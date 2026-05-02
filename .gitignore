@@ -1,0 +1,16 @@
+.zig-cache/
+zig-cache/
+zig-out/
+zig-pkg/
+
+# Local build/distribution outputs
+dist/
+
+# Environment and local editor state
+.env
+.env.*
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo

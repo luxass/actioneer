@@ -42,8 +42,6 @@ pub fn run(
     allocator: std.mem.Allocator,
     parsed: options.Parsed,
 ) !?types.CheckResult {
-    const app_context = ctx.getContextData(options.AppContext);
-
     if (!parsed.json) {
         try text.writeScanStart(ctx.writer, parsed.dirs);
     }
@@ -61,7 +59,7 @@ pub fn run(
     };
     defer scanner.deinitFoundActions(allocator, found);
 
-    var github_client = github.Client.init(allocator, ctx.io, github.tokenFromEnv(app_context.environ_map));
+    var github_client = github.Client.init(allocator, ctx.io);
     defer github_client.deinit();
 
     const result = github_client.resolve(found, parsed.resolveOptions(), &diagnostics) catch |err| {

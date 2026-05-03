@@ -6,10 +6,6 @@ const types = @import("types.zig");
 
 const Version = git.Version;
 
-pub const env = struct {
-    pub const github_token = "GITHUB_TOKEN";
-};
-
 pub const ResolveError = error{
     GitHubRequestFailed,
     NoTagsFound,
@@ -121,11 +117,11 @@ pub const Client = struct {
     const BASE_URL = "https://api.github.com";
     const API_VERSION = "2022-11-28";
 
-    pub fn init(allocator: std.mem.Allocator, io: std.Io, token: ?[]const u8) Self {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io) Self {
         return .{
             .allocator = allocator,
             .client = std.http.Client{ .allocator = allocator, .io = io },
-            .token = token,
+            .token = tokenFromEnv(),
         };
     }
 
@@ -320,8 +316,9 @@ pub const Client = struct {
     }
 };
 
-pub fn tokenFromEnv(environ_map: *std.process.Environ.Map) ?[]const u8 {
-    const value = environ_map.get(env.github_token) orelse return null;
-    if (value.len == 0) return null;
-    return value;
+fn tokenFromEnv() ?[]const u8 {
+    const value = std.c.getenv("GITHUB_TOKEN") orelse return null;
+    const slice = std.mem.sliceTo(value, 0);
+    if (slice.len == 0) return null;
+    return slice;
 }

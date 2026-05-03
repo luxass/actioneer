@@ -1,18 +1,13 @@
 const std = @import("std");
 
-pub const env = struct {
-    pub const ci = "CI";
-    pub const verbose = "VERBOSE";
-};
-
 pub const Environment = struct {
     ci: bool = false,
     verbose: bool = false,
 
-    pub fn from(environ_map: *std.process.Environ.Map, overrides: Overrides) Environment {
+    pub fn from(overrides: Overrides) Environment {
         return .{
-            .ci = boolEnv(environ_map, env.ci),
-            .verbose = overrides.verbose or boolEnv(environ_map, env.verbose),
+            .ci = boolEnv("CI"),
+            .verbose = overrides.verbose or boolEnv("VERBOSE"),
         };
     }
 };
@@ -23,8 +18,8 @@ pub const Overrides = struct {
 
 var current: Environment = .{};
 
-pub fn init(environ_map: *std.process.Environ.Map, overrides: Overrides) void {
-    current = Environment.from(environ_map, overrides);
+pub fn init(overrides: Overrides) void {
+    current = Environment.from(overrides);
 }
 
 pub fn isCi() bool {
@@ -35,10 +30,11 @@ pub fn isVerbose() bool {
     return current.verbose;
 }
 
-pub fn boolEnv(environ_map: *std.process.Environ.Map, name: []const u8) bool {
-    const value = environ_map.get(name) orelse return false;
-    return std.ascii.eqlIgnoreCase(value, "true") or
-        std.mem.eql(u8, value, "1") or
-        std.ascii.eqlIgnoreCase(value, "yes") or
-        std.ascii.eqlIgnoreCase(value, "on");
+pub fn boolEnv(name: [*:0]const u8) bool {
+    const value = std.c.getenv(name) orelse return false;
+    const slice = std.mem.sliceTo(value, 0);
+    return std.ascii.eqlIgnoreCase(slice, "true") or
+        std.mem.eql(u8, slice, "1") or
+        std.ascii.eqlIgnoreCase(slice, "yes") or
+        std.ascii.eqlIgnoreCase(slice, "on");
 }

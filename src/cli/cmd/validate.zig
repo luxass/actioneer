@@ -2,7 +2,6 @@ const std = @import("std");
 const zli = @import("zli");
 
 const check = @import("../check.zig");
-const github = @import("../../core/github.zig");
 const log = @import("../../core/log.zig");
 const runtime = @import("../../core/runtime.zig");
 const types = @import("../../core/types.zig");
@@ -26,10 +25,7 @@ pub fn run(ctx: zli.CommandContext) !void {
     defer prepared.deinit(ctx.allocator);
     const parsed = prepared.parsed;
     const allocator = prepared.allocator();
-    const app_context = ctx.getContextData(options.AppContext);
-    const github_token = github.tokenFromEnv(app_context.environ_map);
-
-    log.debug("command=validate dirs={d} recursive={} mode={s} style={s} json={} ci={} excludes={d} github_token={}", .{
+    log.debug("command=validate dirs={d} recursive={} mode={s} style={s} json={} ci={} excludes={d}", .{
         parsed.dirs.len,
         parsed.recursive,
         @tagName(parsed.mode),
@@ -37,7 +33,6 @@ pub fn run(ctx: zli.CommandContext) !void {
         parsed.json,
         runtime.isCi(),
         parsed.excludes.len,
-        github_token != null,
     });
 
     const result = (try check.run(ctx, allocator, parsed)) orelse return;

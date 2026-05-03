@@ -131,7 +131,7 @@ pub fn addFlags(command: *zli.Command) !void {
 
 pub fn parse(ctx: zli.CommandContext) !Parsed {
     const app_context = ctx.getContextData(AppContext);
-    runtime.init(app_context.environ_map, .{
+    runtime.init(.{
         .verbose = ctx.flag("verbose", bool),
     });
 

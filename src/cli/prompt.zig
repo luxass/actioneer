@@ -39,6 +39,7 @@ const Widths = struct {
 };
 
 const visible_rows = 18;
+const header_lines = 4;
 
 const RawTerminal = struct {
     original: posix.termios,
@@ -94,13 +95,15 @@ pub fn selectUpdates(
 
     var cursor: usize = 0;
     var scroll: usize = 0;
-    var rendered_lines: usize = 0;
-    defer clearPrompt(ctx, rendered_lines) catch {};
+    var rendered_dynamic_lines: usize = 0;
+    defer clearPrompt(ctx, header_lines + rendered_dynamic_lines) catch {};
+
+    try renderHeader(ctx, candidates);
 
     while (true) {
         adjustScroll(&scroll, cursor, candidates.len);
-        try clearPrompt(ctx, rendered_lines);
-        rendered_lines = try render(ctx, candidates, selected, cursor, scroll);
+        try clearPrompt(ctx, rendered_dynamic_lines);
+        rendered_dynamic_lines = try renderDynamic(ctx, candidates, selected, cursor, scroll);
 
         switch (try readKey()) {
             .up => cursor = if (cursor == 0) candidates.len - 1 else cursor - 1,
@@ -128,17 +131,8 @@ pub fn selectUpdates(
     return indexes.toOwnedSlice(allocator);
 }
 
-fn render(
-    ctx: zli.CommandContext,
-    candidates: []const types.Candidate,
-    selected: []const bool,
-    cursor: usize,
-    scroll: usize,
-) Error!usize {
-    var lines: usize = 0;
-
+fn renderHeader(ctx: zli.CommandContext, candidates: []const types.Candidate) Error!void {
     try ctx.writer.print("{s}{s}{s}\n\n", .{ styles.BOLD, text.prompt.title, styles.RESET });
-    lines += 2;
     try ctx.writer.print("{s}•{s} {s}{d}{s} update candidates across {s}{d}{s} workflow files\n", .{
         styles.GREEN,
         styles.RESET,
@@ -149,14 +143,23 @@ fn render(
         workflowCount(candidates),
         styles.RESET,
     });
-    lines += 1;
     try ctx.writer.print("{s}?{s} {s}{s}\n", .{
         styles.CYAN,
         styles.RESET,
         text.prompt.controls_summary,
         styles.RESET,
     });
-    lines += 1;
+    try ctx.writer.flush();
+}
+
+fn renderDynamic(
+    ctx: zli.CommandContext,
+    candidates: []const types.Candidate,
+    selected: []const bool,
+    cursor: usize,
+    scroll: usize,
+) Error!usize {
+    var lines: usize = 0;
 
     const widths = Widths{
         .action = maxWidth(candidates, .action),

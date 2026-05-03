@@ -20,21 +20,13 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const mod = addActioneerModule(b, target);
     const zli = addZliModule(b, target, optimize);
-    const exe = addActioneerExecutable(b, target, optimize, mod, zli);
+    const exe = addActioneerExecutable(b, target, optimize, zli);
 
     b.installArtifact(exe);
     addRunStep(b, exe);
-    addTestStep(b, mod, exe);
+    addTestStep(b, exe);
     addDistStep(b, optimize);
-}
-
-fn addActioneerModule(b: *std.Build, target: std.Build.ResolvedTarget) *std.Build.Module {
-    return b.addModule(exe_name, .{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-    });
 }
 
 fn addZliModule(
@@ -53,7 +45,6 @@ fn addActioneerExecutable(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-    mod: *std.Build.Module,
     zli: *std.Build.Module,
 ) *std.Build.Step.Compile {
     return b.addExecutable(.{
@@ -63,7 +54,6 @@ fn addActioneerExecutable(
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = exe_name, .module = mod },
                 .{ .name = "zli", .module = zli },
             },
         }),
@@ -82,15 +72,12 @@ fn addRunStep(b: *std.Build, exe: *std.Build.Step.Compile) void {
     run_step.dependOn(&run_cmd.step);
 }
 
-fn addTestStep(b: *std.Build, mod: *std.Build.Module, exe: *std.Build.Step.Compile) void {
-    const mod_tests = b.addTest(.{ .root_module = mod });
+fn addTestStep(b: *std.Build, exe: *std.Build.Step.Compile) void {
     const exe_tests = b.addTest(.{ .root_module = exe.root_module });
 
-    const run_mod_tests = b.addRunArtifact(mod_tests);
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
     const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
 }
 
@@ -102,9 +89,8 @@ fn addDistStep(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
             .arch_os_abi = dist_target.triple,
         }) catch @panic("invalid dist target"));
 
-        const mod = addActioneerModule(b, target);
         const zli = addZliModule(b, target, optimize);
-        const exe = addActioneerExecutable(b, target, optimize, mod, zli);
+        const exe = addActioneerExecutable(b, target, optimize, zli);
 
         const install = b.addInstallArtifact(exe, .{
             .dest_dir = .{ .override = .{ .custom = b.fmt("dist/{s}", .{

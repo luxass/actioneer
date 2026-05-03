@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const updates = @import("updates.zig");
+const types = @import("types.zig");
 
 pub const ApplyError = error{
     UpdateTargetNotFound,
@@ -30,7 +30,7 @@ const UsesLine = struct {
 pub fn applySelected(
     allocator: std.mem.Allocator,
     io: std.Io,
-    candidates: []const updates.Candidate,
+    candidates: []const types.Candidate,
     selected: []const usize,
 ) ApplyError!usize {
     var applied: usize = 0;
@@ -65,7 +65,7 @@ pub fn applyToString(
     allocator: std.mem.Allocator,
     contents: []const u8,
     file: []const u8,
-    candidates: []const updates.Candidate,
+    candidates: []const types.Candidate,
     selected: []const usize,
 ) ApplyError!ApplyResult {
     var out = std.Io.Writer.Allocating.init(allocator);
@@ -100,11 +100,11 @@ pub fn applyToString(
 }
 
 fn findCandidateForLine(
-    candidates: []const updates.Candidate,
+    candidates: []const types.Candidate,
     selected: []const usize,
     file: []const u8,
     line: u32,
-) ?updates.Candidate {
+) ?types.Candidate {
     for (selected) |index| {
         const candidate = candidates[index];
         if (candidate.line == line and std.mem.eql(u8, candidate.file, file)) return candidate;
@@ -112,7 +112,7 @@ fn findCandidateForLine(
     return null;
 }
 
-fn selectedCountForFile(candidates: []const updates.Candidate, selected: []const usize, file: []const u8) usize {
+fn selectedCountForFile(candidates: []const types.Candidate, selected: []const usize, file: []const u8) usize {
     var count: usize = 0;
     for (selected) |index| {
         if (std.mem.eql(u8, candidates[index].file, file)) count += 1;
@@ -136,13 +136,13 @@ fn nextLine(contents: []const u8, start: usize) LineSlice {
     };
 }
 
-fn rewriteFileLine(writer: *std.Io.Writer, line: LineSlice, candidate: updates.Candidate) ApplyError!void {
+fn rewriteFileLine(writer: *std.Io.Writer, line: LineSlice, candidate: types.Candidate) ApplyError!void {
     try rewriteLineText(writer, line.text, candidate);
     try writer.writeAll(line.carriage_return);
     try writer.writeAll(line.newline);
 }
 
-fn rewriteLineText(writer: *std.Io.Writer, line: []const u8, candidate: updates.Candidate) ApplyError!void {
+fn rewriteLineText(writer: *std.Io.Writer, line: []const u8, candidate: types.Candidate) ApplyError!void {
     const parsed = try parseUsesLine(line);
 
     const value = parsed.code[parsed.value_start..parsed.value_end];
@@ -198,7 +198,7 @@ fn writeUpdatedUses(
     writer: *std.Io.Writer,
     parsed: UsesLine,
     ref_start: usize,
-    candidate: updates.Candidate,
+    candidate: types.Candidate,
 ) ApplyError!void {
     try writer.writeAll(parsed.code[0..ref_start]);
     try writer.writeAll(candidate.next);
@@ -206,7 +206,7 @@ fn writeUpdatedUses(
     try writeComment(writer, parsed.comment, candidate);
 }
 
-fn writeComment(writer: *std.Io.Writer, existing_comment: []const u8, candidate: updates.Candidate) ApplyError!void {
+fn writeComment(writer: *std.Io.Writer, existing_comment: []const u8, candidate: types.Candidate) ApplyError!void {
     if (shouldWriteVersionComment(candidate)) {
         try writer.writeAll(" # ");
         try writer.writeAll(displayTarget(candidate));
@@ -215,13 +215,13 @@ fn writeComment(writer: *std.Io.Writer, existing_comment: []const u8, candidate:
     }
 }
 
-fn shouldWriteVersionComment(candidate: updates.Candidate) bool {
+fn shouldWriteVersionComment(candidate: types.Candidate) bool {
     const target = displayTarget(candidate);
     return target.len > 0 and
         (!std.mem.eql(u8, candidate.next, target) or candidate.version_comment.len > 0 or candidate.sha_mismatch);
 }
 
-fn displayTarget(candidate: updates.Candidate) []const u8 {
+fn displayTarget(candidate: types.Candidate) []const u8 {
     return if (candidate.next_label.len > 0) candidate.next_label else candidate.next;
 }
 
@@ -250,7 +250,7 @@ test "apply sha update and version comment" {
         \\      - uses: actions/setup-node@v3
         \\
     ;
-    const candidates = [_]updates.Candidate{
+    const candidates = [_]types.Candidate{
         .{
             .action = "actions/checkout",
             .job = "build",
@@ -299,7 +299,7 @@ test "apply quoted version update without adding comment" {
         \\  - uses: "actions/setup-node@v3"
         \\
     ;
-    const candidates = [_]updates.Candidate{
+    const candidates = [_]types.Candidate{
         .{
             .action = "actions/setup-node",
             .job = "build",
@@ -317,6 +317,36 @@ test "apply quoted version update without adding comment" {
     try std.testing.expectEqualStrings(
         \\steps:
         \\  - uses: "actions/setup-node@v4"
+        \\
+    , result.contents);
+}
+
+test "apply reusable workflow update" {
+    const input =
+        \\jobs:
+        \\  zizmor:
+        \\    uses: luxass/shared-workflows/.github/workflows/reusable-ci-security.yaml@v0.6.0
+        \\
+    ;
+    const candidates = [_]types.Candidate{
+        .{
+            .action = "luxass/shared-workflows/.github/workflows/reusable-ci-security.yaml",
+            .job = "zizmor",
+            .current = "v0.6.0",
+            .next = "v0.7.0",
+            .next_label = "v0.7.0",
+            .file = "ci-security.yml",
+            .line = 3,
+        },
+    };
+
+    const result = try applyToString(std.testing.allocator, input, "ci-security.yml", &candidates, &.{0});
+    defer std.testing.allocator.free(result.contents);
+
+    try std.testing.expectEqualStrings(
+        \\jobs:
+        \\  zizmor:
+        \\    uses: luxass/shared-workflows/.github/workflows/reusable-ci-security.yaml@v0.7.0
         \\
     , result.contents);
 }

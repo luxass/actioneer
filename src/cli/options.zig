@@ -1,8 +1,9 @@
 const std = @import("std");
 const zli = @import("zli");
 
-const config = @import("../core/config.zig");
-const text = @import("../core/ui/text.zig");
+const runtime = @import("../core/runtime.zig");
+const types = @import("../core/types.zig");
+const text = @import("ui.zig");
 
 pub const AppContext = struct {
     args: []const [:0]const u8,
@@ -15,27 +16,29 @@ pub const Parsed = struct {
     dry_run: bool,
     include_branches: bool,
     json: bool,
-    min_age: u32,
-    mode: []const u8,
-    style: []const u8,
+    mode: types.UpdateMode,
+    style: types.PinStyle,
     recursive: bool,
     yes: bool,
-    github_token: ?[]const u8,
 
     pub fn deinit(self: Parsed, allocator: std.mem.Allocator) void {
         allocator.free(self.dirs);
         allocator.free(self.excludes);
     }
 
-    pub fn core(self: Parsed) config.Config {
+    pub fn scanOptions(self: Parsed) types.ScanOptions {
         return .{
             .dirs = self.dirs,
+            .recursive = self.recursive,
+        };
+    }
+
+    pub fn resolveOptions(self: Parsed) types.ResolveOptions {
+        return .{
             .excludes = self.excludes,
             .include_branches = self.include_branches,
             .mode = self.mode,
             .style = self.style,
-            .recursive = self.recursive,
-            .github_token = self.github_token,
         };
     }
 };
@@ -49,7 +52,7 @@ const dry_run_flag = zli.Flag{
 
 const exclude_flag = zli.Flag{
     .name = "exclude",
-    .description = "Exclude actions by regex (repeatable)",
+    .description = "Exclude actions containing this text (repeatable)",
     .type = .String,
     .default_value = .{ .String = "" },
 };
@@ -66,13 +69,6 @@ const json_flag = zli.Flag{
     .description = "Output update information as machine-readable JSON",
     .type = .Bool,
     .default_value = .{ .Bool = false },
-};
-
-const min_age_flag = zli.Flag{
-    .name = "min-age",
-    .description = "Minimum age in days for updates",
-    .type = .Int,
-    .default_value = .{ .Int = 0 },
 };
 
 const mode_flag = zli.Flag{
@@ -105,17 +101,24 @@ const yes_flag = zli.Flag{
     .default_value = .{ .Bool = false },
 };
 
+const verbose_flag = zli.Flag{
+    .name = "verbose",
+    .description = "Print more detailed progress information",
+    .type = .Bool,
+    .default_value = .{ .Bool = false },
+};
+
 pub fn addFlags(command: *zli.Command) !void {
     try command.addFlags(&.{
         dry_run_flag,
         exclude_flag,
         include_branches_flag,
         json_flag,
-        min_age_flag,
         mode_flag,
         style_flag,
         recursive_flag,
         yes_flag,
+        verbose_flag,
     });
 
     try command.addPositionalArg(.{
@@ -128,6 +131,9 @@ pub fn addFlags(command: *zli.Command) !void {
 
 pub fn parse(ctx: zli.CommandContext) !Parsed {
     const app_context = ctx.getContextData(AppContext);
+    runtime.init(app_context.environ_map, .{
+        .verbose = ctx.flag("verbose", bool),
+    });
 
     var dirs: std.ArrayList([]const u8) = .empty;
     errdefer dirs.deinit(ctx.allocator);
@@ -141,12 +147,10 @@ pub fn parse(ctx: zli.CommandContext) !Parsed {
         .dry_run = ctx.flag("dry-run", bool),
         .include_branches = ctx.flag("include-branches", bool),
         .json = ctx.flag("json", bool),
-        .min_age = @intCast(ctx.flag("min-age", i32)),
-        .mode = ctx.flag("mode", []const u8),
-        .style = ctx.flag("style", []const u8),
+        .mode = try parseMode(ctx, ctx.flag("mode", []const u8)),
+        .style = try parseStyle(ctx, ctx.flag("style", []const u8)),
         .recursive = ctx.flag("recursive", bool),
         .yes = ctx.flag("yes", bool),
-        .github_token = githubToken(app_context),
     };
 
     try collectRepeatableExcludes(ctx, app_context.args, &excludes);
@@ -156,13 +160,27 @@ pub fn parse(ctx: zli.CommandContext) !Parsed {
         try dirs.append(ctx.allocator, if (parsed.recursive) "." else ".github");
     }
 
-    try validateChoice(ctx, "mode", parsed.mode, &.{ "major", "minor", "patch" });
-    try validateChoice(ctx, "style", parsed.style, &.{ "sha", "preserve" });
-
     parsed.dirs = try dirs.toOwnedSlice(ctx.allocator);
     parsed.excludes = try excludes.toOwnedSlice(ctx.allocator);
 
     return parsed;
+}
+
+fn parseMode(ctx: zli.CommandContext, value: []const u8) !types.UpdateMode {
+    if (std.mem.eql(u8, value, "major")) return .major;
+    if (std.mem.eql(u8, value, "minor")) return .minor;
+    if (std.mem.eql(u8, value, "patch")) return .patch;
+
+    try text.writeInvalidOption(ctx.writer, "mode", value);
+    return error.InvalidOption;
+}
+
+fn parseStyle(ctx: zli.CommandContext, value: []const u8) !types.PinStyle {
+    if (std.mem.eql(u8, value, "sha")) return .sha;
+    if (std.mem.eql(u8, value, "preserve")) return .preserve;
+
+    try text.writeInvalidOption(ctx.writer, "style", value);
+    return error.InvalidOption;
 }
 
 fn collectRepeatableExcludes(
@@ -171,7 +189,7 @@ fn collectRepeatableExcludes(
     excludes: *std.ArrayList([]const u8),
 ) !void {
     var i: usize = 1;
-    if (i < args.len and isCommandName(args[i])) i += 1;
+    if (i < args.len and std.mem.eql(u8, args[i], ctx.command.cmd_options.name)) i += 1;
 
     while (i < args.len) : (i += 1) {
         const arg: []const u8 = args[i];
@@ -192,25 +210,6 @@ fn collectRepeatableExcludes(
             continue;
         }
     }
-}
-
-fn isCommandName(arg: []const u8) bool {
-    return std.mem.eql(u8, arg, "validate");
-}
-
-fn githubToken(app_context: *AppContext) ?[]const u8 {
-    const token = app_context.environ_map.get("GITHUB_TOKEN") orelse return null;
-    if (token.len == 0) return null;
-    return token;
-}
-
-fn validateChoice(ctx: zli.CommandContext, name: []const u8, value: []const u8, choices: []const []const u8) !void {
-    for (choices) |choice| {
-        if (std.mem.eql(u8, value, choice)) return;
-    }
-
-    try text.writeInvalidOption(ctx.writer, name, value);
-    return error.InvalidOption;
 }
 
 fn missingValue(ctx: zli.CommandContext, flag: []const u8) error{MissingFlagValue} {

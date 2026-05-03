@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const types = @import("types.zig");
-const yaml = @import("parse-yaml.zig");
+const yaml = @import("yaml.zig");
 
 pub fn parseWorkflowString(
     allocator: std.mem.Allocator,
@@ -24,16 +24,16 @@ pub fn parseWorkflowString(
 }
 
 pub fn deinitFoundAction(allocator: std.mem.Allocator, action: types.FoundAction) void {
-    allocator.free(action.action);
-    allocator.free(action.owner);
-    allocator.free(action.repo);
+    allocator.free(action.action.repository.owner);
+    allocator.free(action.action.repository.name);
+    if (action.action.path.len > 0) allocator.free(action.action.path);
     allocator.free(action.ref);
     if (action.version_comment.len > 0) allocator.free(action.version_comment);
     allocator.free(action.job);
     allocator.free(action.file);
 }
 
-pub fn deinitFoundActions(allocator: std.mem.Allocator, found: []types.FoundAction) void {
+pub fn deinitFoundActions(allocator: std.mem.Allocator, found: []const types.FoundAction) void {
     for (found) |action| {
         deinitFoundAction(allocator, action);
     }
@@ -97,9 +97,13 @@ fn actionFromUsesValue(
     const version_comment = extractVersionComment(comment);
 
     return .{
-        .action = try allocator.dupe(u8, parsed.action),
-        .owner = try allocator.dupe(u8, parsed.owner),
-        .repo = try allocator.dupe(u8, parsed.repo),
+        .action = .{
+            .repository = .{
+                .owner = try allocator.dupe(u8, parsed.owner),
+                .name = try allocator.dupe(u8, parsed.name),
+            },
+            .path = if (parsed.path.len > 0) try allocator.dupe(u8, parsed.path) else "",
+        },
         .ref = try allocator.dupe(u8, parsed.ref),
         .version_comment = if (version_comment) |version| try allocator.dupe(u8, version) else "",
         .job = try allocator.dupe(u8, scope),
@@ -111,7 +115,8 @@ fn actionFromUsesValue(
 const ParsedActionRef = struct {
     action: []const u8,
     owner: []const u8,
-    repo: []const u8,
+    name: []const u8,
+    path: []const u8 = "",
     ref: []const u8,
 };
 
@@ -122,13 +127,15 @@ fn parseActionRef(value: []const u8) !ParsedActionRef {
 
     var parts = std.mem.splitScalar(u8, action, '/');
     const owner = parts.next() orelse return error.InvalidActionReference;
-    const repo = parts.next() orelse return error.InvalidActionReference;
-    if (owner.len == 0 or repo.len == 0 or ref.len == 0) return error.InvalidActionReference;
+    const name = parts.next() orelse return error.InvalidActionReference;
+    if (owner.len == 0 or name.len == 0 or ref.len == 0) return error.InvalidActionReference;
+    const path_start = owner.len + 1 + name.len;
 
     return .{
         .action = action,
         .owner = owner,
-        .repo = repo,
+        .name = name,
+        .path = if (path_start < action.len) action[path_start..] else "",
         .ref = ref,
     };
 }
@@ -176,8 +183,31 @@ test "parse workflow uses" {
 
     try std.testing.expectEqual(@as(usize, 2), found.len);
     try std.testing.expectEqualStrings("build", found[0].job);
-    try std.testing.expectEqualStrings("actions/checkout", found[0].action);
+    const action_name = try found[0].action.allocDisplay(std.testing.allocator);
+    defer std.testing.allocator.free(action_name);
+    try std.testing.expectEqualStrings("actions/checkout", action_name);
     try std.testing.expectEqualStrings("v4", found[0].ref);
+}
+
+test "parse reusable workflow uses" {
+    const yamlStr =
+        \\name: security
+        \\jobs:
+        \\  zizmor:
+        \\    uses: luxass/shared-workflows/.github/workflows/reusable-ci-security.yaml@v0.6.0
+    ;
+
+    const found = try parseWorkflowString(std.testing.allocator, ".github/workflows/ci-security.yml", yamlStr);
+    defer deinitFoundActions(std.testing.allocator, found);
+
+    try std.testing.expectEqual(@as(usize, 1), found.len);
+    try std.testing.expectEqualStrings("zizmor", found[0].job);
+    const workflow_action = try found[0].action.allocDisplay(std.testing.allocator);
+    defer std.testing.allocator.free(workflow_action);
+    try std.testing.expectEqualStrings("luxass/shared-workflows/.github/workflows/reusable-ci-security.yaml", workflow_action);
+    try std.testing.expectEqualStrings("luxass", found[0].action.repository.owner);
+    try std.testing.expectEqualStrings("shared-workflows", found[0].action.repository.name);
+    try std.testing.expectEqualStrings("v0.6.0", found[0].ref);
 }
 
 test "parse version comment on sha pinned action" {
@@ -208,7 +238,9 @@ test "parse version comments with major-only version" {
     defer deinitFoundActions(std.testing.allocator, found);
 
     try std.testing.expectEqual(@as(usize, 1), found.len);
-    try std.testing.expectEqualStrings("actions/checkout", found[0].action);
+    const major_action = try found[0].action.allocDisplay(std.testing.allocator);
+    defer std.testing.allocator.free(major_action);
+    try std.testing.expectEqualStrings("actions/checkout", major_action);
     try std.testing.expectEqualStrings("0123456789abcdef", found[0].ref);
     try std.testing.expectEqualStrings("v4", found[0].version_comment);
 }
@@ -227,7 +259,9 @@ test "parse composite action uses" {
 
     try std.testing.expectEqual(@as(usize, 1), found.len);
     try std.testing.expectEqualStrings("composite", found[0].job);
-    try std.testing.expectEqualStrings("actions/setup-node", found[0].action);
+    const composite_action = try found[0].action.allocDisplay(std.testing.allocator);
+    defer std.testing.allocator.free(composite_action);
+    try std.testing.expectEqualStrings("actions/setup-node", composite_action);
     try std.testing.expectEqualStrings("v4", found[0].ref);
     try std.testing.expectEqualStrings("v4.2.0", found[0].version_comment);
 }

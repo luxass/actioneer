@@ -2,9 +2,11 @@ const std = @import("std");
 const builtin = @import("builtin");
 const zli = @import("zli");
 
-const style = @import("../core/ui/style.zig");
-const text = @import("../core/ui/text.zig");
-const updates = @import("../core/updates.zig");
+const types = @import("../core/types.zig");
+const ui = @import("ui.zig");
+
+const styles = ui.styles;
+const text = ui;
 
 const posix = std.posix;
 
@@ -68,7 +70,7 @@ const RawTerminal = struct {
 pub fn selectUpdates(
     allocator: std.mem.Allocator,
     ctx: zli.CommandContext,
-    candidates: []const updates.Candidate,
+    candidates: []const types.Candidate,
 ) Error![]usize {
     if (builtin.os.tag == .windows) return error.UnsupportedPlatform;
     if (candidates.len == 0) return allocator.alloc(usize, 0);
@@ -84,9 +86,9 @@ pub fn selectUpdates(
     };
     defer terminal.deinit();
 
-    try ctx.writer.print(style.hide_cursor, .{});
+    try ctx.writer.print(styles.HIDE_CURSOR, .{});
     defer {
-        ctx.writer.print(style.show_cursor, .{}) catch {};
+        ctx.writer.print(styles.SHOW_CURSOR, .{}) catch {};
         ctx.writer.flush() catch {};
     }
 
@@ -128,31 +130,31 @@ pub fn selectUpdates(
 
 fn render(
     ctx: zli.CommandContext,
-    candidates: []const updates.Candidate,
+    candidates: []const types.Candidate,
     selected: []const bool,
     cursor: usize,
     scroll: usize,
 ) Error!usize {
     var lines: usize = 0;
 
-    try ctx.writer.print("{s}{s}{s}\n\n", .{ style.bold, text.prompt.title, style.reset });
+    try ctx.writer.print("{s}{s}{s}\n\n", .{ styles.BOLD, text.prompt.title, styles.RESET });
     lines += 2;
     try ctx.writer.print("{s}•{s} {s}{d}{s} update candidates across {s}{d}{s} workflow files\n", .{
-        style.green,
-        style.reset,
-        style.yellow,
+        styles.GREEN,
+        styles.RESET,
+        styles.YELLOW,
         candidates.len,
-        style.reset,
-        style.yellow,
+        styles.RESET,
+        styles.YELLOW,
         workflowCount(candidates),
-        style.reset,
+        styles.RESET,
     });
     lines += 1;
     try ctx.writer.print("{s}?{s} {s}{s}\n", .{
-        style.cyan,
-        style.reset,
+        styles.CYAN,
+        styles.RESET,
         text.prompt.controls_summary,
-        style.reset,
+        styles.RESET,
     });
     lines += 1;
 
@@ -164,7 +166,7 @@ fn render(
 
     const end = @min(candidates.len, scroll + visible_rows);
     if (scroll > 0) {
-        try ctx.writer.print("{s}↑ {d} more above{s}\n", .{ style.gray, scroll, style.reset });
+        try ctx.writer.print("{s}↑ {d} more above{s}\n", .{ styles.BRIGHT_BLACK, scroll, styles.RESET });
         lines += 1;
     }
 
@@ -180,11 +182,11 @@ fn render(
     }
 
     if (end < candidates.len) {
-        try ctx.writer.print("{s}↓ {d} more below{s}\n", .{ style.gray, candidates.len - end, style.reset });
+        try ctx.writer.print("{s}↓ {d} more below{s}\n", .{ styles.BRIGHT_BLACK, candidates.len - end, styles.RESET });
         lines += 1;
     }
 
-    try ctx.writer.print("\n{s}{s}{s}\n", .{ style.cyan, text.prompt.footer, style.reset });
+    try ctx.writer.print("\n{s}{s}{s}\n", .{ styles.CYAN, text.prompt.footer, styles.RESET });
     lines += 2;
     try ctx.writer.flush();
 
@@ -192,64 +194,64 @@ fn render(
 }
 
 fn renderGroupHeader(ctx: zli.CommandContext, file: []const u8, widths: Widths) Error!usize {
-    try ctx.writer.print("\n{s}› {s}{s}\n", .{ style.cyan, file, style.reset });
-    try ctx.writer.print("  {s}○ Action{s}", .{ style.gray, style.reset });
-    try writePadding(ctx, widths.action - "Action".len + 4);
-    try ctx.writer.print("{s}Job{s}", .{ style.gray, style.reset });
-    try writePadding(ctx, widths.job - "Job".len + 4);
-    try ctx.writer.print("{s}Current{s}", .{ style.gray, style.reset });
-    try writePadding(ctx, widths.current - "Current".len + 14);
-    try ctx.writer.print("{s}› Target{s}\n", .{ style.gray, style.reset });
+    try ctx.writer.print("\n{s}› {s}{s}\n", .{ styles.CYAN, file, styles.RESET });
+    try ctx.writer.print("  {s}○ Action{s}", .{ styles.BRIGHT_BLACK, styles.RESET });
+    try writePadding(ctx, trailingPadding(widths.action, "Action".len, 4));
+    try ctx.writer.print("{s}Job{s}", .{ styles.BRIGHT_BLACK, styles.RESET });
+    try writePadding(ctx, trailingPadding(widths.job, "Job".len, 4));
+    try ctx.writer.print("{s}Current{s}", .{ styles.BRIGHT_BLACK, styles.RESET });
+    try writePadding(ctx, trailingPadding(widths.current, "Current".len, 14));
+    try ctx.writer.print("{s}› Target{s}\n", .{ styles.BRIGHT_BLACK, styles.RESET });
 
     return 3;
 }
 
 fn renderRow(
     ctx: zli.CommandContext,
-    candidate: updates.Candidate,
+    candidate: types.Candidate,
     is_selected: bool,
     is_cursor: bool,
     widths: Widths,
 ) Error!void {
-    const row_style = if (is_cursor) style.reverse else style.dim;
+    const row_style = if (is_cursor) styles.INVERSE else styles.DIM;
     const pointer = if (is_cursor) "›" else " ";
-    const checkbox_color = if (is_selected) style.green else style.gray;
+    const checkbox_color = if (is_selected) styles.GREEN else styles.BRIGHT_BLACK;
     const checkbox = if (is_selected) "●" else "○";
-    const target_color = if (candidate.sha_mismatch) style.yellow else if (candidate.next_is_major) style.red else style.green;
+    const target_color = if (candidate.sha_mismatch) styles.YELLOW else if (candidate.next_is_major) styles.RED else styles.GREEN;
     const target = displayTarget(candidate);
 
     try ctx.writer.print("{s}{s}{s}  {s}{s}{s} {s}{s}{s}{s}", .{
         row_style,
         pointer,
-        style.reset,
+        styles.RESET,
         checkbox_color,
         checkbox,
-        style.reset,
+        styles.RESET,
         row_style,
-        style.bold,
+        styles.BOLD,
         candidate.action,
-        style.reset,
+        styles.RESET,
     });
-    try writePadding(ctx, widths.action - candidate.action.len + 4);
+    try writePadding(ctx, trailingPadding(widths.action, candidate.action.len, 4));
 
-    try ctx.writer.print("{s}{s}{s}", .{ row_style, candidate.job, style.reset });
-    try writePadding(ctx, widths.job - candidate.job.len + 4);
+    try ctx.writer.print("{s}{s}{s}", .{ row_style, candidate.job, styles.RESET });
+    try writePadding(ctx, trailingPadding(widths.job, candidate.job.len, 4));
 
-    try ctx.writer.print("{s}{s}{s}", .{ style.bold, candidate.current, style.reset });
+    try ctx.writer.print("{s}{s}{s}", .{ styles.BOLD, candidate.current, styles.RESET });
     if (candidate.version_comment.len > 0) {
-        const mismatch_color = if (candidate.sha_mismatch) style.red else style.gray;
-        try ctx.writer.print(" {s}({s}){s}", .{ mismatch_color, candidate.version_comment, style.reset });
+        const mismatch_color = if (candidate.sha_mismatch) styles.RED else styles.BRIGHT_BLACK;
+        try ctx.writer.print(" {s}({s}){s}", .{ mismatch_color, candidate.version_comment, styles.RESET });
     } else if (candidate.current_ref.len > 0) {
-        try ctx.writer.print(" {s}({s}){s}", .{ style.gray, shortSha(candidate.current_ref), style.reset });
+        try ctx.writer.print(" {s}({s}){s}", .{ styles.BRIGHT_BLACK, shortSha(candidate.current_ref), styles.RESET });
     }
-    try writePadding(ctx, widths.current - candidate.current.len + 4);
+    try writePadding(ctx, trailingPadding(widths.current, candidate.current.len, 4));
 
     try ctx.writer.print("{s}›{s}  {s}{s}{s}\n", .{
-        style.bold,
-        style.reset,
+        styles.BOLD,
+        styles.RESET,
         target_color,
         target,
-        style.reset,
+        styles.RESET,
     });
 }
 
@@ -269,7 +271,7 @@ fn adjustScroll(scroll: *usize, cursor: usize, count: usize) void {
     }
 }
 
-fn displayTarget(candidate: updates.Candidate) []const u8 {
+fn displayTarget(candidate: types.Candidate) []const u8 {
     return text.displayTarget(candidate);
 }
 
@@ -293,7 +295,8 @@ fn readKey() Error!Key {
 
     return switch (byte[0]) {
         3 => error.Interrupted,
-        4, 27, 'q' => keyOrEscapeSequence(),
+        4, 'q' => .cancel,
+        27 => keyOrEscapeSequence(),
         '\r', '\n' => .accept,
         ' ', 'x' => .toggle,
         'a' => .toggle_all,
@@ -312,8 +315,8 @@ fn keyOrEscapeSequence() Error!Key {
     if (len < 2 or seq[0] != '[') return .cancel;
 
     return switch (seq[1]) {
-        'A' => .scroll_up,
-        'B' => .scroll_down,
+        'A' => .up,
+        'B' => .down,
         else => .ignore,
     };
 }
@@ -341,7 +344,7 @@ fn scrollDown(scroll: *usize, cursor: *usize, count: usize) void {
 
 const WidthField = enum { action, job, current };
 
-fn maxWidth(candidates: []const updates.Candidate, field: WidthField) usize {
+fn maxWidth(candidates: []const types.Candidate, field: WidthField) usize {
     var width: usize = 0;
     for (candidates) |candidate| {
         const len = switch (field) {
@@ -354,7 +357,11 @@ fn maxWidth(candidates: []const updates.Candidate, field: WidthField) usize {
     return width;
 }
 
-fn workflowCount(candidates: []const updates.Candidate) usize {
+fn trailingPadding(column_width: usize, value_len: usize, gap: usize) usize {
+    return column_width -| value_len + gap;
+}
+
+fn workflowCount(candidates: []const types.Candidate) usize {
     var count: usize = 0;
     var last_file: ?[]const u8 = null;
     for (candidates) |candidate| {
@@ -383,7 +390,7 @@ fn toggleAll(selected: []bool) void {
     @memset(selected, !all_selected);
 }
 
-fn toggleFile(candidates: []const updates.Candidate, selected: []bool, file: []const u8) void {
+fn toggleFile(candidates: []const types.Candidate, selected: []bool, file: []const u8) void {
     var all_selected = true;
     for (candidates, 0..) |candidate, index| {
         if (!std.mem.eql(u8, candidate.file, file)) continue;
@@ -405,4 +412,10 @@ fn writePadding(ctx: zli.CommandContext, count: usize) Error!void {
     while (i < count) : (i += 1) {
         try ctx.writer.writeByte(' ');
     }
+}
+
+test "trailing padding does not underflow for header labels wider than values" {
+    try std.testing.expectEqual(@as(usize, 14), trailingPadding(2, "Current".len, 14));
+    try std.testing.expectEqual(@as(usize, 4), trailingPadding(3, "Action".len, 4));
+    try std.testing.expectEqual(@as(usize, 7), trailingPadding(10, "Job".len, 4));
 }

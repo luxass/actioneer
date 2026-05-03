@@ -142,7 +142,9 @@ fn parseMap(allocator: std.mem.Allocator, lines: []const Line, index: *usize, in
 
         index.* += 1;
 
-        const value = if (rest.len > 0)
+        const value = if (isBlockScalarIndicator(rest))
+            try createBlockScalarNode(allocator, lines, index, line.indent, line.number, line.comment)
+        else if (rest.len > 0)
             try createScalarNode(allocator, rest, line.number, line.comment)
         else if (index.* < lines.len and lines[index.*].indent > line.indent)
             try parseBlock(allocator, lines, index, lines[index.*].indent)
@@ -173,7 +175,9 @@ fn parseList(allocator: std.mem.Allocator, lines: []const Line, index: *usize, i
         const rest = std.mem.trim(u8, line.text[2..], " \t");
         index.* += 1;
 
-        const item = if (rest.len == 0)
+        const item = if (isBlockScalarIndicator(rest))
+            try createBlockScalarNode(allocator, lines, index, line.indent, line.number, line.comment)
+        else if (rest.len == 0)
             try parseBlock(allocator, lines, index, if (index.* < lines.len) lines[index.*].indent else indent + 2)
         else if (std.mem.indexOfScalar(u8, rest, ':') != null)
             try parseInlineMapItem(allocator, lines, index, indent, line, rest)
@@ -197,7 +201,7 @@ fn parseInlineMapItem(
     var pairs: std.ArrayList(Pair) = .empty;
     errdefer deinitPairs(allocator, pairs.items);
 
-    try appendInlinePair(allocator, &pairs, line, rest);
+    try appendInlinePair(allocator, &pairs, lines, index, line.indent, line, rest);
 
     while (index.* < lines.len and lines[index.*].indent > list_indent) {
         const child_line = lines[index.*];
@@ -208,7 +212,9 @@ fn parseInlineMapItem(
         const value_text = std.mem.trim(u8, child_line.text[colon + 1 ..], " \t");
         index.* += 1;
 
-        const value = if (value_text.len > 0)
+        const value = if (isBlockScalarIndicator(value_text))
+            try createBlockScalarNode(allocator, lines, index, child_line.indent, child_line.number, child_line.comment)
+        else if (value_text.len > 0)
             try createScalarNode(allocator, value_text, child_line.number, child_line.comment)
         else if (index.* < lines.len and lines[index.*].indent > child_line.indent)
             try parseBlock(allocator, lines, index, lines[index.*].indent)
@@ -224,12 +230,22 @@ fn parseInlineMapItem(
     return createNode(allocator, .{ .map = try pairs.toOwnedSlice(allocator) }, line.number, "");
 }
 
-fn appendInlinePair(allocator: std.mem.Allocator, pairs: *std.ArrayList(Pair), line: Line, text: []const u8) !void {
+fn appendInlinePair(
+    allocator: std.mem.Allocator,
+    pairs: *std.ArrayList(Pair),
+    lines: []const Line,
+    index: *usize,
+    parent_indent: usize,
+    line: Line,
+    text: []const u8,
+) !void {
     const colon = std.mem.indexOfScalar(u8, text, ':') orelse return error.InvalidYaml;
     const key = std.mem.trim(u8, text[0..colon], " \t");
     const rest = std.mem.trim(u8, text[colon + 1 ..], " \t");
 
-    const value = if (rest.len > 0)
+    const value = if (isBlockScalarIndicator(rest))
+        try createBlockScalarNode(allocator, lines, index, parent_indent, line.number, line.comment)
+    else if (rest.len > 0)
         try createScalarNode(allocator, rest, line.number, line.comment)
     else
         try createNode(allocator, .null, line.number, line.comment);
@@ -242,6 +258,34 @@ fn appendInlinePair(allocator: std.mem.Allocator, pairs: *std.ArrayList(Pair), l
 
 fn createScalarNode(allocator: std.mem.Allocator, value: []const u8, line: u32, comment: []const u8) !*Node {
     return createNode(allocator, .{ .scalar = try allocator.dupe(u8, cleanScalar(value)) }, line, comment);
+}
+
+fn createBlockScalarNode(
+    allocator: std.mem.Allocator,
+    lines: []const Line,
+    index: *usize,
+    parent_indent: usize,
+    line: u32,
+    comment: []const u8,
+) !*Node {
+    var value: std.ArrayList(u8) = .empty;
+    errdefer value.deinit(allocator);
+
+    while (index.* < lines.len and lines[index.*].indent > parent_indent) : (index.* += 1) {
+        if (value.items.len > 0) try value.append(allocator, '\n');
+        try value.appendSlice(allocator, lines[index.*].text);
+    }
+
+    return createNode(allocator, .{ .scalar = try value.toOwnedSlice(allocator) }, line, comment);
+}
+
+fn isBlockScalarIndicator(value: []const u8) bool {
+    return std.mem.eql(u8, value, "|") or
+        std.mem.eql(u8, value, ">") or
+        std.mem.startsWith(u8, value, "|+") or
+        std.mem.startsWith(u8, value, "|-") or
+        std.mem.startsWith(u8, value, ">+") or
+        std.mem.startsWith(u8, value, ">-");
 }
 
 fn createNode(allocator: std.mem.Allocator, value: Value, line: u32, comment: []const u8) !*Node {
@@ -358,4 +402,25 @@ test "parse yaml list of scalar values" {
     try std.testing.expect(on.value == .list);
     try std.testing.expectEqualStrings("push", on.value.list[0].scalar().?);
     try std.testing.expectEqualStrings("pull_request", on.value.list[1].scalar().?);
+}
+
+test "parse block scalar without swallowing following list items" {
+    const yaml =
+        \\steps:
+        \\  - name: script
+        \\    run: |
+        \\      echo one
+        \\      echo two
+        \\  - name: checkout
+        \\    uses: actions/checkout@v4
+    ;
+
+    const document = try parseYaml(std.testing.allocator, yaml);
+    defer document.deinit();
+
+    const steps = document.root.get("steps").?;
+    try std.testing.expect(steps.value == .list);
+    try std.testing.expectEqual(@as(usize, 2), steps.value.list.len);
+    try std.testing.expectEqualStrings("echo one\necho two", steps.value.list[0].get("run").?.scalar().?);
+    try std.testing.expectEqualStrings("actions/checkout@v4", steps.value.list[1].get("uses").?.scalar().?);
 }

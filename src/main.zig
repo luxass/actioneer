@@ -32,5 +32,8 @@ pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);
     defer args.deinit();
 
-    try root.execute(&args, .{ .data = &app_context });
+    root.execute(&args, .{ .data = &app_context }) catch |err| switch (err) {
+        error.CommandFailed => std.process.exit(1),
+        else => return err,
+    };
 }

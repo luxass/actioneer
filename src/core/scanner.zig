@@ -1,9 +1,8 @@
 const std = @import("std");
 
-const config = @import("config.zig");
+const log = @import("log.zig");
 const parse = @import("parse.zig");
 const types = @import("types.zig");
-const updates = @import("updates.zig");
 
 pub const ScanError = error{
     InvalidActionReference,
@@ -12,7 +11,7 @@ pub const ScanError = error{
 pub fn scan(
     allocator: std.mem.Allocator,
     io: std.Io,
-    parsed: config.Config,
+    options: types.ScanOptions,
 ) ScanError![]types.FoundAction {
     var found: std.ArrayList(types.FoundAction) = .empty;
     errdefer {
@@ -20,9 +19,16 @@ pub fn scan(
         found.deinit(allocator);
     }
 
-    for (parsed.dirs) |path| {
-        scanPath(allocator, io, path, parsed.recursive or std.mem.eql(u8, path, ".github"), &found) catch |err| switch (err) {
-            error.FileNotFound => continue,
+    for (options.dirs) |path| {
+        log.debug("scan path={s} recursive={}", .{
+            path,
+            options.recursive or std.mem.eql(u8, path, ".github"),
+        });
+        scanPath(allocator, io, path, options.recursive or std.mem.eql(u8, path, ".github"), &found) catch |err| switch (err) {
+            error.FileNotFound => {
+                log.debug("scan path missing path={s}", .{path});
+                continue;
+            },
             else => return err,
         };
     }
@@ -30,27 +36,8 @@ pub fn scan(
     return found.toOwnedSlice(allocator);
 }
 
-pub fn toUnresolvedCandidates(
-    allocator: std.mem.Allocator,
-    found: []const types.FoundAction,
-) ![]updates.Candidate {
-    var candidates: std.ArrayList(updates.Candidate) = .empty;
-    errdefer candidates.deinit(allocator);
-
-    for (found) |action| {
-        try candidates.append(allocator, .{
-            .action = action.action,
-            .job = action.job,
-            .current = action.ref,
-            .version_comment = action.version_comment,
-            .next = action.ref,
-            .next_label = action.ref,
-            .file = action.file,
-            .line = action.line,
-        });
-    }
-
-    return candidates.toOwnedSlice(allocator);
+pub fn deinitFoundActions(allocator: std.mem.Allocator, found: []const types.FoundAction) void {
+    parse.deinitFoundActions(allocator, found);
 }
 
 fn scanDir(
@@ -130,6 +117,12 @@ fn appendParsedWorkflow(
     defer allocator.free(parsed);
 
     try found.appendSlice(allocator, parsed);
+    log.debug("parsed workflow file={s} bytes={d} actions={d} total_actions={d}", .{
+        display_path,
+        contents.len,
+        parsed.len,
+        found.items.len,
+    });
 }
 
 fn isYamlFile(path: []const u8) bool {

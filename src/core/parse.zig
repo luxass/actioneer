@@ -1,7 +1,46 @@
 const std = @import("std");
+const ts = @import("tree-sitter");
 
 const types = @import("types.zig");
-const yaml = @import("yaml.zig");
+
+extern fn tree_sitter_yaml() callconv(.c) *const ts.Language;
+
+const ScalarKinds = std.StaticStringMap(void).initComptime(.{
+    .{ "alias_name", {} },
+    .{ "anchor_name", {} },
+    .{ "boolean_scalar", {} },
+    .{ "double_quote_scalar", {} },
+    .{ "float_scalar", {} },
+    .{ "integer_scalar", {} },
+    .{ "null_scalar", {} },
+    .{ "single_quote_scalar", {} },
+    .{ "string_scalar", {} },
+    .{ "timestamp_scalar", {} },
+});
+
+const WrapperKinds = std.StaticStringMap(void).initComptime(.{
+    .{ "block_node", {} },
+    .{ "document", {} },
+    .{ "flow_node", {} },
+    .{ "plain_scalar", {} },
+    .{ "stream", {} },
+});
+
+const MappingKinds = std.StaticStringMap(void).initComptime(.{
+    .{ "block_mapping", {} },
+    .{ "flow_mapping", {} },
+});
+
+const PairKinds = std.StaticStringMap(void).initComptime(.{
+    .{ "block_mapping_pair", {} },
+    .{ "flow_pair", {} },
+});
+
+const ScalarRange = struct {
+    text: []const u8,
+    start_byte: u32,
+    end_byte: u32,
+};
 
 pub fn parseWorkflowString(
     allocator: std.mem.Allocator,
@@ -14,11 +53,15 @@ pub fn parseWorkflowString(
         found.deinit(allocator);
     }
 
-    const document = try yaml.parseYaml(allocator, contents);
-    defer document.deinit();
+    const parser = ts.Parser.create();
+    defer parser.destroy();
+    try parser.setLanguage(tree_sitter_yaml());
+
+    const tree = parser.parseString(contents, null) orelse return error.InvalidYaml;
+    defer tree.destroy();
 
     const initial_scope: []const u8 = if (isCompositeAction(file_path)) "composite" else "workflow";
-    try collectActionsFromNode(allocator, document.root, file_path, initial_scope, &found);
+    try collectActionsFromNode(allocator, contents, tree.rootNode(), file_path, initial_scope, &found);
 
     return found.toOwnedSlice(allocator);
 }
@@ -34,48 +77,125 @@ pub fn deinitFoundAction(allocator: std.mem.Allocator, action: types.FoundAction
 }
 
 pub fn deinitFoundActions(allocator: std.mem.Allocator, found: []const types.FoundAction) void {
-    for (found) |action| {
-        deinitFoundAction(allocator, action);
-    }
+    for (found) |action| deinitFoundAction(allocator, action);
     allocator.free(found);
 }
 
 fn collectActionsFromNode(
     allocator: std.mem.Allocator,
-    node: *const yaml.Node,
+    contents: []const u8,
+    node: ts.Node,
     file_path: []const u8,
     scope: []const u8,
     found: *std.ArrayList(types.FoundAction),
-) !void {
-    switch (node.value) {
-        .map => |pairs| {
-            for (pairs) |pair| {
-                if (std.mem.eql(u8, pair.key, "jobs") and pair.value.value == .map) {
-                    for (pair.value.value.map) |job| {
-                        try collectActionsFromNode(allocator, job.value, file_path, job.key, found);
-                    }
-                    continue;
-                }
+) anyerror!void {
+    const kind = node.kind();
 
-                if (std.mem.eql(u8, pair.key, "uses")) {
-                    if (pair.value.scalar()) |value| {
-                        if (actionFromUsesValue(allocator, value, pair.value.comment, scope, file_path, pair.value.line)) |action| {
-                            try found.append(allocator, action);
-                        } else |_| {}
-                    }
-                    continue;
-                }
-
-                try collectActionsFromNode(allocator, pair.value, file_path, scope, found);
-            }
-        },
-        .list => |items| {
-            for (items) |item| {
-                try collectActionsFromNode(allocator, item, file_path, scope, found);
-            }
-        },
-        .scalar, .null => {},
+    if (PairKinds.has(kind)) {
+        try collectFromPair(allocator, contents, node, file_path, scope, found);
+        return;
     }
+
+    var index: u32 = 0;
+    while (index < node.namedChildCount()) : (index += 1) {
+        try collectActionsFromNode(allocator, contents, node.namedChild(index).?, file_path, scope, found);
+    }
+}
+
+fn collectFromPair(
+    allocator: std.mem.Allocator,
+    contents: []const u8,
+    pair: ts.Node,
+    file_path: []const u8,
+    scope: []const u8,
+    found: *std.ArrayList(types.FoundAction),
+) anyerror!void {
+    const key_node = pair.childByFieldName("key") orelse return;
+    const key_range = scalarRange(contents, key_node) orelse return;
+    const key = cleanScalar(key_range.text);
+
+    const value_node = pair.childByFieldName("value") orelse return;
+
+    if (std.mem.eql(u8, key, "jobs")) {
+        try collectJobs(allocator, contents, value_node, file_path, found);
+        return;
+    }
+
+    if (std.mem.eql(u8, key, "uses")) {
+        const value_range = scalarRange(contents, value_node) orelse return;
+        if (actionFromUsesValue(
+            allocator,
+            value_range.text,
+            extractTrailingComment(contents, value_node),
+            scope,
+            file_path,
+            value_node.startPoint().row + 1,
+            value_range.start_byte,
+            value_range.end_byte,
+        )) |action| {
+            try found.append(allocator, action);
+        } else |_| {}
+        return;
+    }
+
+    try collectActionsFromNode(allocator, contents, value_node, file_path, scope, found);
+}
+
+fn collectJobs(
+    allocator: std.mem.Allocator,
+    contents: []const u8,
+    node: ts.Node,
+    file_path: []const u8,
+    found: *std.ArrayList(types.FoundAction),
+) anyerror!void {
+    const kind = node.kind();
+
+    if (PairKinds.has(kind)) {
+        const key_node = node.childByFieldName("key") orelse return;
+        const key_range = scalarRange(contents, key_node) orelse return;
+        const job_scope = cleanScalar(key_range.text);
+        const value_node = node.childByFieldName("value") orelse return;
+        try collectActionsFromNode(allocator, contents, value_node, file_path, job_scope, found);
+        return;
+    }
+
+    if (WrapperKinds.has(kind) or MappingKinds.has(kind)) {
+        var index: u32 = 0;
+        while (index < node.namedChildCount()) : (index += 1) {
+            try collectJobs(allocator, contents, node.namedChild(index).?, file_path, found);
+        }
+    }
+}
+
+fn scalarRange(contents: []const u8, node: ts.Node) ?ScalarRange {
+    const kind = node.kind();
+
+    if (WrapperKinds.has(kind)) {
+        if (node.namedChildCount() == 0) return null;
+        return scalarRange(contents, node.namedChild(0).?);
+    }
+
+    if (!ScalarKinds.has(kind)) return null;
+
+    const raw_start = node.startByte();
+    const raw_end = node.endByte();
+    const raw = contents[raw_start..raw_end];
+    const trimmed = cleanScalar(raw);
+    const leading = @as(u32, @intCast(std.mem.indexOf(u8, raw, trimmed) orelse 0));
+
+    return .{
+        .text = trimmed,
+        .start_byte = raw_start + leading,
+        .end_byte = raw_start + leading + @as(u32, @intCast(trimmed.len)),
+    };
+}
+
+fn extractTrailingComment(contents: []const u8, value_node: ts.Node) []const u8 {
+    const end = value_node.endByte();
+    const line_end = std.mem.indexOfScalarPos(u8, contents, end, '\n') orelse contents.len;
+    const tail = contents[end..line_end];
+    const comment_start = std.mem.indexOfScalar(u8, tail, '#') orelse return "";
+    return std.mem.trim(u8, tail[comment_start + 1 ..], " \t");
 }
 
 fn actionFromUsesValue(
@@ -85,6 +205,8 @@ fn actionFromUsesValue(
     scope: []const u8,
     file_path: []const u8,
     line: u32,
+    value_start: u32,
+    value_end: u32,
 ) !types.FoundAction {
     if (std.mem.startsWith(u8, value, "./") or
         std.mem.startsWith(u8, value, "../") or
@@ -95,6 +217,7 @@ fn actionFromUsesValue(
 
     const parsed = parseActionRef(value) catch return error.InvalidActionReference;
     const version_comment = extractVersionComment(comment);
+    const ref_start = value_start + @as(u32, @intCast(parsed.action.len + 1));
 
     return .{
         .action = .{
@@ -109,6 +232,8 @@ fn actionFromUsesValue(
         .job = try allocator.dupe(u8, scope),
         .file = try allocator.dupe(u8, file_path),
         .line = line,
+        .ref_start = ref_start,
+        .ref_end = value_end,
     };
 }
 
@@ -161,6 +286,18 @@ fn parseVersionLike(value: []const u8) bool {
         if (!std.ascii.isDigit(char)) return false;
     }
     return true;
+}
+
+fn cleanScalar(value: []const u8) []const u8 {
+    var result = std.mem.trim(u8, value, " \t");
+    if (result.len >= 2) {
+        const first = result[0];
+        const last = result[result.len - 1];
+        if ((first == '"' and last == '"') or (first == '\'' and last == '\'')) {
+            result = result[1 .. result.len - 1];
+        }
+    }
+    return result;
 }
 
 fn isCompositeAction(path: []const u8) bool {
@@ -264,4 +401,20 @@ test "parse composite action uses" {
     try std.testing.expectEqualStrings("actions/setup-node", composite_action);
     try std.testing.expectEqualStrings("v4", found[0].ref);
     try std.testing.expectEqualStrings("v4.2.0", found[0].version_comment);
+}
+
+test "parse quoted uses span" {
+    const yamlStr =
+        \\jobs:
+        \\  build:
+        \\    steps:
+        \\      - uses: "actions/setup-node@v4"
+    ;
+
+    const found = try parseWorkflowString(std.testing.allocator, ".github/workflows/ci.yml", yamlStr);
+    defer deinitFoundActions(std.testing.allocator, found);
+
+    try std.testing.expectEqual(@as(usize, 1), found.len);
+    try std.testing.expectEqualStrings("v4", found[0].ref);
+    try std.testing.expectEqualStrings("v4", yamlStr[found[0].ref_start..found[0].ref_end]);
 }

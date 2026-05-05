@@ -35,6 +35,8 @@ pub const FoundAction = struct {
     job: []const u8,
     file: []const u8,
     line: u32,
+    ref_start: u32,
+    ref_end: u32,
 };
 
 pub const Repository = struct {
@@ -81,6 +83,8 @@ pub const Candidate = struct {
     next_is_major: bool = false,
     file: []const u8,
     line: u32,
+    ref_start: u32,
+    ref_end: u32,
 };
 
 pub fn deinitCandidates(allocator: std.mem.Allocator, candidates: []const Candidate) void {

@@ -21,7 +21,8 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const zli = addZliModule(b, target, optimize);
-    const exe = addActioneerExecutable(b, target, optimize, zli);
+    const tree_sitter = addTreeSitterModule(b, target, optimize);
+    const exe = addActioneerExecutable(b, target, optimize, zli, tree_sitter);
 
     b.installArtifact(exe);
     addRunStep(b, exe);
@@ -41,13 +42,26 @@ fn addZliModule(
     return zli_dep.module("zli");
 }
 
+fn addTreeSitterModule(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) *std.Build.Module {
+    const tree_sitter_dep = b.dependency("tree_sitter", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    return tree_sitter_dep.module("tree_sitter");
+}
+
 fn addActioneerExecutable(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     zli: *std.Build.Module,
+    tree_sitter: *std.Build.Module,
 ) *std.Build.Step.Compile {
-    return b.addExecutable(.{
+    const exe = b.addExecutable(.{
         .name = exe_name,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
@@ -55,9 +69,38 @@ fn addActioneerExecutable(
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "zli", .module = zli },
+                .{ .name = "tree-sitter", .module = tree_sitter },
             },
         }),
     });
+
+    // ---- Tree-sitter YAML grammar ----
+
+    // C part (parser)
+    exe.root_module.addCSourceFiles(.{
+        .files = &.{
+            "vendor/tree-sitter-yaml/parser.c",
+        },
+        .flags = &.{
+            "-std=c11",
+        },
+    });
+
+    // C++ part (scanner)
+    exe.root_module.addCSourceFiles(.{
+        .files = &.{
+            "vendor/tree-sitter-yaml/scanner.cc",
+        },
+        .flags = &.{
+            "-std=c++17",
+        },
+    });
+
+    exe.root_module.addIncludePath(b.path("vendor/tree-sitter-yaml"));
+    exe.root_module.link_libc = true;
+    exe.root_module.link_libcpp = true;
+
+    return exe;
 }
 
 fn addRunStep(b: *std.Build, exe: *std.Build.Step.Compile) void {
@@ -90,7 +133,8 @@ fn addDistStep(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         }) catch @panic("invalid dist target"));
 
         const zli = addZliModule(b, target, optimize);
-        const exe = addActioneerExecutable(b, target, optimize, zli);
+        const tree_sitter = addTreeSitterModule(b, target, optimize);
+        const exe = addActioneerExecutable(b, target, optimize, zli, tree_sitter);
 
         const install = b.addInstallArtifact(exe, .{
             .dest_dir = .{ .override = .{ .custom = b.fmt("dist/{s}", .{

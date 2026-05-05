@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const parse = @import("parse.zig");
 const types = @import("types.zig");
 
 pub const ApplyError = error{
@@ -17,14 +18,6 @@ const LineSlice = struct {
     newline: []const u8,
     carriage_return: []const u8,
     next_start: usize,
-};
-
-const UsesLine = struct {
-    code: []const u8,
-    comment: []const u8,
-    value_start: usize,
-    value_end: usize,
-    action_end: usize,
 };
 
 pub fn applySelected(
@@ -68,56 +61,64 @@ pub fn applyToString(
     candidates: []const types.Candidate,
     selected: []const usize,
 ) ApplyError!ApplyResult {
+    const file_candidates = try selectedCandidatesForFile(allocator, candidates, selected, file);
+    defer allocator.free(file_candidates);
+
     var out = std.Io.Writer.Allocating.init(allocator);
     errdefer out.deinit();
 
-    var applied: usize = 0;
-    var line_number: u32 = 1;
-    var start: usize = 0;
+    var cursor: usize = 0;
 
-    while (start < contents.len) {
-        const line = nextLine(contents, start);
-
-        if (findCandidateForLine(candidates, selected, file, line_number)) |candidate| {
-            try rewriteFileLine(&out.writer, line, candidate);
-            applied += 1;
-        } else {
-            try out.writer.writeAll(line.raw);
+    for (file_candidates) |candidate| {
+        if (candidate.ref_start > candidate.ref_end or candidate.ref_end > contents.len or candidate.ref_start < cursor) {
+            return error.UpdateTargetNotFound;
+        }
+        if (!std.mem.eql(u8, contents[candidate.ref_start..candidate.ref_end], candidate.current)) {
+            return error.UpdateTargetNotFound;
         }
 
-        start = line.next_start;
-        line_number += 1;
+        const line_start = lineStart(contents, candidate.ref_start);
+        const line = nextLine(contents, line_start);
+        if (line_start < cursor) return error.UpdateTargetNotFound;
+
+        try out.writer.writeAll(contents[cursor..line_start]);
+        try rewriteFileLine(&out.writer, line, line_start, candidate);
+        cursor = line.next_start;
     }
 
-    if (selectedCountForFile(candidates, selected, file) != applied) {
-        return error.UpdateTargetNotFound;
-    }
+    try out.writer.writeAll(contents[cursor..]);
 
     return .{
         .contents = try out.toOwnedSlice(),
-        .applied = applied,
+        .applied = file_candidates.len,
     };
 }
 
-fn findCandidateForLine(
+fn selectedCandidatesForFile(
+    allocator: std.mem.Allocator,
     candidates: []const types.Candidate,
     selected: []const usize,
     file: []const u8,
-    line: u32,
-) ?types.Candidate {
+) ![]types.Candidate {
+    var filtered: std.ArrayList(types.Candidate) = .empty;
+    defer filtered.deinit(allocator);
+
     for (selected) |index| {
         const candidate = candidates[index];
-        if (candidate.line == line and std.mem.eql(u8, candidate.file, file)) return candidate;
+        if (!std.mem.eql(u8, candidate.file, file)) continue;
+        try filtered.append(allocator, candidate);
     }
-    return null;
+
+    std.sort.insertion(types.Candidate, filtered.items, {}, lessThanCandidate);
+    return filtered.toOwnedSlice(allocator);
 }
 
-fn selectedCountForFile(candidates: []const types.Candidate, selected: []const usize, file: []const u8) usize {
-    var count: usize = 0;
-    for (selected) |index| {
-        if (std.mem.eql(u8, candidates[index].file, file)) count += 1;
-    }
-    return count;
+fn lessThanCandidate(_: void, lhs: types.Candidate, rhs: types.Candidate) bool {
+    return lhs.ref_start < rhs.ref_start;
+}
+
+fn lineStart(contents: []const u8, offset: usize) usize {
+    return if (std.mem.lastIndexOfScalar(u8, contents[0..offset], '\n')) |index| index + 1 else 0;
 }
 
 fn nextLine(contents: []const u8, start: usize) LineSlice {
@@ -136,83 +137,31 @@ fn nextLine(contents: []const u8, start: usize) LineSlice {
     };
 }
 
-fn rewriteFileLine(writer: *std.Io.Writer, line: LineSlice, candidate: types.Candidate) ApplyError!void {
-    try rewriteLineText(writer, line.text, candidate);
+fn rewriteFileLine(writer: *std.Io.Writer, line: LineSlice, line_start: usize, candidate: types.Candidate) ApplyError!void {
+    try rewriteLineText(writer, line.text, line_start, candidate);
     try writer.writeAll(line.carriage_return);
     try writer.writeAll(line.newline);
 }
 
-fn rewriteLineText(writer: *std.Io.Writer, line: []const u8, candidate: types.Candidate) ApplyError!void {
-    const parsed = try parseUsesLine(line);
+fn rewriteLineText(writer: *std.Io.Writer, line: []const u8, line_start: usize, candidate: types.Candidate) ApplyError!void {
+    const rel_ref_start = candidate.ref_start - line_start;
+    const rel_ref_end = candidate.ref_end - line_start;
+    if (rel_ref_end > line.len) return error.UpdateTargetNotFound;
 
-    const value = parsed.code[parsed.value_start..parsed.value_end];
-    if (!std.mem.eql(u8, value[0..parsed.action_end], candidate.action)) return error.UpdateTargetNotFound;
-
-    const ref_start = parsed.value_start + parsed.action_end + 1;
-    try writeUpdatedUses(writer, parsed, ref_start, candidate);
-}
-
-fn parseUsesLine(line: []const u8) ApplyError!UsesLine {
     const comment_start = findCommentStart(line);
-    const code = line[0 .. comment_start orelse line.len];
-    const comment = if (comment_start) |index| line[index..] else "";
+    const comment_index = comment_start orelse line.len;
 
-    const value_start = try findUsesValueStart(code);
-    const value_end = findUsesValueEnd(code, value_start) orelse return error.UpdateTargetNotFound;
-    const value = code[value_start..value_end];
-    const action_end = std.mem.lastIndexOfScalar(u8, value, '@') orelse return error.UpdateTargetNotFound;
-
-    return .{
-        .code = code,
-        .comment = comment,
-        .value_start = value_start,
-        .value_end = value_end,
-        .action_end = action_end,
-    };
-}
-
-fn findUsesValueStart(code: []const u8) ApplyError!usize {
-    const uses_index = std.mem.indexOf(u8, code, "uses:") orelse return error.UpdateTargetNotFound;
-    var value_start = uses_index + "uses:".len;
-    while (value_start < code.len and (code[value_start] == ' ' or code[value_start] == '\t')) : (value_start += 1) {}
-
-    if (value_start < code.len and (code[value_start] == '"' or code[value_start] == '\'')) {
-        value_start += 1;
-    }
-
-    return value_start;
-}
-
-fn findUsesValueEnd(code: []const u8, value_start: usize) ?usize {
-    if (value_start == 0) return null;
-
-    const opening_quote_index = value_start - 1;
-    if (opening_quote_index < code.len and (code[opening_quote_index] == '"' or code[opening_quote_index] == '\'')) {
-        return std.mem.indexOfScalarPos(u8, code, value_start, code[opening_quote_index]);
-    }
-
-    return std.mem.trimEnd(u8, code[value_start..], " \t").len + value_start;
-}
-
-fn writeUpdatedUses(
-    writer: *std.Io.Writer,
-    parsed: UsesLine,
-    ref_start: usize,
-    candidate: types.Candidate,
-) ApplyError!void {
-    try writer.writeAll(parsed.code[0..ref_start]);
+    try writer.writeAll(line[0..rel_ref_start]);
     try writer.writeAll(candidate.next);
-    try writer.writeAll(parsed.code[parsed.value_end..]);
-    try writeComment(writer, parsed.comment, candidate);
-}
 
-fn writeComment(writer: *std.Io.Writer, existing_comment: []const u8, candidate: types.Candidate) ApplyError!void {
     if (shouldWriteVersionComment(candidate)) {
+        try writer.writeAll(line[rel_ref_end..comment_index]);
         try writer.writeAll(" # ");
         try writer.writeAll(displayTarget(candidate));
-    } else {
-        try writer.writeAll(existing_comment);
+        return;
     }
+
+    try writer.writeAll(line[rel_ref_end..]);
 }
 
 fn shouldWriteVersionComment(candidate: types.Candidate) bool {
@@ -250,6 +199,9 @@ test "apply sha update and version comment" {
         \\      - uses: actions/setup-node@v3
         \\
     ;
+    const found = try parse.parseWorkflowString(std.testing.allocator, ".github/workflows/ci.yml", input);
+    defer parse.deinitFoundActions(std.testing.allocator, found);
+
     const candidates = [_]types.Candidate{
         .{
             .action = "actions/checkout",
@@ -260,6 +212,8 @@ test "apply sha update and version comment" {
             .next_label = "v4.2.0",
             .file = ".github/workflows/ci.yml",
             .line = 4,
+            .ref_start = found[0].ref_start,
+            .ref_end = found[0].ref_end,
         },
     };
 
@@ -277,28 +231,15 @@ test "apply sha update and version comment" {
     , result.contents);
 }
 
-test "parse uses line with comment" {
-    const parsed = try parseUsesLine("      - uses: actions/checkout@oldsha # v4.1.0");
-
-    try std.testing.expectEqualStrings("actions/checkout@oldsha", parsed.code[parsed.value_start..parsed.value_end]);
-    try std.testing.expectEqual(@as(usize, "actions/checkout".len), parsed.action_end);
-    try std.testing.expectEqualStrings("# v4.1.0", parsed.comment);
-}
-
-test "parse quoted uses line" {
-    const parsed = try parseUsesLine("  uses: 'actions/setup-node@v3'");
-
-    try std.testing.expectEqualStrings("actions/setup-node@v3", parsed.code[parsed.value_start..parsed.value_end]);
-    try std.testing.expectEqual(@as(usize, "actions/setup-node".len), parsed.action_end);
-    try std.testing.expectEqualStrings("", parsed.comment);
-}
-
 test "apply quoted version update without adding comment" {
     const input =
         \\steps:
         \\  - uses: "actions/setup-node@v3"
         \\
     ;
+    const found = try parse.parseWorkflowString(std.testing.allocator, "ci.yml", input);
+    defer parse.deinitFoundActions(std.testing.allocator, found);
+
     const candidates = [_]types.Candidate{
         .{
             .action = "actions/setup-node",
@@ -308,6 +249,8 @@ test "apply quoted version update without adding comment" {
             .next_label = "v4",
             .file = "ci.yml",
             .line = 2,
+            .ref_start = found[0].ref_start,
+            .ref_end = found[0].ref_end,
         },
     };
 
@@ -328,6 +271,9 @@ test "apply reusable workflow update" {
         \\    uses: luxass/shared-workflows/.github/workflows/reusable-ci-security.yaml@v0.6.0
         \\
     ;
+    const found = try parse.parseWorkflowString(std.testing.allocator, "ci-security.yml", input);
+    defer parse.deinitFoundActions(std.testing.allocator, found);
+
     const candidates = [_]types.Candidate{
         .{
             .action = "luxass/shared-workflows/.github/workflows/reusable-ci-security.yaml",
@@ -337,6 +283,8 @@ test "apply reusable workflow update" {
             .next_label = "v0.7.0",
             .file = "ci-security.yml",
             .line = 3,
+            .ref_start = found[0].ref_start,
+            .ref_end = found[0].ref_end,
         },
     };
 

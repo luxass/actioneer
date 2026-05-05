@@ -224,6 +224,8 @@ pub const Client = struct {
                 .next_is_major = isMajorUpdate(current_version, target.version),
                 .file = try self.allocator.dupe(u8, action.file),
                 .line = action.line,
+                .ref_start = action.ref_start,
+                .ref_end = action.ref_end,
             });
             keep_action_display = true;
         }

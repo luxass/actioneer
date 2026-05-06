@@ -33,8 +33,11 @@ jobs:
         with:
           version: 0.16.0
 
-      - name: Build
+      - name: Fetch dependencies
         run: zig build --fetch
+
+      - name: Build
+        run: zig build
 
       - name: Test
         run: zig build test

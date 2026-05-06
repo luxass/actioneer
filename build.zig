@@ -4,7 +4,6 @@ const exe_name = "actioneer";
 
 const DistTarget = struct {
     triple: []const u8,
-    exe_filename: []const u8 = exe_name,
 };
 
 const dist_targets = [_]DistTarget{
@@ -12,17 +11,21 @@ const dist_targets = [_]DistTarget{
     .{ .triple = "x86_64-macos" },
     .{ .triple = "aarch64-linux-musl" },
     .{ .triple = "x86_64-linux-musl" },
-    .{ .triple = "aarch64-windows-gnu", .exe_filename = exe_name ++ ".exe" },
-    .{ .triple = "x86_64-windows-gnu", .exe_filename = exe_name ++ ".exe" },
+    .{ .triple = "aarch64-windows-gnu" },
+    .{ .triple = "x86_64-windows-gnu" },
+};
+
+const BuildModules = struct {
+    zli: *std.Build.Module,
+    tree_sitter: *std.Build.Module,
 };
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const zli = addZliModule(b, target, optimize);
-    const tree_sitter = addTreeSitterModule(b, target, optimize);
-    const exe = addActioneerExecutable(b, target, optimize, zli, tree_sitter);
+    const modules = loadModules(b, target, optimize);
+    const exe = addActioneerExecutable(b, target, optimize, modules);
 
     b.installArtifact(exe);
     addRunStep(b, exe);
@@ -30,36 +33,30 @@ pub fn build(b: *std.Build) void {
     addDistStep(b, optimize);
 }
 
-fn addZliModule(
+fn loadModules(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-) *std.Build.Module {
+) BuildModules {
     const zli_dep = b.dependency("zli", .{
         .target = target,
         .optimize = optimize,
     });
-    return zli_dep.module("zli");
-}
-
-fn addTreeSitterModule(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-) *std.Build.Module {
     const tree_sitter_dep = b.dependency("tree_sitter", .{
         .target = target,
         .optimize = optimize,
     });
-    return tree_sitter_dep.module("tree_sitter");
+    return .{
+        .zli = zli_dep.module("zli"),
+        .tree_sitter = tree_sitter_dep.module("tree_sitter"),
+    };
 }
 
 fn addActioneerExecutable(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-    zli: *std.Build.Module,
-    tree_sitter: *std.Build.Module,
+    modules: BuildModules,
 ) *std.Build.Step.Compile {
     const exe = b.addExecutable(.{
         .name = exe_name,
@@ -68,39 +65,29 @@ fn addActioneerExecutable(
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "zli", .module = zli },
-                .{ .name = "tree-sitter", .module = tree_sitter },
+                .{ .name = "zli", .module = modules.zli },
+                .{ .name = "tree-sitter", .module = modules.tree_sitter },
             },
         }),
     });
 
-    // ---- Tree-sitter YAML grammar ----
+    configureTreeSitterYaml(exe, b);
 
-    // C part (parser)
+    return exe;
+}
+
+fn configureTreeSitterYaml(exe: *std.Build.Step.Compile, b: *std.Build) void {
     exe.root_module.addCSourceFiles(.{
-        .files = &.{
-            "vendor/tree-sitter-yaml/parser.c",
-        },
-        .flags = &.{
-            "-std=c11",
-        },
+        .files = &.{"vendor/tree-sitter-yaml/parser.c"},
+        .flags = &.{"-std=c11"},
     });
-
-    // C++ part (scanner)
     exe.root_module.addCSourceFiles(.{
-        .files = &.{
-            "vendor/tree-sitter-yaml/scanner.cc",
-        },
-        .flags = &.{
-            "-std=c++17",
-        },
+        .files = &.{"vendor/tree-sitter-yaml/scanner.cc"},
+        .flags = &.{"-std=c++17"},
     });
-
     exe.root_module.addIncludePath(b.path("vendor/tree-sitter-yaml"));
     exe.root_module.link_libc = true;
     exe.root_module.link_libcpp = true;
-
-    return exe;
 }
 
 fn addRunStep(b: *std.Build, exe: *std.Build.Step.Compile) void {
@@ -132,21 +119,22 @@ fn addDistStep(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
             .arch_os_abi = dist_target.triple,
         }) catch @panic("invalid dist target"));
 
-        const zli = addZliModule(b, target, optimize);
-        const tree_sitter = addTreeSitterModule(b, target, optimize);
-        const exe = addActioneerExecutable(b, target, optimize, zli, tree_sitter);
+        const modules = loadModules(b, target, optimize);
+        const exe = addActioneerExecutable(b, target, optimize, modules);
 
         const install = b.addInstallArtifact(exe, .{
             .dest_dir = .{ .override = .{ .custom = b.fmt("dist/{s}", .{
                 dist_target.triple,
             }) } },
-            .dest_sub_path = b.fmt("{s}", .{
-                dist_target.exe_filename,
-            }),
+            .dest_sub_path = b.fmt("{s}", .{artifactName(target.result.os.tag)}),
             .pdb_dir = .disabled,
             .implib_dir = .disabled,
         });
 
         dist_step.dependOn(&install.step);
     }
+}
+
+fn artifactName(os_tag: std.Target.Os.Tag) []const u8 {
+    return if (os_tag == .windows) exe_name ++ ".exe" else exe_name;
 }

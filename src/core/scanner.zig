@@ -12,10 +12,10 @@ pub fn scan(
     allocator: std.mem.Allocator,
     io: std.Io,
     options: types.ScanOptions,
-) ScanError![]types.FoundAction {
-    var found: std.ArrayList(types.FoundAction) = .empty;
+) ScanError![]types.Reference {
+    var found: std.ArrayList(types.Reference) = .empty;
     errdefer {
-        for (found.items) |action| parse.deinitFoundAction(allocator, action);
+        for (found.items) |action| parse.deinitReference(allocator, action);
         found.deinit(allocator);
     }
 
@@ -36,8 +36,12 @@ pub fn scan(
     return found.toOwnedSlice(allocator);
 }
 
-pub fn deinitFoundActions(allocator: std.mem.Allocator, found: []const types.FoundAction) void {
-    parse.deinitFoundActions(allocator, found);
+pub fn deinitReferences(allocator: std.mem.Allocator, found: []const types.Reference) void {
+    parse.deinitReferences(allocator, found);
+}
+
+pub fn deinitFoundActions(allocator: std.mem.Allocator, found: []const types.Reference) void {
+    deinitReferences(allocator, found);
 }
 
 fn scanDir(
@@ -45,7 +49,7 @@ fn scanDir(
     io: std.Io,
     dir_path: []const u8,
     recursive: bool,
-    found: *std.ArrayList(types.FoundAction),
+    found: *std.ArrayList(types.Reference),
 ) ScanError!void {
     var dir = try std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true });
     defer dir.close(io);
@@ -87,7 +91,7 @@ fn scanPath(
     io: std.Io,
     path: []const u8,
     recursive: bool,
-    found: *std.ArrayList(types.FoundAction),
+    found: *std.ArrayList(types.Reference),
 ) ScanError!void {
     scanDir(allocator, io, path, recursive, found) catch |err| switch (err) {
         error.NotDir => return scanFile(allocator, io, path, found),
@@ -99,7 +103,7 @@ fn scanFile(
     allocator: std.mem.Allocator,
     io: std.Io,
     file_path: []const u8,
-    found: *std.ArrayList(types.FoundAction),
+    found: *std.ArrayList(types.Reference),
 ) !void {
     const contents = try std.Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(5 * 1024 * 1024));
     defer allocator.free(contents);
@@ -111,7 +115,7 @@ fn appendParsedWorkflow(
     allocator: std.mem.Allocator,
     display_path: []const u8,
     contents: []const u8,
-    found: *std.ArrayList(types.FoundAction),
+    found: *std.ArrayList(types.Reference),
 ) !void {
     const parsed = try parse.collectReferencesFromSource(allocator, display_path, contents);
     defer allocator.free(parsed);

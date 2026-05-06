@@ -28,15 +28,30 @@ pub const CheckResult = struct {
     candidates: []const Candidate,
 };
 
-pub const FoundAction = struct {
-    action: ActionName,
-    ref: []const u8,
-    version_comment: []const u8 = "",
-    job: []const u8,
+pub const ReferenceKind = enum {
+    workflow_job,
+    workflow_step,
+    composite_step,
+};
+
+pub const ByteSpan = struct {
+    start: u32,
+    end: u32,
+};
+
+pub const SourceLocation = struct {
     file: []const u8,
     line: u32,
-    ref_start: u32,
-    ref_end: u32,
+    ref_span: ByteSpan,
+};
+
+pub const Reference = struct {
+    kind: ReferenceKind,
+    name: ActionName,
+    current_ref: []const u8,
+    version_hint: []const u8 = "",
+    scope: []const u8,
+    source: SourceLocation,
 };
 
 pub const Repository = struct {

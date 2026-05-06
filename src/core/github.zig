@@ -131,7 +131,7 @@ pub const Client = struct {
 
     pub fn resolve(
         self: *Self,
-        found: []const types.FoundAction,
+        found: []const types.Reference,
         options: types.ResolveOptions,
         diagnostics: ?*Diagnostics,
     ) ResolveError![]types.Candidate {
@@ -143,25 +143,25 @@ pub const Client = struct {
         var cache = std.HashMap(types.Repository, []Tag, RepositoryContext, std.hash_map.default_max_load_percentage).init(self.allocator);
         defer cache.deinit();
 
-        for (found) |action| {
-            const action_display = try action.action.allocDisplay(self.allocator);
+        for (found) |reference| {
+            const action_display = try reference.name.allocDisplay(self.allocator);
             var keep_action_display = false;
             defer if (!keep_action_display) self.allocator.free(action_display);
 
             if (isExcluded(action_display, options.excludes)) {
-                log.debug("resolve skip excluded action={s} file={s}:{d}", .{ action_display, action.file, action.line });
+                log.debug("resolve skip excluded action={s} file={s}:{d}", .{ action_display, reference.source.file, reference.source.line });
                 continue;
             }
 
-            const comment_version = if (action.version_comment.len > 0) git.parseVersion(action.version_comment) else null;
-            const current_version = git.parseVersion(action.ref) orelse comment_version;
-            const current_is_sha = git.isLikelySha(action.ref);
+            const comment_version = if (reference.version_hint.len > 0) git.parseVersion(reference.version_hint) else null;
+            const current_version = git.parseVersion(reference.current_ref) orelse comment_version;
+            const current_is_sha = git.isLikelySha(reference.current_ref);
             if (current_version == null and !current_is_sha and !options.include_branches) {
-                log.debug("resolve skip unversioned action={s} ref={s} file={s}:{d}", .{ action_display, action.ref, action.file, action.line });
+                log.debug("resolve skip unversioned action={s} ref={s} file={s}:{d}", .{ action_display, reference.current_ref, reference.source.file, reference.source.line });
                 continue;
             }
 
-            const repository = action.action.repository;
+            const repository = reference.name.repository;
             var cache_hit = true;
             const tags = if (cache.get(repository)) |cached| cached else blk: {
                 cache_hit = false;
@@ -175,57 +175,57 @@ pub const Client = struct {
                 log.debug("github cache hit repo={s}/{s} version_tags={d}", .{ repository.owner, repository.name, tags.len });
             }
 
-            const commented_tag = if (action.version_comment.len > 0) findTag(tags, action.version_comment) else null;
-            const sha_mismatch = current_is_sha and commented_tag != null and !git.shaMatches(action.ref, commented_tag.?.sha);
+            const commented_tag = if (reference.version_hint.len > 0) findTag(tags, reference.version_hint) else null;
+            const sha_mismatch = current_is_sha and commented_tag != null and !git.shaMatches(reference.current_ref, commented_tag.?.sha);
             const target = chooseTarget(tags, current_version, options.mode) orelse {
                 log.debug("resolve skip no target action={s} ref={s} mode={s} file={s}:{d}", .{
                     action_display,
-                    action.ref,
+                    reference.current_ref,
                     @tagName(options.mode),
-                    action.file,
-                    action.line,
+                    reference.source.file,
+                    reference.source.line,
                 });
                 continue;
             };
             const current_ref = if (commented_tag) |tag|
                 tag.sha
             else
-                findCurrentSha(tags, action.ref) orelse if (current_is_sha) action.ref else "";
+                findCurrentSha(tags, reference.current_ref) orelse if (current_is_sha) reference.current_ref else "";
 
-            if (!sha_mismatch and (std.mem.eql(u8, action.ref, target.name) or std.mem.eql(u8, action.ref, target.sha))) {
+            if (!sha_mismatch and (std.mem.eql(u8, reference.current_ref, target.name) or std.mem.eql(u8, reference.current_ref, target.sha))) {
                 log.debug("resolve skip current action={s} ref={s} target={s} file={s}:{d}", .{
                     action_display,
-                    action.ref,
+                    reference.current_ref,
                     target.name,
-                    action.file,
-                    action.line,
+                    reference.source.file,
+                    reference.source.line,
                 });
                 continue;
             }
 
             log.debug("resolve candidate action={s} current={s} target={s} sha_mismatch={} major={} file={s}:{d}", .{
                 action_display,
-                action.ref,
+                reference.current_ref,
                 target.name,
                 sha_mismatch,
                 isMajorUpdate(current_version, target.version),
-                action.file,
-                action.line,
+                reference.source.file,
+                reference.source.line,
             });
             try candidates.append(self.allocator, .{
                 .action = action_display,
-                .job = try self.allocator.dupe(u8, action.job),
-                .current = try self.allocator.dupe(u8, action.ref),
+                .job = try self.allocator.dupe(u8, reference.scope),
+                .current = try self.allocator.dupe(u8, reference.current_ref),
                 .current_ref = if (current_ref.len > 0) try self.allocator.dupe(u8, current_ref) else "",
-                .version_comment = if (action.version_comment.len > 0) try self.allocator.dupe(u8, action.version_comment) else "",
+                .version_comment = if (reference.version_hint.len > 0) try self.allocator.dupe(u8, reference.version_hint) else "",
                 .sha_mismatch = sha_mismatch,
                 .next = try self.allocator.dupe(u8, if (options.style == .sha) target.sha else target.name),
                 .next_label = try self.allocator.dupe(u8, target.name),
                 .next_is_major = isMajorUpdate(current_version, target.version),
-                .file = try self.allocator.dupe(u8, action.file),
-                .line = action.line,
-                .ref_start = action.ref_start,
-                .ref_end = action.ref_end,
+                .file = try self.allocator.dupe(u8, reference.source.file),
+                .line = reference.source.line,
+                .ref_start = reference.source.ref_span.start,
+                .ref_end = reference.source.ref_span.end,
             });
             keep_action_display = true;
         }

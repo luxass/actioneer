@@ -8,10 +8,10 @@ pub fn collectReferences(
     allocator: std.mem.Allocator,
     file_path: []const u8,
     contents: []const u8,
-) ![]types.FoundAction {
-    var found: std.ArrayList(types.FoundAction) = .empty;
+) ![]types.Reference {
+    var found: std.ArrayList(types.Reference) = .empty;
     errdefer {
-        for (found.items) |action| deinitFoundAction(allocator, action);
+        for (found.items) |action| deinitReference(allocator, action);
         found.deinit(allocator);
     }
 
@@ -27,18 +27,18 @@ pub fn collectReferences(
     return found.toOwnedSlice(allocator);
 }
 
-pub fn deinitFoundAction(allocator: std.mem.Allocator, action: types.FoundAction) void {
-    allocator.free(action.action.repository.owner);
-    allocator.free(action.action.repository.name);
-    if (action.action.path.len > 0) allocator.free(action.action.path);
-    allocator.free(action.ref);
-    if (action.version_comment.len > 0) allocator.free(action.version_comment);
-    allocator.free(action.job);
-    allocator.free(action.file);
+pub fn deinitReference(allocator: std.mem.Allocator, action: types.Reference) void {
+    allocator.free(action.name.repository.owner);
+    allocator.free(action.name.repository.name);
+    if (action.name.path.len > 0) allocator.free(action.name.path);
+    allocator.free(action.current_ref);
+    if (action.version_hint.len > 0) allocator.free(action.version_hint);
+    allocator.free(action.scope);
+    allocator.free(action.source.file);
 }
 
-pub fn deinitFoundActions(allocator: std.mem.Allocator, found: []const types.FoundAction) void {
-    for (found) |action| deinitFoundAction(allocator, action);
+pub fn deinitReferences(allocator: std.mem.Allocator, found: []const types.Reference) void {
+    for (found) |action| deinitReference(allocator, action);
     allocator.free(found);
 }
 
@@ -47,7 +47,7 @@ fn collectWorkflowActions(
     contents: []const u8,
     root_mapping: ts.Node,
     file_path: []const u8,
-    found: *std.ArrayList(types.FoundAction),
+    found: *std.ArrayList(types.Reference),
 ) anyerror!void {
     const jobs_node = yaml_tree.pairValueByKey(contents, root_mapping, "jobs") orelse return;
     const jobs_mapping = yaml_tree.mappingNode(jobs_node) orelse return;
@@ -70,16 +70,16 @@ fn collectJobActions(
     job_node: ts.Node,
     file_path: []const u8,
     job_scope: []const u8,
-    found: *std.ArrayList(types.FoundAction),
+    found: *std.ArrayList(types.Reference),
 ) anyerror!void {
     const job_mapping = yaml_tree.mappingNode(job_node) orelse return;
 
     if (yaml_tree.pairValueByKey(contents, job_mapping, "uses")) |value_node| {
-        try appendActionReference(allocator, contents, value_node, job_scope, file_path, found);
+        try appendActionReference(allocator, contents, value_node, job_scope, .workflow_job, file_path, found);
     }
 
     if (yaml_tree.pairValueByKey(contents, job_mapping, "steps")) |steps_node| {
-        try collectStepActions(allocator, contents, steps_node, file_path, job_scope, found);
+        try collectStepActions(allocator, contents, steps_node, file_path, job_scope, .workflow_step, found);
     }
 }
 
@@ -88,7 +88,7 @@ fn collectCompositeActions(
     contents: []const u8,
     root_mapping: ts.Node,
     file_path: []const u8,
-    found: *std.ArrayList(types.FoundAction),
+    found: *std.ArrayList(types.Reference),
 ) anyerror!void {
     const runs_node = yaml_tree.pairValueByKey(contents, root_mapping, "runs") orelse return;
     const runs_mapping = yaml_tree.mappingNode(runs_node) orelse return;
@@ -98,7 +98,7 @@ fn collectCompositeActions(
     if (!std.mem.eql(u8, yaml_tree.cleanScalar(using_range.text), "composite")) return;
 
     const steps_node = yaml_tree.pairValueByKey(contents, runs_mapping, "steps") orelse return;
-    try collectStepActions(allocator, contents, steps_node, file_path, "composite", found);
+    try collectStepActions(allocator, contents, steps_node, file_path, "composite", .composite_step, found);
 }
 
 fn collectStepActions(
@@ -107,7 +107,8 @@ fn collectStepActions(
     steps_node: ts.Node,
     file_path: []const u8,
     scope: []const u8,
-    found: *std.ArrayList(types.FoundAction),
+    kind: types.ReferenceKind,
+    found: *std.ArrayList(types.Reference),
 ) anyerror!void {
     const steps_sequence = yaml_tree.sequenceNode(steps_node) orelse return;
 
@@ -116,7 +117,7 @@ fn collectStepActions(
         const item = steps_sequence.namedChild(index).?;
         const step_mapping = yaml_tree.mappingNode(item) orelse continue;
         const uses_node = yaml_tree.pairValueByKey(contents, step_mapping, "uses") orelse continue;
-        try appendActionReference(allocator, contents, uses_node, scope, file_path, found);
+        try appendActionReference(allocator, contents, uses_node, scope, kind, file_path, found);
     }
 }
 
@@ -125,8 +126,9 @@ fn appendActionReference(
     contents: []const u8,
     value_node: ts.Node,
     scope: []const u8,
+    kind: types.ReferenceKind,
     file_path: []const u8,
-    found: *std.ArrayList(types.FoundAction),
+    found: *std.ArrayList(types.Reference),
 ) !void {
     const value_range = yaml_tree.scalarRange(contents, value_node) orelse return;
     if (actionFromUsesValue(
@@ -134,6 +136,7 @@ fn appendActionReference(
         value_range.text,
         yaml_tree.extractTrailingComment(contents, value_node),
         scope,
+        kind,
         file_path,
         value_node.startPoint().row + 1,
         value_range.start_byte,
@@ -148,11 +151,12 @@ fn actionFromUsesValue(
     value: []const u8,
     comment: []const u8,
     scope: []const u8,
+    kind: types.ReferenceKind,
     file_path: []const u8,
     line: u32,
     value_start: u32,
     value_end: u32,
-) !types.FoundAction {
+) !types.Reference {
     if (std.mem.startsWith(u8, value, "./") or
         std.mem.startsWith(u8, value, "../") or
         std.mem.startsWith(u8, value, "docker://"))
@@ -165,20 +169,25 @@ fn actionFromUsesValue(
     const ref_start = value_start + @as(u32, @intCast(parsed.action.len + 1));
 
     return .{
-        .action = .{
+        .kind = kind,
+        .name = .{
             .repository = .{
                 .owner = try allocator.dupe(u8, parsed.owner),
                 .name = try allocator.dupe(u8, parsed.name),
             },
             .path = if (parsed.path.len > 0) try allocator.dupe(u8, parsed.path) else "",
         },
-        .ref = try allocator.dupe(u8, parsed.ref),
-        .version_comment = if (version_comment) |version| try allocator.dupe(u8, version) else "",
-        .job = try allocator.dupe(u8, scope),
-        .file = try allocator.dupe(u8, file_path),
-        .line = line,
-        .ref_start = ref_start,
-        .ref_end = value_end,
+        .current_ref = try allocator.dupe(u8, parsed.ref),
+        .version_hint = if (version_comment) |version| try allocator.dupe(u8, version) else "",
+        .scope = try allocator.dupe(u8, scope),
+        .source = .{
+            .file = try allocator.dupe(u8, file_path),
+            .line = line,
+            .ref_span = .{
+                .start = ref_start,
+                .end = value_end,
+            },
+        },
     };
 }
 
@@ -248,21 +257,23 @@ test "collect workflow step and reusable workflow references" {
     ;
 
     const found = try collectReferences(std.testing.allocator, ".github/workflows/ci.yml", source);
-    defer deinitFoundActions(std.testing.allocator, found);
+    defer deinitReferences(std.testing.allocator, found);
 
     try std.testing.expectEqual(@as(usize, 2), found.len);
+    try std.testing.expectEqual(types.ReferenceKind.workflow_job, found[0].kind);
+    try std.testing.expectEqual(types.ReferenceKind.workflow_step, found[1].kind);
 
-    const reusable = try found[0].action.allocDisplay(std.testing.allocator);
+    const reusable = try found[0].name.allocDisplay(std.testing.allocator);
     defer std.testing.allocator.free(reusable);
     try std.testing.expectEqualStrings("luxass/shared-workflows/.github/workflows/ci.yml", reusable);
-    try std.testing.expectEqualStrings("build", found[0].job);
-    try std.testing.expectEqualStrings("v1", found[0].ref);
+    try std.testing.expectEqualStrings("build", found[0].scope);
+    try std.testing.expectEqualStrings("v1", found[0].current_ref);
 
-    const step_action = try found[1].action.allocDisplay(std.testing.allocator);
+    const step_action = try found[1].name.allocDisplay(std.testing.allocator);
     defer std.testing.allocator.free(step_action);
     try std.testing.expectEqualStrings("actions/checkout", step_action);
-    try std.testing.expectEqualStrings("v4", found[1].ref);
-    try std.testing.expectEqualStrings("v4.1.0", found[1].version_comment);
+    try std.testing.expectEqualStrings("v4", found[1].current_ref);
+    try std.testing.expectEqualStrings("v4.1.0", found[1].version_hint);
 }
 
 test "collect composite action references only for composite actions" {
@@ -274,10 +285,11 @@ test "collect composite action references only for composite actions" {
     ;
 
     const found = try collectReferences(std.testing.allocator, "action.yml", source);
-    defer deinitFoundActions(std.testing.allocator, found);
+    defer deinitReferences(std.testing.allocator, found);
 
     try std.testing.expectEqual(@as(usize, 1), found.len);
-    try std.testing.expectEqualStrings("composite", found[0].job);
+    try std.testing.expectEqual(types.ReferenceKind.composite_step, found[0].kind);
+    try std.testing.expectEqualStrings("composite", found[0].scope);
 }
 
 test "ignore non action uses sites and non composite runs" {
@@ -299,10 +311,10 @@ test "ignore non action uses sites and non composite runs" {
     ;
 
     const workflow_found = try collectReferences(std.testing.allocator, ".github/workflows/ci.yml", workflow_source);
-    defer deinitFoundActions(std.testing.allocator, workflow_found);
+    defer deinitReferences(std.testing.allocator, workflow_found);
     try std.testing.expectEqual(@as(usize, 0), workflow_found.len);
 
     const action_found = try collectReferences(std.testing.allocator, "action.yml", action_source);
-    defer deinitFoundActions(std.testing.allocator, action_found);
+    defer deinitReferences(std.testing.allocator, action_found);
     try std.testing.expectEqual(@as(usize, 0), action_found.len);
 }

@@ -6,7 +6,7 @@ pub fn collectReferencesFromSource(
     allocator: std.mem.Allocator,
     file_path: []const u8,
     contents: []const u8,
-) ![]types.FoundAction {
+) ![]types.Reference {
     return actions.collectReferences(allocator, file_path, contents);
 }
 
@@ -14,16 +14,24 @@ pub fn parseWorkflowString(
     allocator: std.mem.Allocator,
     file_path: []const u8,
     contents: []const u8,
-) ![]types.FoundAction {
+) ![]types.Reference {
     return collectReferencesFromSource(allocator, file_path, contents);
 }
 
-pub fn deinitFoundAction(allocator: std.mem.Allocator, action: types.FoundAction) void {
-    actions.deinitFoundAction(allocator, action);
+pub fn deinitReference(allocator: std.mem.Allocator, action: types.Reference) void {
+    actions.deinitReference(allocator, action);
 }
 
-pub fn deinitFoundActions(allocator: std.mem.Allocator, found: []const types.FoundAction) void {
-    actions.deinitFoundActions(allocator, found);
+pub fn deinitReferences(allocator: std.mem.Allocator, found: []const types.Reference) void {
+    actions.deinitReferences(allocator, found);
+}
+
+pub fn deinitFoundAction(allocator: std.mem.Allocator, action: types.Reference) void {
+    deinitReference(allocator, action);
+}
+
+pub fn deinitFoundActions(allocator: std.mem.Allocator, found: []const types.Reference) void {
+    deinitReferences(allocator, found);
 }
 
 test "parse workflow uses" {
@@ -41,11 +49,12 @@ test "parse workflow uses" {
     defer deinitFoundActions(std.testing.allocator, found);
 
     try std.testing.expectEqual(@as(usize, 2), found.len);
-    try std.testing.expectEqualStrings("build", found[0].job);
-    const action_name = try found[0].action.allocDisplay(std.testing.allocator);
+    try std.testing.expectEqual(types.ReferenceKind.workflow_step, found[0].kind);
+    try std.testing.expectEqualStrings("build", found[0].scope);
+    const action_name = try found[0].name.allocDisplay(std.testing.allocator);
     defer std.testing.allocator.free(action_name);
     try std.testing.expectEqualStrings("actions/checkout", action_name);
-    try std.testing.expectEqualStrings("v4", found[0].ref);
+    try std.testing.expectEqualStrings("v4", found[0].current_ref);
 }
 
 test "parse reusable workflow uses" {
@@ -60,13 +69,14 @@ test "parse reusable workflow uses" {
     defer deinitFoundActions(std.testing.allocator, found);
 
     try std.testing.expectEqual(@as(usize, 1), found.len);
-    try std.testing.expectEqualStrings("zizmor", found[0].job);
-    const workflow_action = try found[0].action.allocDisplay(std.testing.allocator);
+    try std.testing.expectEqual(types.ReferenceKind.workflow_job, found[0].kind);
+    try std.testing.expectEqualStrings("zizmor", found[0].scope);
+    const workflow_action = try found[0].name.allocDisplay(std.testing.allocator);
     defer std.testing.allocator.free(workflow_action);
     try std.testing.expectEqualStrings("luxass/shared-workflows/.github/workflows/reusable-ci-security.yaml", workflow_action);
-    try std.testing.expectEqualStrings("luxass", found[0].action.repository.owner);
-    try std.testing.expectEqualStrings("shared-workflows", found[0].action.repository.name);
-    try std.testing.expectEqualStrings("v0.6.0", found[0].ref);
+    try std.testing.expectEqualStrings("luxass", found[0].name.repository.owner);
+    try std.testing.expectEqualStrings("shared-workflows", found[0].name.repository.name);
+    try std.testing.expectEqualStrings("v0.6.0", found[0].current_ref);
 }
 
 test "parse version comment on sha pinned action" {
@@ -81,8 +91,8 @@ test "parse version comment on sha pinned action" {
     defer deinitFoundActions(std.testing.allocator, found);
 
     try std.testing.expectEqual(@as(usize, 1), found.len);
-    try std.testing.expectEqualStrings("0123456789abcdef", found[0].ref);
-    try std.testing.expectEqualStrings("v4.1.0", found[0].version_comment);
+    try std.testing.expectEqualStrings("0123456789abcdef", found[0].current_ref);
+    try std.testing.expectEqualStrings("v4.1.0", found[0].version_hint);
 }
 
 test "parse version comments with major-only version" {
@@ -97,11 +107,11 @@ test "parse version comments with major-only version" {
     defer deinitFoundActions(std.testing.allocator, found);
 
     try std.testing.expectEqual(@as(usize, 1), found.len);
-    const major_action = try found[0].action.allocDisplay(std.testing.allocator);
+    const major_action = try found[0].name.allocDisplay(std.testing.allocator);
     defer std.testing.allocator.free(major_action);
     try std.testing.expectEqualStrings("actions/checkout", major_action);
-    try std.testing.expectEqualStrings("0123456789abcdef", found[0].ref);
-    try std.testing.expectEqualStrings("v4", found[0].version_comment);
+    try std.testing.expectEqualStrings("0123456789abcdef", found[0].current_ref);
+    try std.testing.expectEqualStrings("v4", found[0].version_hint);
 }
 
 test "parse composite action uses" {
@@ -117,12 +127,13 @@ test "parse composite action uses" {
     defer deinitFoundActions(std.testing.allocator, found);
 
     try std.testing.expectEqual(@as(usize, 1), found.len);
-    try std.testing.expectEqualStrings("composite", found[0].job);
-    const composite_action = try found[0].action.allocDisplay(std.testing.allocator);
+    try std.testing.expectEqual(types.ReferenceKind.composite_step, found[0].kind);
+    try std.testing.expectEqualStrings("composite", found[0].scope);
+    const composite_action = try found[0].name.allocDisplay(std.testing.allocator);
     defer std.testing.allocator.free(composite_action);
     try std.testing.expectEqualStrings("actions/setup-node", composite_action);
-    try std.testing.expectEqualStrings("v4", found[0].ref);
-    try std.testing.expectEqualStrings("v4.2.0", found[0].version_comment);
+    try std.testing.expectEqualStrings("v4", found[0].current_ref);
+    try std.testing.expectEqualStrings("v4.2.0", found[0].version_hint);
 }
 
 test "parse quoted uses span" {
@@ -137,8 +148,8 @@ test "parse quoted uses span" {
     defer deinitFoundActions(std.testing.allocator, found);
 
     try std.testing.expectEqual(@as(usize, 1), found.len);
-    try std.testing.expectEqualStrings("v4", found[0].ref);
-    try std.testing.expectEqualStrings("v4", yamlStr[found[0].ref_start..found[0].ref_end]);
+    try std.testing.expectEqualStrings("v4", found[0].current_ref);
+    try std.testing.expectEqualStrings("v4", yamlStr[found[0].source.ref_span.start..found[0].source.ref_span.end]);
 }
 
 test "ignore uses outside job steps and reusable workflows" {
@@ -159,7 +170,7 @@ test "ignore uses outside job steps and reusable workflows" {
     defer deinitFoundActions(std.testing.allocator, found);
 
     try std.testing.expectEqual(@as(usize, 1), found.len);
-    const action_name = try found[0].action.allocDisplay(std.testing.allocator);
+    const action_name = try found[0].name.allocDisplay(std.testing.allocator);
     defer std.testing.allocator.free(action_name);
     try std.testing.expectEqualStrings("actions/checkout", action_name);
 }

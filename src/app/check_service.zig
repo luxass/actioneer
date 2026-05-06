@@ -15,7 +15,7 @@ pub fn run(
     candidates: []const types.Candidate,
 } {
     const found = try scanner.scan(allocator, io, options);
-    defer scanner.deinitFoundActions(allocator, found);
+    defer scanner.deinitReferences(allocator, found);
 
     var github_client = github.Client.init(allocator, io);
     defer github_client.deinit();

@@ -5,6 +5,7 @@ zig-pkg/
 
 # Local build/distribution outputs
 dist/
+artifacts/
 
 # Environment and local editor state
 .env

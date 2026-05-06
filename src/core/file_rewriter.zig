@@ -1,31 +1,24 @@
 const std = @import("std");
 
 const parse = @import("parse.zig");
+const text_edit = @import("text_edit.zig");
 const types = @import("types.zig");
 
-pub const ApplyError = error{
+pub const RewriteError = error{
     UpdateTargetNotFound,
-} || std.mem.Allocator.Error || std.Io.Dir.ReadFileAllocError || std.Io.Dir.WriteFileError || std.Io.Writer.Error;
+} || text_edit.ApplyError || std.mem.Allocator.Error || std.Io.Dir.ReadFileAllocError || std.Io.Dir.WriteFileError || std.Io.Writer.Error;
 
-pub const ApplyResult = struct {
+pub const RewriteResult = struct {
     contents: []const u8,
     applied: usize,
 };
 
-const LineSlice = struct {
-    raw: []const u8,
-    text: []const u8,
-    newline: []const u8,
-    carriage_return: []const u8,
-    next_start: usize,
-};
-
-pub fn applySelected(
+pub fn rewriteSelectedFiles(
     allocator: std.mem.Allocator,
     io: std.Io,
     candidates: []const types.Candidate,
     selected: []const usize,
-) ApplyError!usize {
+) RewriteError!usize {
     var applied: usize = 0;
     var handled_files: std.StringHashMap(void) = .init(allocator);
     defer handled_files.deinit();
@@ -37,7 +30,7 @@ pub fn applySelected(
         const contents = try std.Io.Dir.cwd().readFileAlloc(io, file, allocator, .limited(10 * 1024 * 1024));
         defer allocator.free(contents);
 
-        const result = try applyToString(allocator, contents, file, candidates, selected);
+        const result = try rewriteString(allocator, contents, file, candidates, selected);
         defer allocator.free(result.contents);
 
         if (result.applied > 0) {
@@ -54,42 +47,38 @@ pub fn applySelected(
     return applied;
 }
 
-pub fn applyToString(
+pub fn rewriteString(
     allocator: std.mem.Allocator,
     contents: []const u8,
     file: []const u8,
     candidates: []const types.Candidate,
     selected: []const usize,
-) ApplyError!ApplyResult {
+) RewriteError!RewriteResult {
     const file_candidates = try selectedCandidatesForFile(allocator, candidates, selected, file);
     defer allocator.free(file_candidates);
 
-    var out = std.Io.Writer.Allocating.init(allocator);
-    errdefer out.deinit();
-
-    var cursor: usize = 0;
+    var edits = std.ArrayList(text_edit.TextEdit).empty;
+    defer edits.deinit(allocator);
+    var owned_replacements = std.ArrayList([]const u8).empty;
+    defer {
+        for (owned_replacements.items) |replacement| allocator.free(replacement);
+        owned_replacements.deinit(allocator);
+    }
 
     for (file_candidates) |candidate| {
-        if (candidate.ref_start > candidate.ref_end or candidate.ref_end > contents.len or candidate.ref_start < cursor) {
+        if (candidate.ref_start > candidate.ref_end or candidate.ref_end > contents.len) {
             return error.UpdateTargetNotFound;
         }
         if (!std.mem.eql(u8, contents[candidate.ref_start..candidate.ref_end], candidate.current)) {
             return error.UpdateTargetNotFound;
         }
-
-        const line_start = lineStart(contents, candidate.ref_start);
-        const line = nextLine(contents, line_start);
-        if (line_start < cursor) return error.UpdateTargetNotFound;
-
-        try out.writer.writeAll(contents[cursor..line_start]);
-        try rewriteFileLine(&out.writer, line, line_start, candidate);
-        cursor = line.next_start;
+        try appendEditsForCandidate(allocator, contents, candidate, &edits, &owned_replacements);
     }
 
-    try out.writer.writeAll(contents[cursor..]);
+    const rewritten = try text_edit.applyEdits(allocator, contents, edits.items);
 
     return .{
-        .contents = try out.toOwnedSlice(),
+        .contents = rewritten,
         .applied = file_candidates.len,
     };
 }
@@ -117,51 +106,33 @@ fn lessThanCandidate(_: void, lhs: types.Candidate, rhs: types.Candidate) bool {
     return lhs.ref_start < rhs.ref_start;
 }
 
-fn lineStart(contents: []const u8, offset: usize) usize {
-    return if (std.mem.lastIndexOfScalar(u8, contents[0..offset], '\n')) |index| index + 1 else 0;
-}
+fn appendEditsForCandidate(
+    allocator: std.mem.Allocator,
+    contents: []const u8,
+    candidate: types.Candidate,
+    edits: *std.ArrayList(text_edit.TextEdit),
+    owned_replacements: *std.ArrayList([]const u8),
+) RewriteError!void {
+    try edits.append(allocator, .{
+        .start = candidate.ref_start,
+        .end = candidate.ref_end,
+        .replacement = candidate.next,
+    });
 
-fn nextLine(contents: []const u8, start: usize) LineSlice {
-    const newline_index = std.mem.indexOfScalarPos(u8, contents, start, '\n');
-    const raw_end = newline_index orelse contents.len;
-    const raw = contents[start .. raw_end + if (newline_index != null) @as(usize, 1) else 0];
-    const newline = if (newline_index != null) contents[raw_end .. raw_end + 1] else "";
-    const text_end = if (raw_end > start and contents[raw_end - 1] == '\r') raw_end - 1 else raw_end;
+    if (!shouldWriteVersionComment(candidate)) return;
 
-    return .{
-        .raw = raw,
-        .text = contents[start..text_end],
-        .newline = newline,
-        .carriage_return = if (text_end != raw_end) "\r" else "",
-        .next_start = raw_end + if (newline_index != null) @as(usize, 1) else 0,
-    };
-}
+    const comment_start = findCommentStart(contents, candidate.ref_end);
+    const line_end = std.mem.indexOfScalarPos(u8, contents, candidate.ref_end, '\n') orelse contents.len;
+    const comment_range_start = comment_start orelse line_end;
+    const replacement = try std.fmt.allocPrint(allocator, " # {s}", .{displayTarget(candidate)});
+    errdefer allocator.free(replacement);
+    try owned_replacements.append(allocator, replacement);
 
-fn rewriteFileLine(writer: *std.Io.Writer, line: LineSlice, line_start: usize, candidate: types.Candidate) ApplyError!void {
-    try rewriteLineText(writer, line.text, line_start, candidate);
-    try writer.writeAll(line.carriage_return);
-    try writer.writeAll(line.newline);
-}
-
-fn rewriteLineText(writer: *std.Io.Writer, line: []const u8, line_start: usize, candidate: types.Candidate) ApplyError!void {
-    const rel_ref_start = candidate.ref_start - line_start;
-    const rel_ref_end = candidate.ref_end - line_start;
-    if (rel_ref_end > line.len) return error.UpdateTargetNotFound;
-
-    const comment_start = findCommentStart(line);
-    const comment_index = comment_start orelse line.len;
-
-    try writer.writeAll(line[0..rel_ref_start]);
-    try writer.writeAll(candidate.next);
-
-    if (shouldWriteVersionComment(candidate)) {
-        try writer.writeAll(line[rel_ref_end..comment_index]);
-        try writer.writeAll(" # ");
-        try writer.writeAll(displayTarget(candidate));
-        return;
-    }
-
-    try writer.writeAll(line[rel_ref_end..]);
+    try edits.append(allocator, .{
+        .start = comment_range_start,
+        .end = line_end,
+        .replacement = replacement,
+    });
 }
 
 fn shouldWriteVersionComment(candidate: types.Candidate) bool {
@@ -174,9 +145,11 @@ fn displayTarget(candidate: types.Candidate) []const u8 {
     return if (candidate.next_label.len > 0) candidate.next_label else candidate.next;
 }
 
-fn findCommentStart(line: []const u8) ?usize {
+fn findCommentStart(contents: []const u8, offset: usize) ?usize {
+    const line_end = std.mem.indexOfScalarPos(u8, contents, offset, '\n') orelse contents.len;
+    const line_start = if (std.mem.lastIndexOfScalar(u8, contents[0..offset], '\n')) |index| index + 1 else 0;
     var quote: ?u8 = null;
-    for (line, 0..) |char, index| {
+    for (contents[line_start..line_end], line_start..) |char, index| {
         if (quote) |active| {
             if (char == active) quote = null;
             continue;
@@ -217,7 +190,7 @@ test "apply sha update and version comment" {
         },
     };
 
-    const result = try applyToString(std.testing.allocator, input, ".github/workflows/ci.yml", &candidates, &.{0});
+    const result = try rewriteString(std.testing.allocator, input, ".github/workflows/ci.yml", &candidates, &.{0});
     defer std.testing.allocator.free(result.contents);
 
     try std.testing.expectEqual(@as(usize, 1), result.applied);
@@ -254,7 +227,7 @@ test "apply quoted version update without adding comment" {
         },
     };
 
-    const result = try applyToString(std.testing.allocator, input, "ci.yml", &candidates, &.{0});
+    const result = try rewriteString(std.testing.allocator, input, "ci.yml", &candidates, &.{0});
     defer std.testing.allocator.free(result.contents);
 
     try std.testing.expectEqualStrings(
@@ -288,7 +261,7 @@ test "apply reusable workflow update" {
         },
     };
 
-    const result = try applyToString(std.testing.allocator, input, "ci-security.yml", &candidates, &.{0});
+    const result = try rewriteString(std.testing.allocator, input, "ci-security.yml", &candidates, &.{0});
     defer std.testing.allocator.free(result.contents);
 
     try std.testing.expectEqualStrings(

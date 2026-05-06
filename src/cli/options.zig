@@ -1,7 +1,6 @@
 const std = @import("std");
 const zli = @import("zli");
 
-const runtime = @import("../core/runtime.zig");
 const types = @import("../core/types.zig");
 const text = @import("ui.zig");
 
@@ -19,6 +18,7 @@ pub const Parsed = struct {
     mode: types.UpdateMode,
     style: types.PinStyle,
     recursive: bool,
+    verbose: bool,
     yes: bool,
 
     pub fn deinit(self: Parsed, allocator: std.mem.Allocator) void {
@@ -130,11 +130,6 @@ pub fn addFlags(command: *zli.Command) !void {
 }
 
 pub fn parse(ctx: zli.CommandContext) !Parsed {
-    const app_context = ctx.getContextData(AppContext);
-    runtime.init(.{
-        .verbose = ctx.flag("verbose", bool),
-    });
-
     var dirs: std.ArrayList([]const u8) = .empty;
     errdefer dirs.deinit(ctx.allocator);
 
@@ -150,9 +145,11 @@ pub fn parse(ctx: zli.CommandContext) !Parsed {
         .mode = try parseMode(ctx, ctx.flag("mode", []const u8)),
         .style = try parseStyle(ctx, ctx.flag("style", []const u8)),
         .recursive = ctx.flag("recursive", bool),
+        .verbose = ctx.flag("verbose", bool),
         .yes = ctx.flag("yes", bool),
     };
 
+    const app_context = ctx.getContextData(AppContext);
     try collectRepeatableExcludes(ctx, app_context.args, &excludes);
     try dirs.appendSlice(ctx.allocator, ctx.positional_args);
 

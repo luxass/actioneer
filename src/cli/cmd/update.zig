@@ -1,7 +1,7 @@
 const std = @import("std");
 const zli = @import("zli");
 
-const apply = @import("../../core/apply.zig");
+const update_service = @import("../../app/update_service.zig");
 const check = @import("../check.zig");
 const log = @import("../../core/log.zig");
 const runtime = @import("../../core/runtime.zig");
@@ -99,7 +99,7 @@ fn run(ctx: zli.CommandContext) !void {
 
     try text.writeSelectedUpdates(ctx.writer, result.candidates, selected);
 
-    const applied = apply.applySelected(allocator, ctx.io, result.candidates, selected) catch |err| {
+    const applied = update_service.applySelected(allocator, ctx.io, result.candidates, selected) catch |err| {
         log.debug("apply failed error={s} selected={d}", .{ @errorName(err), selected.len });
         try text.writeApplyError(ctx.writer, err);
         return;

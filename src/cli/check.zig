@@ -1,9 +1,11 @@
 const std = @import("std");
 const zli = @import("zli");
 
+const config = @import("../app/config.zig");
+const check_service = @import("../app/check_service.zig");
 const github = @import("../core/github.zig");
 const log = @import("../core/log.zig");
-const scanner = @import("../core/scanner.zig");
+const runtime = @import("../core/runtime.zig");
 const types = @import("../core/types.zig");
 const options = @import("options.zig");
 const text = @import("ui.zig");
@@ -42,27 +44,14 @@ pub fn run(
     allocator: std.mem.Allocator,
     parsed: options.Parsed,
 ) !?types.CheckResult {
+    runtime.init(config.AppConfig.fromInputs(ctx.getContextData(options.AppContext).environ_map, parsed.verbose));
+
     if (!parsed.json) {
         try text.writeScanStart(ctx.writer, parsed.dirs);
     }
 
     var diagnostics: github.Diagnostics = .{};
-    const found = scanner.scan(allocator, ctx.io, parsed.scanOptions()) catch |err| {
-        log.debug("check failed error={s} repository={s} status={?} cause={s}", .{
-            @errorName(err),
-            diagnostics.repository,
-            diagnostics.status,
-            diagnostics.cause,
-        });
-        try text.writeCheckError(ctx.writer, err, diagnostics);
-        return null;
-    };
-    defer scanner.deinitFoundActions(allocator, found);
-
-    var github_client = github.Client.init(allocator, ctx.io);
-    defer github_client.deinit();
-
-    const result = github_client.resolve(found, parsed.resolveOptions(), &diagnostics) catch |err| {
+    const result = check_service.run(allocator, ctx.io, parsed.scanOptions(), parsed.resolveOptions(), &diagnostics) catch |err| {
         log.debug("check failed error={s} repository={s} status={?} cause={s}", .{
             @errorName(err),
             diagnostics.repository,
@@ -74,12 +63,12 @@ pub fn run(
     };
 
     log.debug("check complete found_actions={d} candidates={d} sha_mismatches={d}", .{
-        found.len,
-        result.len,
-        text.shaMismatchCount(result),
+        result.reference_count,
+        result.candidates.len,
+        text.shaMismatchCount(result.candidates),
     });
 
-    if (found.len == 0) {
+    if (result.reference_count == 0) {
         if (parsed.json) {
             const empty: []const types.Candidate = &.{};
             try text.writeJson(ctx.writer, empty);
@@ -91,11 +80,11 @@ pub fn run(
     }
 
     if (!parsed.json) {
-        try text.writeFoundReferences(ctx.writer, found.len);
+        try text.writeFoundReferences(ctx.writer, result.reference_count);
     }
 
     return .{
-        .reference_count = found.len,
-        .candidates = result,
+        .reference_count = result.reference_count,
+        .candidates = result.candidates,
     };
 }

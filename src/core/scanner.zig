@@ -113,7 +113,7 @@ fn appendParsedWorkflow(
     contents: []const u8,
     found: *std.ArrayList(types.FoundAction),
 ) !void {
-    const parsed = try parse.parseWorkflowString(allocator, display_path, contents);
+    const parsed = try parse.collectReferencesFromSource(allocator, display_path, contents);
     defer allocator.free(parsed);
 
     try found.appendSlice(allocator, parsed);

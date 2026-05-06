@@ -1,4 +1,5 @@
 const std = @import("std");
+const build_options = @import("build_options");
 const zli = @import("zli");
 
 const update_service = @import("../../app/update_service.zig");
@@ -16,7 +17,7 @@ pub fn register(init_options: zli.InitOptions) !*zli.Command {
     const root = try zli.Command.init(init_options, .{
         .name = "actioneer",
         .description = "Actioneer CLI",
-        .version = .{ .major = 0, .minor = 0, .patch = 0 },
+        .version = build_options.app_version,
     }, run);
 
     try options.addFlags(root);

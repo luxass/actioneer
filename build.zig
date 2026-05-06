@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const exe_name = "actioneer";
+const default_app_version = "0.0.0";
 
 const DistTarget = struct {
     triple: []const u8,
@@ -23,14 +24,16 @@ const BuildModules = struct {
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const app_version_string = b.option([]const u8, "app_version", "Application version embedded in the CLI") orelse default_app_version;
+    const app_version = std.SemanticVersion.parse(app_version_string) catch @panic("invalid app_version");
 
     const modules = loadModules(b, target, optimize);
-    const exe = addActioneerExecutable(b, target, optimize, modules);
+    const exe = addActioneerExecutable(b, target, optimize, modules, app_version);
 
     b.installArtifact(exe);
     addRunStep(b, exe);
     addTestStep(b, exe);
-    addDistStep(b, optimize);
+    addDistStep(b, optimize, app_version);
 }
 
 fn loadModules(
@@ -57,14 +60,20 @@ fn addActioneerExecutable(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     modules: BuildModules,
+    app_version: std.SemanticVersion,
 ) *std.Build.Step.Compile {
+    const build_options = b.addOptions();
+    build_options.addOption(std.SemanticVersion, "app_version", app_version);
+
     const exe = b.addExecutable(.{
         .name = exe_name,
+        .version = app_version,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
+                .{ .name = "build_options", .module = build_options.createModule() },
                 .{ .name = "zli", .module = modules.zli },
                 .{ .name = "tree-sitter", .module = modules.tree_sitter },
             },
@@ -111,7 +120,7 @@ fn addTestStep(b: *std.Build, exe: *std.Build.Step.Compile) void {
     test_step.dependOn(&run_exe_tests.step);
 }
 
-fn addDistStep(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
+fn addDistStep(b: *std.Build, optimize: std.builtin.OptimizeMode, app_version: std.SemanticVersion) void {
     const dist_step = b.step("dist", "Build release binaries for supported platforms");
 
     for (dist_targets) |dist_target| {
@@ -120,7 +129,7 @@ fn addDistStep(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         }) catch @panic("invalid dist target"));
 
         const modules = loadModules(b, target, optimize);
-        const exe = addActioneerExecutable(b, target, optimize, modules);
+        const exe = addActioneerExecutable(b, target, optimize, modules, app_version);
 
         const install = b.addInstallArtifact(exe, .{
             .dest_dir = .{ .override = .{ .custom = b.fmt("dist/{s}", .{

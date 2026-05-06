@@ -42,10 +42,10 @@ jobs:
           version: 0.16.0
 
       - name: Run tests
-        run: zig build --fetch test
+        run: zig build --fetch test -Dapp_version=${{ steps.release.outputs.version }}
 
       - name: Build distribution binaries
-        run: zig build dist -Doptimize=ReleaseSafe
+        run: zig build dist -Doptimize=ReleaseSafe -Dapp_version=${{ steps.release.outputs.version }}
 
       - name: Package assets
         shell: bash
@@ -58,11 +58,22 @@ jobs:
           for target_dir in zig-out/dist/*; do
             target="$(basename "$target_dir")"
             asset_base="actioneer-${version}-${target}"
+            bundle_dir="bundle/${asset_base}"
+
+            rm -rf "$bundle_dir"
+            mkdir -p "$bundle_dir"
+            cp LICENSE "$bundle_dir/"
+
+            if [[ -f "$target_dir/actioneer.exe" ]]; then
+              cp "$target_dir/actioneer.exe" "$bundle_dir/"
+            else
+              cp "$target_dir/actioneer" "$bundle_dir/"
+            fi
 
             if [[ "$target" == *windows* ]]; then
-              (cd "$target_dir" && zip -9 -r "../../../artifacts/${asset_base}.zip" .)
+              (cd "bundle" && zip -9 -r "../artifacts/${asset_base}.zip" "${asset_base}")
             else
-              tar -C "$target_dir" -czf "artifacts/${asset_base}.tar.gz" .
+              tar -C "bundle" -czf "artifacts/${asset_base}.tar.gz" "${asset_base}"
             fi
           done
 

@@ -32,7 +32,7 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
     addRunStep(b, exe);
-    addTestStep(b, exe);
+    addTestStep(b, exe, target, optimize, modules);
     addDistStep(b, optimize, app_version);
 }
 
@@ -85,18 +85,18 @@ fn addActioneerExecutable(
     return exe;
 }
 
-fn configureTreeSitterYaml(exe: *std.Build.Step.Compile, b: *std.Build) void {
-    exe.root_module.addCSourceFiles(.{
+fn configureTreeSitterYaml(compile: *std.Build.Step.Compile, b: *std.Build) void {
+    compile.root_module.addCSourceFiles(.{
         .files = &.{"vendor/tree-sitter-yaml/parser.c"},
         .flags = &.{"-std=c11"},
     });
-    exe.root_module.addCSourceFiles(.{
+    compile.root_module.addCSourceFiles(.{
         .files = &.{"vendor/tree-sitter-yaml/scanner.cc"},
         .flags = &.{"-std=c++17"},
     });
-    exe.root_module.addIncludePath(b.path("vendor/tree-sitter-yaml"));
-    exe.root_module.link_libc = true;
-    exe.root_module.link_libcpp = true;
+    compile.root_module.addIncludePath(b.path("vendor/tree-sitter-yaml"));
+    compile.root_module.link_libc = true;
+    compile.root_module.link_libcpp = true;
 }
 
 fn addRunStep(b: *std.Build, exe: *std.Build.Step.Compile) void {
@@ -111,12 +111,29 @@ fn addRunStep(b: *std.Build, exe: *std.Build.Step.Compile) void {
     run_step.dependOn(&run_cmd.step);
 }
 
-fn addTestStep(b: *std.Build, exe: *std.Build.Step.Compile) void {
-    const exe_tests = b.addTest(.{ .root_module = exe.root_module });
+fn addTestStep(
+    b: *std.Build,
+    exe: *std.Build.Step.Compile,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    modules: BuildModules,
+) void {
+    const test_module = b.createModule(.{
+        .root_source_file = b.path("src/tests.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zli", .module = modules.zli },
+            .{ .name = "tree-sitter", .module = modules.tree_sitter },
+        },
+    });
+    const exe_tests = b.addTest(.{ .root_module = test_module });
+    configureTreeSitterYaml(exe_tests, b);
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
     const test_step = b.step("test", "Run tests");
+    test_step.dependOn(&exe.step);
     test_step.dependOn(&run_exe_tests.step);
 }
 

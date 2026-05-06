@@ -362,6 +362,8 @@ test "detect sha mismatches" {
             .next_label = "v4.2.0",
             .file = ".github/workflows/ci.yml",
             .line = 4,
+            .ref_start = 0,
+            .ref_end = 0,
         },
         .{
             .action = "actions/setup-node",
@@ -370,6 +372,8 @@ test "detect sha mismatches" {
             .next = "v4",
             .file = ".github/workflows/ci.yml",
             .line = 5,
+            .ref_start = 0,
+            .ref_end = 0,
         },
     };
 
@@ -390,6 +394,8 @@ test "write json escapes strings" {
             .next_label = "v2",
             .file = ".github/workflows/ci.yml",
             .line = 7,
+            .ref_start = 0,
+            .ref_end = 0,
         },
     };
 

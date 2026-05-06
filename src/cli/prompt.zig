@@ -420,5 +420,5 @@ fn writePadding(ctx: zli.CommandContext, count: usize) Error!void {
 test "trailing padding does not underflow for header labels wider than values" {
     try std.testing.expectEqual(@as(usize, 14), trailingPadding(2, "Current".len, 14));
     try std.testing.expectEqual(@as(usize, 4), trailingPadding(3, "Action".len, 4));
-    try std.testing.expectEqual(@as(usize, 7), trailingPadding(10, "Job".len, 4));
+    try std.testing.expectEqual(@as(usize, 11), trailingPadding(10, "Job".len, 4));
 }

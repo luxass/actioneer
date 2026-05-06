@@ -123,7 +123,13 @@ fn appendEditsForCandidate(
 
     const comment_start = findCommentStart(contents, candidate.ref_end);
     const line_end = std.mem.indexOfScalarPos(u8, contents, candidate.ref_end, '\n') orelse contents.len;
-    const comment_range_start = comment_start orelse line_end;
+    const comment_range_start = if (comment_start) |start| blk: {
+        var replacement_start = start;
+        while (replacement_start > candidate.ref_end and isHorizontalSpace(contents[replacement_start - 1])) {
+            replacement_start -= 1;
+        }
+        break :blk replacement_start;
+    } else line_end;
     const replacement = try std.fmt.allocPrint(allocator, " # {s}", .{displayTarget(candidate)});
     errdefer allocator.free(replacement);
     try owned_replacements.append(allocator, replacement);
@@ -143,6 +149,10 @@ fn shouldWriteVersionComment(candidate: types.Candidate) bool {
 
 fn displayTarget(candidate: types.Candidate) []const u8 {
     return if (candidate.next_label.len > 0) candidate.next_label else candidate.next;
+}
+
+fn isHorizontalSpace(char: u8) bool {
+    return char == ' ' or char == '\t';
 }
 
 fn findCommentStart(contents: []const u8, offset: usize) ?usize {
@@ -185,8 +195,8 @@ test "apply sha update and version comment" {
             .next_label = "v4.2.0",
             .file = ".github/workflows/ci.yml",
             .line = 4,
-            .ref_start = found[0].ref_start,
-            .ref_end = found[0].ref_end,
+            .ref_start = found[0].source.ref_span.start,
+            .ref_end = found[0].source.ref_span.end,
         },
     };
 
@@ -206,8 +216,10 @@ test "apply sha update and version comment" {
 
 test "apply quoted version update without adding comment" {
     const input =
-        \\steps:
-        \\  - uses: "actions/setup-node@v3"
+        \\jobs:
+        \\  build:
+        \\    steps:
+        \\      - uses: "actions/setup-node@v3"
         \\
     ;
     const found = try parse.parseWorkflowString(std.testing.allocator, "ci.yml", input);
@@ -222,8 +234,8 @@ test "apply quoted version update without adding comment" {
             .next_label = "v4",
             .file = "ci.yml",
             .line = 2,
-            .ref_start = found[0].ref_start,
-            .ref_end = found[0].ref_end,
+            .ref_start = found[0].source.ref_span.start,
+            .ref_end = found[0].source.ref_span.end,
         },
     };
 
@@ -231,8 +243,10 @@ test "apply quoted version update without adding comment" {
     defer std.testing.allocator.free(result.contents);
 
     try std.testing.expectEqualStrings(
-        \\steps:
-        \\  - uses: "actions/setup-node@v4"
+        \\jobs:
+        \\  build:
+        \\    steps:
+        \\      - uses: "actions/setup-node@v4"
         \\
     , result.contents);
 }
@@ -256,8 +270,8 @@ test "apply reusable workflow update" {
             .next_label = "v0.7.0",
             .file = "ci-security.yml",
             .line = 3,
-            .ref_start = found[0].ref_start,
-            .ref_end = found[0].ref_end,
+            .ref_start = found[0].source.ref_span.start,
+            .ref_end = found[0].source.ref_span.end,
         },
     };
 

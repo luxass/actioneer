@@ -5,7 +5,7 @@ const types = @import("../core/types.zig");
 
 pub const ApplyError = file_rewriter.RewriteError;
 
-pub fn applySelected(
+pub fn run(
     allocator: std.mem.Allocator,
     io: std.Io,
     candidates: []const types.Candidate,

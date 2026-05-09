@@ -132,7 +132,7 @@ pub const Client = struct {
     pub fn resolve(
         self: *Self,
         found: []const types.Reference,
-        options: types.ResolveOptions,
+        options: types.CheckOptions,
         diagnostics: ?*Diagnostics,
     ) ResolveError![]types.Candidate {
         if (diagnostics) |diag| diag.reset();

@@ -1,14 +1,7 @@
 const std = @import("std");
 
 const runtime = @import("runtime.zig");
-
-const styles = struct {
-    const RESET = "\x1b[0m";
-    const BLUE = "\x1b[34m";
-    const GREEN = "\x1b[32m";
-    const YELLOW = "\x1b[33m";
-    const RED = "\x1b[31m";
-};
+const styles = @import("../app/ui/styles.zig");
 
 pub fn debug(comptime fmt: []const u8, args: anytype) void {
     if (!runtime.isVerbose()) return;

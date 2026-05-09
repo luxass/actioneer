@@ -11,7 +11,7 @@ pub const ScanError = error{
 pub fn scan(
     allocator: std.mem.Allocator,
     io: std.Io,
-    options: types.ScanOptions,
+    options: types.CheckOptions,
 ) ScanError![]types.Reference {
     var found: std.ArrayList(types.Reference) = .empty;
     errdefer {

@@ -1,16 +1,11 @@
 const std = @import("std");
-const config = @import("../app/config.zig");
 
-var current: config.AppConfig = .{};
+var verbose: bool = false;
 
-pub fn init(app_config: config.AppConfig) void {
-    current = app_config;
-}
-
-pub fn isCi() bool {
-    return current.ci;
+pub fn init(enabled: bool) void {
+    verbose = enabled;
 }
 
 pub fn isVerbose() bool {
-    return current.verbose;
+    return verbose;
 }

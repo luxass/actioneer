@@ -11,12 +11,9 @@ pub const PinStyle = enum {
     preserve,
 };
 
-pub const ScanOptions = struct {
+pub const CheckOptions = struct {
     dirs: []const []const u8,
     recursive: bool,
-};
-
-pub const ResolveOptions = struct {
     excludes: []const []const u8,
     include_branches: bool,
     mode: UpdateMode,

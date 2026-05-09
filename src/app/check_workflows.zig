@@ -7,20 +7,16 @@ const types = @import("../core/types.zig");
 pub fn run(
     allocator: std.mem.Allocator,
     io: std.Io,
-    options: types.ScanOptions,
-    resolve_options: types.ResolveOptions,
+    options: types.CheckOptions,
     diagnostics: ?*github.Diagnostics,
-) !struct {
-    reference_count: usize,
-    candidates: []const types.Candidate,
-} {
+) !types.CheckResult {
     const found = try scanner.scan(allocator, io, options);
     defer scanner.deinitReferences(allocator, found);
 
     var github_client = github.Client.init(allocator, io);
     defer github_client.deinit();
 
-    const candidates = try github_client.resolve(found, resolve_options, diagnostics);
+    const candidates = try github_client.resolve(found, options, diagnostics);
     return .{
         .reference_count = found.len,
         .candidates = candidates,

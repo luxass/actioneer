@@ -2,11 +2,15 @@ const std = @import("std");
 const builtin = @import("builtin");
 const zli = @import("zli");
 
-const types = @import("../core/types.zig");
-const ui = @import("ui.zig");
+const types = @import("../../core/types.zig");
+const output = @import("output.zig");
+const styles = @import("styles.zig");
 
-const styles = ui.styles;
-const text = ui;
+const prompt_text = struct {
+    const title = "Choose action updates";
+    const controls_summary = "Move selection with arrows or j/k";
+    const footer = "Up/Down or j/k move  <space> row  <f> file  <enter> apply  <a> all  <i> invert  <n> none  <q> cancel";
+};
 
 const posix = std.posix;
 
@@ -132,7 +136,7 @@ pub fn selectUpdates(
 }
 
 fn renderHeader(ctx: zli.CommandContext, candidates: []const types.Candidate) Error!void {
-    try ctx.writer.print("{s}{s}{s}\n\n", .{ styles.BOLD, text.prompt.title, styles.RESET });
+    try ctx.writer.print("{s}{s}{s}\n\n", .{ styles.BOLD, prompt_text.title, styles.RESET });
     try ctx.writer.print("{s}•{s} {s}{d}{s} update candidates across {s}{d}{s} workflow files\n", .{
         styles.GREEN,
         styles.RESET,
@@ -146,7 +150,7 @@ fn renderHeader(ctx: zli.CommandContext, candidates: []const types.Candidate) Er
     try ctx.writer.print("{s}?{s} {s}{s}\n", .{
         styles.CYAN,
         styles.RESET,
-        text.prompt.controls_summary,
+        prompt_text.controls_summary,
         styles.RESET,
     });
     try ctx.writer.flush();
@@ -189,7 +193,7 @@ fn renderDynamic(
         lines += 1;
     }
 
-    try ctx.writer.print("\n{s}{s}{s}\n", .{ styles.CYAN, text.prompt.footer, styles.RESET });
+    try ctx.writer.print("\n{s}{s}{s}\n", .{ styles.CYAN, prompt_text.footer, styles.RESET });
     lines += 2;
     try ctx.writer.flush();
 
@@ -221,7 +225,7 @@ fn renderRow(
     const checkbox_color = if (is_selected) styles.GREEN else styles.BRIGHT_BLACK;
     const checkbox = if (is_selected) "●" else "○";
     const target_color = if (candidate.sha_mismatch) styles.YELLOW else if (candidate.next_is_major) styles.RED else styles.GREEN;
-    const target = displayTarget(candidate);
+    const target = output.displayTarget(candidate);
 
     try ctx.writer.print("{s}{s}{s}  {s}{s}{s} {s}{s}{s}{s}", .{
         row_style,
@@ -272,10 +276,6 @@ fn adjustScroll(scroll: *usize, cursor: usize, count: usize) void {
     if (cursor >= scroll.* + visible_rows) {
         scroll.* = cursor + 1 - visible_rows;
     }
-}
-
-fn displayTarget(candidate: types.Candidate) []const u8 {
-    return text.displayTarget(candidate);
 }
 
 fn clearPrompt(ctx: zli.CommandContext, rendered_lines: usize) Error!void {

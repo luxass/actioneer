@@ -1,8 +1,7 @@
 const std = @import("std");
 const Io = std.Io;
 
-const cli = @import("cli/root.zig");
-const options = @import("cli/options.zig");
+const cli = @import("cli.zig");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -24,7 +23,7 @@ pub fn main(init: std.process.Init) !void {
     });
     defer root.deinit();
 
-    var app_context = options.AppContext{
+    var process_state = cli.ProcessState{
         .args = try init.minimal.args.toSlice(init.arena.allocator()),
         .environ_map = init.environ_map,
     };
@@ -32,7 +31,7 @@ pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);
     defer args.deinit();
 
-    root.execute(&args, .{ .data = &app_context }) catch |err| switch (err) {
+    root.execute(&args, .{ .data = &process_state }) catch |err| switch (err) {
         error.CommandFailed => std.process.exit(1),
         else => return err,
     };

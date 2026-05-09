@@ -2,11 +2,21 @@ const std = @import("std");
 
 const github = @import("github.zig");
 const parse = @import("parse.zig");
-const text_edit = @import("text_edit.zig");
 
 pub const RewriteError = error{
     UpdateTargetNotFound,
-} || text_edit.ApplyError || std.mem.Allocator.Error || std.Io.Dir.ReadFileAllocError || std.Io.Dir.WriteFileError || std.Io.Writer.Error;
+} || ApplyError || std.mem.Allocator.Error || std.Io.Dir.ReadFileAllocError || std.Io.Dir.WriteFileError || std.Io.Writer.Error;
+
+pub const TextEdit = struct {
+    start: usize,
+    end: usize,
+    replacement: []const u8,
+};
+
+pub const ApplyError = error{
+    InvalidEditRange,
+    OverlappingEdits,
+} || std.mem.Allocator.Error;
 
 pub const RewriteResult = struct {
     contents: []const u8,
@@ -57,7 +67,7 @@ pub fn rewriteString(
     const file_candidates = try selectedCandidatesForFile(allocator, candidates, selected, file);
     defer allocator.free(file_candidates);
 
-    var edits = std.ArrayList(text_edit.TextEdit).empty;
+    var edits = std.ArrayList(TextEdit).empty;
     defer edits.deinit(allocator);
     var owned_replacements = std.ArrayList([]const u8).empty;
     defer {
@@ -75,7 +85,7 @@ pub fn rewriteString(
         try appendEditsForCandidate(allocator, contents, candidate, &edits, &owned_replacements);
     }
 
-    const rewritten = try text_edit.applyEdits(allocator, contents, edits.items);
+    const rewritten = try applyEdits(allocator, contents, edits.items);
 
     return .{
         .contents = rewritten,
@@ -110,7 +120,7 @@ fn appendEditsForCandidate(
     allocator: std.mem.Allocator,
     contents: []const u8,
     update_candidate: github.Candidate,
-    edits: *std.ArrayList(text_edit.TextEdit),
+    edits: *std.ArrayList(TextEdit),
     owned_replacements: *std.ArrayList([]const u8),
 ) RewriteError!void {
     try edits.append(allocator, .{
@@ -161,6 +171,35 @@ fn findCommentStart(contents: []const u8, offset: usize) ?usize {
         if (char == '#') return index;
     }
     return null;
+}
+
+fn applyEdits(allocator: std.mem.Allocator, contents: []const u8, edits: []const TextEdit) ApplyError![]const u8 {
+    if (edits.len == 0) return allocator.dupe(u8, contents);
+
+    const sorted = try allocator.dupe(TextEdit, edits);
+    defer allocator.free(sorted);
+
+    std.sort.insertion(TextEdit, sorted, {}, lessThanEdit);
+
+    var out = std.ArrayList(u8).empty;
+    defer out.deinit(allocator);
+
+    var cursor: usize = 0;
+    for (sorted) |edit| {
+        if (edit.start > edit.end or edit.end > contents.len) return error.InvalidEditRange;
+        if (edit.start < cursor) return error.OverlappingEdits;
+
+        try out.appendSlice(allocator, contents[cursor..edit.start]);
+        try out.appendSlice(allocator, edit.replacement);
+        cursor = edit.end;
+    }
+
+    try out.appendSlice(allocator, contents[cursor..]);
+    return out.toOwnedSlice(allocator);
+}
+
+fn lessThanEdit(_: void, lhs: TextEdit, rhs: TextEdit) bool {
+    return lhs.start < rhs.start;
 }
 
 test "apply sha update and version comment" {

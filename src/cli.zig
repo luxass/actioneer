@@ -9,7 +9,6 @@ const check_workflows = @import("app/check_workflows.zig");
 const output = @import("app/ui/output.zig");
 const github = @import("core/github.zig");
 const log = @import("core/log.zig");
-const runtime = @import("core/runtime.zig");
 
 pub const app_version = build_options.app_version;
 
@@ -136,7 +135,7 @@ pub fn parseCommandInput(ctx: zli.CommandContext, command: CommandKind) !Command
 }
 
 pub fn initRuntime(input: CommandInput) void {
-    runtime.init(input.verbose);
+    log.init(input.verbose);
 }
 
 pub fn runCheck(

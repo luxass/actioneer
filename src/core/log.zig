@@ -1,10 +1,15 @@
 const std = @import("std");
 
-const runtime = @import("runtime.zig");
 const styles = @import("../app/ui/styles.zig");
 
+var verbose_enabled: bool = false;
+
+pub fn init(enabled: bool) void {
+    verbose_enabled = enabled;
+}
+
 pub fn debug(comptime fmt: []const u8, args: anytype) void {
-    if (!runtime.isVerbose()) return;
+    if (!verbose_enabled) return;
     write(styles.BLUE, "debug", fmt, args);
 }
 

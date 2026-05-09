@@ -1,12 +1,11 @@
 const std = @import("std");
 const actions = @import("../syntax/github_actions.zig");
-const types = @import("types.zig");
 
 pub fn collectReferencesFromSource(
     allocator: std.mem.Allocator,
     file_path: []const u8,
     contents: []const u8,
-) ![]types.Reference {
+) ![]actions.Reference {
     return actions.collectReferences(allocator, file_path, contents);
 }
 
@@ -14,23 +13,23 @@ pub fn parseWorkflowString(
     allocator: std.mem.Allocator,
     file_path: []const u8,
     contents: []const u8,
-) ![]types.Reference {
+) ![]actions.Reference {
     return collectReferencesFromSource(allocator, file_path, contents);
 }
 
-pub fn deinitReference(allocator: std.mem.Allocator, action: types.Reference) void {
+pub fn deinitReference(allocator: std.mem.Allocator, action: actions.Reference) void {
     actions.deinitReference(allocator, action);
 }
 
-pub fn deinitReferences(allocator: std.mem.Allocator, found: []const types.Reference) void {
+pub fn deinitReferences(allocator: std.mem.Allocator, found: []const actions.Reference) void {
     actions.deinitReferences(allocator, found);
 }
 
-pub fn deinitFoundAction(allocator: std.mem.Allocator, action: types.Reference) void {
+pub fn deinitFoundAction(allocator: std.mem.Allocator, action: actions.Reference) void {
     deinitReference(allocator, action);
 }
 
-pub fn deinitFoundActions(allocator: std.mem.Allocator, found: []const types.Reference) void {
+pub fn deinitFoundActions(allocator: std.mem.Allocator, found: []const actions.Reference) void {
     deinitReferences(allocator, found);
 }
 
@@ -49,7 +48,7 @@ test "parse workflow uses" {
     defer deinitFoundActions(std.testing.allocator, found);
 
     try std.testing.expectEqual(@as(usize, 2), found.len);
-    try std.testing.expectEqual(types.ReferenceKind.workflow_step, found[0].kind);
+    try std.testing.expectEqual(actions.ReferenceKind.workflow_step, found[0].kind);
     try std.testing.expectEqualStrings("build", found[0].scope);
     const action_name = try found[0].name.allocDisplay(std.testing.allocator);
     defer std.testing.allocator.free(action_name);
@@ -69,7 +68,7 @@ test "parse reusable workflow uses" {
     defer deinitFoundActions(std.testing.allocator, found);
 
     try std.testing.expectEqual(@as(usize, 1), found.len);
-    try std.testing.expectEqual(types.ReferenceKind.workflow_job, found[0].kind);
+    try std.testing.expectEqual(actions.ReferenceKind.workflow_job, found[0].kind);
     try std.testing.expectEqualStrings("zizmor", found[0].scope);
     const workflow_action = try found[0].name.allocDisplay(std.testing.allocator);
     defer std.testing.allocator.free(workflow_action);
@@ -127,7 +126,7 @@ test "parse composite action uses" {
     defer deinitFoundActions(std.testing.allocator, found);
 
     try std.testing.expectEqual(@as(usize, 1), found.len);
-    try std.testing.expectEqual(types.ReferenceKind.composite_step, found[0].kind);
+    try std.testing.expectEqual(actions.ReferenceKind.composite_step, found[0].kind);
     try std.testing.expectEqualStrings("composite", found[0].scope);
     const composite_action = try found[0].name.allocDisplay(std.testing.allocator);
     defer std.testing.allocator.free(composite_action);

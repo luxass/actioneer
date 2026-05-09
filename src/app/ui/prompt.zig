@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const zli = @import("zli");
 
-const types = @import("../../core/types.zig");
+const github = @import("../../core/github.zig");
 const output = @import("output.zig");
 const styles = @import("styles.zig");
 
@@ -75,7 +75,7 @@ const RawTerminal = struct {
 pub fn selectUpdates(
     allocator: std.mem.Allocator,
     ctx: zli.CommandContext,
-    candidates: []const types.Candidate,
+    candidates: []const github.Candidate,
 ) Error![]usize {
     if (builtin.os.tag == .windows) return error.UnsupportedPlatform;
     if (candidates.len == 0) return allocator.alloc(usize, 0);
@@ -135,7 +135,7 @@ pub fn selectUpdates(
     return indexes.toOwnedSlice(allocator);
 }
 
-fn renderHeader(ctx: zli.CommandContext, candidates: []const types.Candidate) Error!void {
+fn renderHeader(ctx: zli.CommandContext, candidates: []const github.Candidate) Error!void {
     try ctx.writer.print("{s}{s}{s}\n\n", .{ styles.BOLD, prompt_text.title, styles.RESET });
     try ctx.writer.print("{s}•{s} {s}{d}{s} update candidates across {s}{d}{s} workflow files\n", .{
         styles.GREEN,
@@ -158,7 +158,7 @@ fn renderHeader(ctx: zli.CommandContext, candidates: []const types.Candidate) Er
 
 fn renderDynamic(
     ctx: zli.CommandContext,
-    candidates: []const types.Candidate,
+    candidates: []const github.Candidate,
     selected: []const bool,
     cursor: usize,
     scroll: usize,
@@ -215,7 +215,7 @@ fn renderGroupHeader(ctx: zli.CommandContext, file: []const u8, widths: Widths) 
 
 fn renderRow(
     ctx: zli.CommandContext,
-    candidate: types.Candidate,
+    row_candidate: github.Candidate,
     is_selected: bool,
     is_cursor: bool,
     widths: Widths,
@@ -224,8 +224,8 @@ fn renderRow(
     const pointer = if (is_cursor) "›" else " ";
     const checkbox_color = if (is_selected) styles.GREEN else styles.BRIGHT_BLACK;
     const checkbox = if (is_selected) "●" else "○";
-    const target_color = if (candidate.sha_mismatch) styles.YELLOW else if (candidate.next_is_major) styles.RED else styles.GREEN;
-    const target = output.displayTarget(candidate);
+    const target_color = if (row_candidate.hasShaMismatch()) styles.YELLOW else if (row_candidate.isMajorUpdate()) styles.RED else styles.GREEN;
+    const target = row_candidate.displayTarget();
 
     try ctx.writer.print("{s}{s}{s}  {s}{s}{s} {s}{s}{s}{s}", .{
         row_style,
@@ -236,22 +236,22 @@ fn renderRow(
         styles.RESET,
         row_style,
         styles.BOLD,
-        candidate.action,
+        row_candidate.action,
         styles.RESET,
     });
-    try writePadding(ctx, trailingPadding(widths.action, candidate.action.len, 4));
+    try writePadding(ctx, trailingPadding(widths.action, row_candidate.action.len, 4));
 
-    try ctx.writer.print("{s}{s}{s}", .{ row_style, candidate.job, styles.RESET });
-    try writePadding(ctx, trailingPadding(widths.job, candidate.job.len, 4));
+    try ctx.writer.print("{s}{s}{s}", .{ row_style, row_candidate.job, styles.RESET });
+    try writePadding(ctx, trailingPadding(widths.job, row_candidate.job.len, 4));
 
-    try ctx.writer.print("{s}{s}{s}", .{ styles.BOLD, candidate.current, styles.RESET });
-    if (candidate.version_comment.len > 0) {
-        const mismatch_color = if (candidate.sha_mismatch) styles.RED else styles.BRIGHT_BLACK;
-        try ctx.writer.print(" {s}({s}){s}", .{ mismatch_color, candidate.version_comment, styles.RESET });
-    } else if (candidate.current_ref.len > 0) {
-        try ctx.writer.print(" {s}({s}){s}", .{ styles.BRIGHT_BLACK, shortSha(candidate.current_ref), styles.RESET });
+    try ctx.writer.print("{s}{s}{s}", .{ styles.BOLD, row_candidate.current, styles.RESET });
+    if (row_candidate.hasVersionComment()) {
+        const mismatch_color = if (row_candidate.hasShaMismatch()) styles.RED else styles.BRIGHT_BLACK;
+        try ctx.writer.print(" {s}({s}){s}", .{ mismatch_color, row_candidate.version_comment, styles.RESET });
+    } else if (row_candidate.hasCurrentRef()) {
+        try ctx.writer.print(" {s}({s}){s}", .{ styles.BRIGHT_BLACK, shortSha(row_candidate.current_ref), styles.RESET });
     }
-    try writePadding(ctx, trailingPadding(widths.current, candidate.current.len, 4));
+    try writePadding(ctx, trailingPadding(widths.current, row_candidate.current.len, 4));
 
     try ctx.writer.print("{s}›{s}  {s}{s}{s}\n", .{
         styles.BOLD,
@@ -347,7 +347,7 @@ fn scrollDown(scroll: *usize, cursor: *usize, count: usize) void {
 
 const WidthField = enum { action, job, current };
 
-fn maxWidth(candidates: []const types.Candidate, field: WidthField) usize {
+fn maxWidth(candidates: []const github.Candidate, field: WidthField) usize {
     var width: usize = 0;
     for (candidates) |candidate| {
         const len = switch (field) {
@@ -364,7 +364,7 @@ fn trailingPadding(column_width: usize, value_len: usize, gap: usize) usize {
     return column_width -| value_len + gap;
 }
 
-fn workflowCount(candidates: []const types.Candidate) usize {
+fn workflowCount(candidates: []const github.Candidate) usize {
     var count: usize = 0;
     var last_file: ?[]const u8 = null;
     for (candidates) |candidate| {
@@ -393,7 +393,7 @@ fn toggleAll(selected: []bool) void {
     @memset(selected, !all_selected);
 }
 
-fn toggleFile(candidates: []const types.Candidate, selected: []bool, file: []const u8) void {
+fn toggleFile(candidates: []const github.Candidate, selected: []bool, file: []const u8) void {
     var all_selected = true;
     for (candidates, 0..) |candidate, index| {
         if (!std.mem.eql(u8, candidate.file, file)) continue;

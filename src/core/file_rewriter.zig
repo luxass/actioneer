@@ -1,8 +1,8 @@
 const std = @import("std");
 
+const github = @import("github.zig");
 const parse = @import("parse.zig");
 const text_edit = @import("text_edit.zig");
-const types = @import("types.zig");
 
 pub const RewriteError = error{
     UpdateTargetNotFound,
@@ -16,7 +16,7 @@ pub const RewriteResult = struct {
 pub fn rewriteSelectedFiles(
     allocator: std.mem.Allocator,
     io: std.Io,
-    candidates: []const types.Candidate,
+    candidates: []const github.Candidate,
     selected: []const usize,
 ) RewriteError!usize {
     var applied: usize = 0;
@@ -51,7 +51,7 @@ pub fn rewriteString(
     allocator: std.mem.Allocator,
     contents: []const u8,
     file: []const u8,
-    candidates: []const types.Candidate,
+    candidates: []const github.Candidate,
     selected: []const usize,
 ) RewriteError!RewriteResult {
     const file_candidates = try selectedCandidatesForFile(allocator, candidates, selected, file);
@@ -85,11 +85,11 @@ pub fn rewriteString(
 
 fn selectedCandidatesForFile(
     allocator: std.mem.Allocator,
-    candidates: []const types.Candidate,
+    candidates: []const github.Candidate,
     selected: []const usize,
     file: []const u8,
-) ![]types.Candidate {
-    var filtered: std.ArrayList(types.Candidate) = .empty;
+) ![]github.Candidate {
+    var filtered: std.ArrayList(github.Candidate) = .empty;
     defer filtered.deinit(allocator);
 
     for (selected) |index| {
@@ -98,39 +98,39 @@ fn selectedCandidatesForFile(
         try filtered.append(allocator, candidate);
     }
 
-    std.sort.insertion(types.Candidate, filtered.items, {}, lessThanCandidate);
+    std.sort.insertion(github.Candidate, filtered.items, {}, lessThanCandidate);
     return filtered.toOwnedSlice(allocator);
 }
 
-fn lessThanCandidate(_: void, lhs: types.Candidate, rhs: types.Candidate) bool {
+fn lessThanCandidate(_: void, lhs: github.Candidate, rhs: github.Candidate) bool {
     return lhs.ref_start < rhs.ref_start;
 }
 
 fn appendEditsForCandidate(
     allocator: std.mem.Allocator,
     contents: []const u8,
-    candidate: types.Candidate,
+    update_candidate: github.Candidate,
     edits: *std.ArrayList(text_edit.TextEdit),
     owned_replacements: *std.ArrayList([]const u8),
 ) RewriteError!void {
     try edits.append(allocator, .{
-        .start = candidate.ref_start,
-        .end = candidate.ref_end,
-        .replacement = candidate.next,
+        .start = update_candidate.ref_start,
+        .end = update_candidate.ref_end,
+        .replacement = update_candidate.next,
     });
 
-    if (!shouldWriteVersionComment(candidate)) return;
+    if (!update_candidate.shouldWriteVersionComment()) return;
 
-    const comment_start = findCommentStart(contents, candidate.ref_end);
-    const line_end = std.mem.indexOfScalarPos(u8, contents, candidate.ref_end, '\n') orelse contents.len;
+    const comment_start = findCommentStart(contents, update_candidate.ref_end);
+    const line_end = std.mem.indexOfScalarPos(u8, contents, update_candidate.ref_end, '\n') orelse contents.len;
     const comment_range_start = if (comment_start) |start| blk: {
         var replacement_start = start;
-        while (replacement_start > candidate.ref_end and isHorizontalSpace(contents[replacement_start - 1])) {
+        while (replacement_start > update_candidate.ref_end and isHorizontalSpace(contents[replacement_start - 1])) {
             replacement_start -= 1;
         }
         break :blk replacement_start;
     } else line_end;
-    const replacement = try std.fmt.allocPrint(allocator, " # {s}", .{displayTarget(candidate)});
+    const replacement = try std.fmt.allocPrint(allocator, " # {s}", .{update_candidate.displayTarget()});
     errdefer allocator.free(replacement);
     try owned_replacements.append(allocator, replacement);
 
@@ -139,16 +139,6 @@ fn appendEditsForCandidate(
         .end = line_end,
         .replacement = replacement,
     });
-}
-
-fn shouldWriteVersionComment(candidate: types.Candidate) bool {
-    const target = displayTarget(candidate);
-    return target.len > 0 and
-        (!std.mem.eql(u8, candidate.next, target) or candidate.version_comment.len > 0 or candidate.sha_mismatch);
-}
-
-fn displayTarget(candidate: types.Candidate) []const u8 {
-    return if (candidate.next_label.len > 0) candidate.next_label else candidate.next;
 }
 
 fn isHorizontalSpace(char: u8) bool {
@@ -185,7 +175,7 @@ test "apply sha update and version comment" {
     const found = try parse.parseWorkflowString(std.testing.allocator, ".github/workflows/ci.yml", input);
     defer parse.deinitFoundActions(std.testing.allocator, found);
 
-    const candidates = [_]types.Candidate{
+    const candidates = [_]github.Candidate{
         .{
             .action = "actions/checkout",
             .job = "build",
@@ -225,7 +215,7 @@ test "apply quoted version update without adding comment" {
     const found = try parse.parseWorkflowString(std.testing.allocator, "ci.yml", input);
     defer parse.deinitFoundActions(std.testing.allocator, found);
 
-    const candidates = [_]types.Candidate{
+    const candidates = [_]github.Candidate{
         .{
             .action = "actions/setup-node",
             .job = "build",
@@ -261,7 +251,7 @@ test "apply reusable workflow update" {
     const found = try parse.parseWorkflowString(std.testing.allocator, "ci-security.yml", input);
     defer parse.deinitFoundActions(std.testing.allocator, found);
 
-    const candidates = [_]types.Candidate{
+    const candidates = [_]github.Candidate{
         .{
             .action = "luxass/shared-workflows/.github/workflows/reusable-ci-security.yaml",
             .job = "zizmor",

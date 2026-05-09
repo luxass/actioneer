@@ -2,9 +2,83 @@ const std = @import("std");
 
 const git = @import("git.zig");
 const log = @import("log.zig");
-const types = @import("types.zig");
+const actions = @import("../syntax/github_actions.zig");
 
 const Version = git.Version;
+
+pub const UpdateMode = enum {
+    major,
+    minor,
+    patch,
+};
+
+pub const PinStyle = enum {
+    sha,
+    preserve,
+};
+
+pub const ResolveOptions = struct {
+    excludes: []const []const u8,
+    include_branches: bool,
+    mode: UpdateMode,
+    style: PinStyle,
+};
+
+pub const Candidate = struct {
+    action: []const u8,
+    job: []const u8,
+    current: []const u8,
+    current_ref: []const u8 = "",
+    version_comment: []const u8 = "",
+    sha_mismatch: bool = false,
+    next: []const u8,
+    next_label: []const u8 = "",
+    next_is_major: bool = false,
+    file: []const u8,
+    line: u32,
+    ref_start: u32,
+    ref_end: u32,
+
+    pub fn displayTarget(self: Candidate) []const u8 {
+        return if (self.next_label.len > 0) self.next_label else self.next;
+    }
+
+    pub fn hasCurrentRef(self: Candidate) bool {
+        return self.current_ref.len > 0;
+    }
+
+    pub fn hasVersionComment(self: Candidate) bool {
+        return self.version_comment.len > 0;
+    }
+
+    pub fn hasShaMismatch(self: Candidate) bool {
+        return self.sha_mismatch;
+    }
+
+    pub fn isMajorUpdate(self: Candidate) bool {
+        return self.next_is_major;
+    }
+
+    pub fn shouldWriteVersionComment(self: Candidate) bool {
+        const target = self.displayTarget();
+        return target.len > 0 and
+            (!std.mem.eql(u8, self.next, target) or self.hasVersionComment() or self.hasShaMismatch());
+    }
+};
+
+pub fn deinitCandidates(allocator: std.mem.Allocator, candidates: []const Candidate) void {
+    for (candidates) |candidate| {
+        allocator.free(candidate.action);
+        allocator.free(candidate.job);
+        allocator.free(candidate.current);
+        if (candidate.current_ref.len > 0) allocator.free(candidate.current_ref);
+        if (candidate.version_comment.len > 0) allocator.free(candidate.version_comment);
+        allocator.free(candidate.next);
+        if (candidate.next_label.len > 0) allocator.free(candidate.next_label);
+        allocator.free(candidate.file);
+    }
+    allocator.free(candidates);
+}
 
 pub const ResolveError = error{
     GitHubRequestFailed,
@@ -22,7 +96,7 @@ pub const Diagnostics = struct {
 };
 
 const RepositoryContext = struct {
-    pub fn hash(_: RepositoryContext, repository: types.Repository) u64 {
+    pub fn hash(_: RepositoryContext, repository: actions.Repository) u64 {
         var hasher = std.hash.Wyhash.init(0);
         hasher.update(repository.owner);
         hasher.update(&[_]u8{0});
@@ -30,7 +104,7 @@ const RepositoryContext = struct {
         return hasher.final();
     }
 
-    pub fn eql(_: RepositoryContext, lhs: types.Repository, rhs: types.Repository) bool {
+    pub fn eql(_: RepositoryContext, lhs: actions.Repository, rhs: actions.Repository) bool {
         return std.mem.eql(u8, lhs.owner, rhs.owner) and std.mem.eql(u8, lhs.name, rhs.name);
     }
 };
@@ -48,7 +122,7 @@ const Tag = struct {
     version: Version,
 };
 
-fn chooseTarget(tags: []const Tag, current: ?Version, mode: types.UpdateMode) ?Tag {
+fn chooseTarget(tags: []const Tag, current: ?Version, mode: UpdateMode) ?Tag {
     var best: ?Tag = null;
     for (tags) |tag| {
         if (current) |current_version| {
@@ -131,37 +205,37 @@ pub const Client = struct {
 
     pub fn resolve(
         self: *Self,
-        found: []const types.Reference,
-        options: types.CheckOptions,
+        found: []const actions.Reference,
+        options: ResolveOptions,
         diagnostics: ?*Diagnostics,
-    ) ResolveError![]types.Candidate {
+    ) ResolveError![]Candidate {
         if (diagnostics) |diag| diag.reset();
 
-        var candidates: std.ArrayList(types.Candidate) = .empty;
+        var candidates: std.ArrayList(Candidate) = .empty;
         errdefer candidates.deinit(self.allocator);
 
-        var cache = std.HashMap(types.Repository, []Tag, RepositoryContext, std.hash_map.default_max_load_percentage).init(self.allocator);
+        var cache = std.HashMap(actions.Repository, []Tag, RepositoryContext, std.hash_map.default_max_load_percentage).init(self.allocator);
         defer cache.deinit();
 
-        for (found) |reference| {
-            const action_display = try reference.name.allocDisplay(self.allocator);
+        for (found) |found_reference| {
+            const action_display = try found_reference.name.allocDisplay(self.allocator);
             var keep_action_display = false;
             defer if (!keep_action_display) self.allocator.free(action_display);
 
             if (isExcluded(action_display, options.excludes)) {
-                log.debug("resolve skip excluded action={s} file={s}:{d}", .{ action_display, reference.source.file, reference.source.line });
+                log.debug("resolve skip excluded action={s} file={s}:{d}", .{ action_display, found_reference.source.file, found_reference.source.line });
                 continue;
             }
 
-            const comment_version = if (reference.version_hint.len > 0) git.parseVersion(reference.version_hint) else null;
-            const current_version = git.parseVersion(reference.current_ref) orelse comment_version;
-            const current_is_sha = git.isLikelySha(reference.current_ref);
+            const comment_version = if (found_reference.version_hint.len > 0) git.parseVersion(found_reference.version_hint) else null;
+            const current_version = git.parseVersion(found_reference.current_ref) orelse comment_version;
+            const current_is_sha = git.isLikelySha(found_reference.current_ref);
             if (current_version == null and !current_is_sha and !options.include_branches) {
-                log.debug("resolve skip unversioned action={s} ref={s} file={s}:{d}", .{ action_display, reference.current_ref, reference.source.file, reference.source.line });
+                log.debug("resolve skip unversioned action={s} ref={s} file={s}:{d}", .{ action_display, found_reference.current_ref, found_reference.source.file, found_reference.source.line });
                 continue;
             }
 
-            const repository = reference.name.repository;
+            const repository = found_reference.name.repository;
             var cache_hit = true;
             const tags = if (cache.get(repository)) |cached| cached else blk: {
                 cache_hit = false;
@@ -175,57 +249,57 @@ pub const Client = struct {
                 log.debug("github cache hit repo={s}/{s} version_tags={d}", .{ repository.owner, repository.name, tags.len });
             }
 
-            const commented_tag = if (reference.version_hint.len > 0) findTag(tags, reference.version_hint) else null;
-            const sha_mismatch = current_is_sha and commented_tag != null and !git.shaMatches(reference.current_ref, commented_tag.?.sha);
+            const commented_tag = if (found_reference.version_hint.len > 0) findTag(tags, found_reference.version_hint) else null;
+            const sha_mismatch = current_is_sha and commented_tag != null and !git.shaMatches(found_reference.current_ref, commented_tag.?.sha);
             const target = chooseTarget(tags, current_version, options.mode) orelse {
                 log.debug("resolve skip no target action={s} ref={s} mode={s} file={s}:{d}", .{
                     action_display,
-                    reference.current_ref,
+                    found_reference.current_ref,
                     @tagName(options.mode),
-                    reference.source.file,
-                    reference.source.line,
+                    found_reference.source.file,
+                    found_reference.source.line,
                 });
                 continue;
             };
             const current_ref = if (commented_tag) |tag|
                 tag.sha
             else
-                findCurrentSha(tags, reference.current_ref) orelse if (current_is_sha) reference.current_ref else "";
+                findCurrentSha(tags, found_reference.current_ref) orelse if (current_is_sha) found_reference.current_ref else "";
 
-            if (!sha_mismatch and (std.mem.eql(u8, reference.current_ref, target.name) or std.mem.eql(u8, reference.current_ref, target.sha))) {
+            if (!sha_mismatch and (std.mem.eql(u8, found_reference.current_ref, target.name) or std.mem.eql(u8, found_reference.current_ref, target.sha))) {
                 log.debug("resolve skip current action={s} ref={s} target={s} file={s}:{d}", .{
                     action_display,
-                    reference.current_ref,
+                    found_reference.current_ref,
                     target.name,
-                    reference.source.file,
-                    reference.source.line,
+                    found_reference.source.file,
+                    found_reference.source.line,
                 });
                 continue;
             }
 
             log.debug("resolve candidate action={s} current={s} target={s} sha_mismatch={} major={} file={s}:{d}", .{
                 action_display,
-                reference.current_ref,
+                found_reference.current_ref,
                 target.name,
                 sha_mismatch,
                 isMajorUpdate(current_version, target.version),
-                reference.source.file,
-                reference.source.line,
+                found_reference.source.file,
+                found_reference.source.line,
             });
             try candidates.append(self.allocator, .{
                 .action = action_display,
-                .job = try self.allocator.dupe(u8, reference.scope),
-                .current = try self.allocator.dupe(u8, reference.current_ref),
+                .job = try self.allocator.dupe(u8, found_reference.scope),
+                .current = try self.allocator.dupe(u8, found_reference.current_ref),
                 .current_ref = if (current_ref.len > 0) try self.allocator.dupe(u8, current_ref) else "",
-                .version_comment = if (reference.version_hint.len > 0) try self.allocator.dupe(u8, reference.version_hint) else "",
+                .version_comment = if (found_reference.version_hint.len > 0) try self.allocator.dupe(u8, found_reference.version_hint) else "",
                 .sha_mismatch = sha_mismatch,
                 .next = try self.allocator.dupe(u8, if (options.style == .sha) target.sha else target.name),
                 .next_label = try self.allocator.dupe(u8, target.name),
                 .next_is_major = isMajorUpdate(current_version, target.version),
-                .file = try self.allocator.dupe(u8, reference.source.file),
-                .line = reference.source.line,
-                .ref_start = reference.source.ref_span.start,
-                .ref_end = reference.source.ref_span.end,
+                .file = try self.allocator.dupe(u8, found_reference.source.file),
+                .line = found_reference.source.line,
+                .ref_start = found_reference.source.ref_span.start,
+                .ref_end = found_reference.source.ref_span.end,
             });
             keep_action_display = true;
         }
@@ -235,7 +309,7 @@ pub const Client = struct {
 
     fn fetchTags(
         self: *Self,
-        repository: types.Repository,
+        repository: actions.Repository,
         diagnostics: ?*Diagnostics,
     ) ResolveError![]Tag {
         const path = try std.fmt.allocPrint(self.allocator, "/repos/{s}/{s}/tags?per_page=100", .{ repository.owner, repository.name });
@@ -263,7 +337,7 @@ pub const Client = struct {
         return self.parseTags(repository, body.written(), diagnostics);
     }
 
-    fn parseTags(self: *Self, repository: types.Repository, body: []const u8, diagnostics: ?*Diagnostics) ResolveError![]Tag {
+    fn parseTags(self: *Self, repository: actions.Repository, body: []const u8, diagnostics: ?*Diagnostics) ResolveError![]Tag {
         const parsed = try std.json.parseFromSlice([]ApiTag, self.allocator, body, .{
             .ignore_unknown_fields = true,
             .allocate = .alloc_always,

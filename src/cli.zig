@@ -10,7 +10,6 @@ const output = @import("app/ui/output.zig");
 const github = @import("core/github.zig");
 const log = @import("core/log.zig");
 const runtime = @import("core/runtime.zig");
-const types = @import("core/types.zig");
 
 pub const app_version = build_options.app_version;
 
@@ -46,8 +45,8 @@ pub const CommandInput = struct {
     excludes: []const []const u8,
     recursive: bool,
     include_branches: bool,
-    mode: types.UpdateMode,
-    style: types.PinStyle,
+    mode: github.UpdateMode,
+    style: github.PinStyle,
     json: bool,
     dry_run: bool,
     yes: bool,
@@ -96,10 +95,8 @@ pub const CommandInput = struct {
         allocator.free(self.excludes);
     }
 
-    pub fn checkOptions(self: CommandInput) types.CheckOptions {
+    pub fn resolveOptions(self: CommandInput) github.ResolveOptions {
         return .{
-            .dirs = self.paths,
-            .recursive = self.recursive,
             .excludes = self.excludes,
             .include_branches = self.include_branches,
             .mode = self.mode,
@@ -146,7 +143,7 @@ pub fn runCheck(
     allocator: std.mem.Allocator,
     ctx: zli.CommandContext,
     input: CommandInput,
-) !?types.CheckResult {
+) !?check_workflows.Result {
     if (input.wantsHumanOutput()) {
         try output.writeScanStart(ctx.writer, input.paths);
     }
@@ -155,7 +152,9 @@ pub fn runCheck(
     const result = check_workflows.run(
         allocator,
         ctx.io,
-        input.checkOptions(),
+        input.paths,
+        input.recursive,
+        input.resolveOptions(),
         &diagnostics,
     ) catch |err| {
         log.debug("check failed error={s} repository={s} status={?} cause={s}", .{
@@ -176,7 +175,7 @@ pub fn runCheck(
 
     if (result.reference_count == 0) {
         if (input.wantsJsonOutput()) {
-            const empty: []const types.Candidate = &.{};
+            const empty: []const github.Candidate = &.{};
             try output.writeJson(ctx.writer, empty);
             return null;
         }
@@ -285,7 +284,7 @@ fn currentProcessState(ctx: zli.CommandContext) *const ProcessState {
     return ctx.getContextData(ProcessState);
 }
 
-fn parseMode(ctx: zli.CommandContext, value: []const u8) !types.UpdateMode {
+fn parseMode(ctx: zli.CommandContext, value: []const u8) !github.UpdateMode {
     if (std.mem.eql(u8, value, "major")) return .major;
     if (std.mem.eql(u8, value, "minor")) return .minor;
     if (std.mem.eql(u8, value, "patch")) return .patch;
@@ -294,7 +293,7 @@ fn parseMode(ctx: zli.CommandContext, value: []const u8) !types.UpdateMode {
     return error.InvalidOption;
 }
 
-fn parseStyle(ctx: zli.CommandContext, value: []const u8) !types.PinStyle {
+fn parseStyle(ctx: zli.CommandContext, value: []const u8) !github.PinStyle {
     if (std.mem.eql(u8, value, "sha")) return .sha;
     if (std.mem.eql(u8, value, "preserve")) return .preserve;
 

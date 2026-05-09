@@ -2,7 +2,7 @@ const std = @import("std");
 
 const log = @import("log.zig");
 const parse = @import("parse.zig");
-const types = @import("types.zig");
+const actions = @import("../syntax/github_actions.zig");
 
 pub const ScanError = error{
     InvalidActionReference,
@@ -11,20 +11,21 @@ pub const ScanError = error{
 pub fn scan(
     allocator: std.mem.Allocator,
     io: std.Io,
-    options: types.CheckOptions,
-) ScanError![]types.Reference {
-    var found: std.ArrayList(types.Reference) = .empty;
+    paths: []const []const u8,
+    recursive: bool,
+) ScanError![]actions.Reference {
+    var found: std.ArrayList(actions.Reference) = .empty;
     errdefer {
         for (found.items) |action| parse.deinitReference(allocator, action);
         found.deinit(allocator);
     }
 
-    for (options.dirs) |path| {
+    for (paths) |path| {
         log.debug("scan path={s} recursive={}", .{
             path,
-            options.recursive or std.mem.eql(u8, path, ".github"),
+            recursive or std.mem.eql(u8, path, ".github"),
         });
-        scanPath(allocator, io, path, options.recursive or std.mem.eql(u8, path, ".github"), &found) catch |err| switch (err) {
+        scanPath(allocator, io, path, recursive or std.mem.eql(u8, path, ".github"), &found) catch |err| switch (err) {
             error.FileNotFound => {
                 log.debug("scan path missing path={s}", .{path});
                 continue;
@@ -36,11 +37,11 @@ pub fn scan(
     return found.toOwnedSlice(allocator);
 }
 
-pub fn deinitReferences(allocator: std.mem.Allocator, found: []const types.Reference) void {
+pub fn deinitReferences(allocator: std.mem.Allocator, found: []const actions.Reference) void {
     parse.deinitReferences(allocator, found);
 }
 
-pub fn deinitFoundActions(allocator: std.mem.Allocator, found: []const types.Reference) void {
+pub fn deinitFoundActions(allocator: std.mem.Allocator, found: []const actions.Reference) void {
     deinitReferences(allocator, found);
 }
 
@@ -49,7 +50,7 @@ fn scanDir(
     io: std.Io,
     dir_path: []const u8,
     recursive: bool,
-    found: *std.ArrayList(types.Reference),
+    found: *std.ArrayList(actions.Reference),
 ) ScanError!void {
     var dir = try std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true });
     defer dir.close(io);
@@ -91,7 +92,7 @@ fn scanPath(
     io: std.Io,
     path: []const u8,
     recursive: bool,
-    found: *std.ArrayList(types.Reference),
+    found: *std.ArrayList(actions.Reference),
 ) ScanError!void {
     scanDir(allocator, io, path, recursive, found) catch |err| switch (err) {
         error.NotDir => return scanFile(allocator, io, path, found),
@@ -103,7 +104,7 @@ fn scanFile(
     allocator: std.mem.Allocator,
     io: std.Io,
     file_path: []const u8,
-    found: *std.ArrayList(types.Reference),
+    found: *std.ArrayList(actions.Reference),
 ) !void {
     const contents = try std.Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(5 * 1024 * 1024));
     defer allocator.free(contents);
@@ -115,7 +116,7 @@ fn appendParsedWorkflow(
     allocator: std.mem.Allocator,
     display_path: []const u8,
     contents: []const u8,
-    found: *std.ArrayList(types.Reference),
+    found: *std.ArrayList(actions.Reference),
 ) !void {
     const parsed = try parse.collectReferencesFromSource(allocator, display_path, contents);
     defer allocator.free(parsed);

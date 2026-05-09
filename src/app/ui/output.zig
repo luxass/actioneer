@@ -1,12 +1,7 @@
 const std = @import("std");
 
 const github = @import("../../core/github.zig");
-const types = @import("../../core/types.zig");
 pub const styles = @import("styles.zig");
-
-pub fn displayTarget(candidate: types.Candidate) []const u8 {
-    return if (candidate.next_label.len > 0) candidate.next_label else candidate.next;
-}
 
 pub fn writeScanStart(writer: *std.Io.Writer, paths: []const []const u8) !void {
     if (paths.len == 1) {
@@ -37,22 +32,22 @@ pub fn writeUpdateCount(writer: *std.Io.Writer, count: usize) !void {
     try writer.print(".\n", .{});
 }
 
-pub fn hasShaMismatches(candidates: []const types.Candidate) bool {
+pub fn hasShaMismatches(candidates: []const github.Candidate) bool {
     for (candidates) |candidate| {
-        if (candidate.sha_mismatch) return true;
+        if (candidate.hasShaMismatch()) return true;
     }
     return false;
 }
 
-pub fn shaMismatchCount(candidates: []const types.Candidate) usize {
+pub fn shaMismatchCount(candidates: []const github.Candidate) usize {
     var count: usize = 0;
     for (candidates) |candidate| {
-        if (candidate.sha_mismatch) count += 1;
+        if (candidate.hasShaMismatch()) count += 1;
     }
     return count;
 }
 
-pub fn writeShaMismatchWarning(writer: *std.Io.Writer, candidates: []const types.Candidate) !void {
+pub fn writeShaMismatchWarning(writer: *std.Io.Writer, candidates: []const github.Candidate) !void {
     const count = shaMismatchCount(candidates);
     if (count == 0) return;
 
@@ -62,7 +57,7 @@ pub fn writeShaMismatchWarning(writer: *std.Io.Writer, candidates: []const types
     try writeShaMismatchDetails(writer, candidates);
 }
 
-pub fn writeShaMismatchError(writer: *std.Io.Writer, candidates: []const types.Candidate) !void {
+pub fn writeShaMismatchError(writer: *std.Io.Writer, candidates: []const github.Candidate) !void {
     const count = shaMismatchCount(candidates);
     if (count == 0) return;
 
@@ -73,9 +68,9 @@ pub fn writeShaMismatchError(writer: *std.Io.Writer, candidates: []const types.C
     try writer.print("{s}Fix:{s} update the SHA to the tag commit, or correct the version comment before trusting the reference.\n", .{ styles.CYAN, styles.RESET });
 }
 
-fn writeShaMismatchDetails(writer: *std.Io.Writer, candidates: []const types.Candidate) !void {
+fn writeShaMismatchDetails(writer: *std.Io.Writer, candidates: []const github.Candidate) !void {
     for (candidates) |candidate| {
-        if (!candidate.sha_mismatch) continue;
+        if (!candidate.hasShaMismatch()) continue;
 
         try writer.print("  {s}-{s} {s}{s}{s} at {s}{s}:{}{s} uses {s}{s}{s}", .{
             styles.BRIGHT_BLACK,
@@ -91,10 +86,10 @@ fn writeShaMismatchDetails(writer: *std.Io.Writer, candidates: []const types.Can
             candidate.current,
             styles.RESET,
         });
-        if (candidate.version_comment.len > 0) {
+        if (candidate.hasVersionComment()) {
             try writer.print(" but says {s}{s}{s}", .{ styles.YELLOW, candidate.version_comment, styles.RESET });
         }
-        if (candidate.current_ref.len > 0) {
+        if (candidate.hasCurrentRef()) {
             try writer.print("; expected {s}{s}{s}", .{ styles.GREEN, shortSha(candidate.current_ref), styles.RESET });
         }
         try writer.print(".\n", .{});
@@ -129,7 +124,7 @@ pub fn writeSelectionCanceled(writer: *std.Io.Writer, interrupted: bool) !void {
     }
 }
 
-pub fn writeSelectedUpdates(writer: *std.Io.Writer, candidates: []const types.Candidate, selected: []const usize) !void {
+pub fn writeSelectedUpdates(writer: *std.Io.Writer, candidates: []const github.Candidate, selected: []const usize) !void {
     try writer.print("{s}Applying{s} {s}{d}{s} selected update", .{ styles.CYAN, styles.RESET, styles.YELLOW, selected.len, styles.RESET });
     if (selected.len != 1) try writer.print("s", .{});
     try writer.print(":\n", .{});
@@ -145,8 +140,8 @@ pub fn writeSelectedUpdates(writer: *std.Io.Writer, candidates: []const types.Ca
             styles.BRIGHT_BLACK,
             candidate.current,
             styles.RESET,
-            if (candidate.next_is_major) styles.RED else styles.GREEN,
-            displayTarget(candidate),
+            if (candidate.isMajorUpdate()) styles.RED else styles.GREEN,
+            candidate.displayTarget(),
             styles.RESET,
         });
     }
@@ -158,7 +153,7 @@ pub fn writeApplyComplete(writer: *std.Io.Writer, applied: usize) !void {
     try writer.print(".\n", .{});
 }
 
-pub fn writePreview(writer: *std.Io.Writer, references: usize, candidates: []const types.Candidate) !void {
+pub fn writePreview(writer: *std.Io.Writer, references: usize, candidates: []const github.Candidate) !void {
     try writer.print("{s}Preview{s}: {s}{d}{s} scanned reference", .{ styles.CYAN, styles.RESET, styles.YELLOW, references, styles.RESET });
     if (references != 1) try writer.print("s", .{});
     try writer.print(", {s}{d}{s} available update", .{ styles.YELLOW, candidates.len, styles.RESET });
@@ -179,17 +174,17 @@ pub fn writePreview(writer: *std.Io.Writer, references: usize, candidates: []con
             candidate.current,
             styles.RESET,
         });
-        if (candidate.version_comment.len > 0) {
+        if (candidate.hasVersionComment()) {
             try writer.print(" {s}# {s}{s}", .{ styles.BRIGHT_BLACK, candidate.version_comment, styles.RESET });
         }
-        if (candidate.sha_mismatch) {
+        if (candidate.hasShaMismatch()) {
             try writer.print(" {s}(SHA/comment mismatch){s}", .{ styles.RED, styles.RESET });
         }
         try writer.print(" {s}->{s} {s}{s}{s} {s}({s}:{}){s}\n", .{
             styles.BRIGHT_BLACK,
             styles.RESET,
-            if (candidate.next_is_major) styles.RED else styles.GREEN,
-            displayTarget(candidate),
+            if (candidate.isMajorUpdate()) styles.RED else styles.GREEN,
+            candidate.displayTarget(),
             styles.RESET,
             styles.BRIGHT_BLACK,
             candidate.file,
@@ -199,7 +194,7 @@ pub fn writePreview(writer: *std.Io.Writer, references: usize, candidates: []con
     }
 }
 
-pub fn writeJson(writer: *std.Io.Writer, candidates: []const types.Candidate) !void {
+pub fn writeJson(writer: *std.Io.Writer, candidates: []const github.Candidate) !void {
     var json = std.json.Stringify{ .writer = writer, .options = .{} };
     try json.beginObject();
     try json.objectField("updates");
@@ -216,11 +211,11 @@ pub fn writeJson(writer: *std.Io.Writer, candidates: []const types.Candidate) !v
         try json.objectField("versionComment");
         try json.write(candidate.version_comment);
         try json.objectField("shaMismatch");
-        try json.write(candidate.sha_mismatch);
+        try json.write(candidate.hasShaMismatch());
         try json.objectField("next");
         try json.write(candidate.next);
         try json.objectField("nextLabel");
-        try json.write(displayTarget(candidate));
+        try json.write(candidate.displayTarget());
         try json.objectField("file");
         try json.write(candidate.file);
         try json.objectField("line");
@@ -294,7 +289,7 @@ pub fn writeMissingFlagValue(writer: *std.Io.Writer, flag: []const u8) void {
 }
 
 test "detect sha mismatches" {
-    const candidates = [_]types.Candidate{
+    const candidates = [_]github.Candidate{
         .{
             .action = "actions/checkout",
             .job = "build",
@@ -329,7 +324,7 @@ test "write json escapes strings" {
     var out = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
 
-    const candidates = [_]types.Candidate{
+    const candidates = [_]github.Candidate{
         .{
             .action = "owner/repo\"quoted",
             .job = "build\njob",

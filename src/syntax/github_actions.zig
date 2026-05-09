@@ -1,15 +1,72 @@
 const std = @import("std");
 const ts = @import("tree-sitter");
 
-const types = @import("../core/types.zig");
 const yaml_tree = @import("yaml_tree.zig");
+
+pub const ReferenceKind = enum {
+    workflow_job,
+    workflow_step,
+    composite_step,
+};
+
+pub const ByteSpan = struct {
+    start: u32,
+    end: u32,
+};
+
+pub const SourceLocation = struct {
+    file: []const u8,
+    line: u32,
+    ref_span: ByteSpan,
+};
+
+pub const Repository = struct {
+    owner: []const u8,
+    name: []const u8,
+
+    pub fn allocDisplay(self: Repository, allocator: anytype) ![]const u8 {
+        return std.fmt.allocPrint(allocator, "{s}/{s}", .{ self.owner, self.name });
+    }
+};
+
+pub const ActionName = struct {
+    repository: Repository,
+    path: []const u8 = "",
+
+    pub fn displayLen(self: ActionName) usize {
+        return self.repository.owner.len + 1 + self.repository.name.len + self.path.len;
+    }
+
+    pub fn allocDisplay(self: ActionName, allocator: anytype) ![]const u8 {
+        return std.fmt.allocPrint(allocator, "{s}/{s}{s}", .{ self.repository.owner, self.repository.name, self.path });
+    }
+
+    pub fn eqlDisplay(self: ActionName, value: []const u8) bool {
+        if (value.len != self.displayLen()) return false;
+        if (!std.mem.startsWith(u8, value, self.repository.owner)) return false;
+        if (value[self.repository.owner.len] != '/') return false;
+
+        const name_start = self.repository.owner.len + 1;
+        if (!std.mem.startsWith(u8, value[name_start..], self.repository.name)) return false;
+        return std.mem.eql(u8, value[name_start + self.repository.name.len ..], self.path);
+    }
+};
+
+pub const Reference = struct {
+    kind: ReferenceKind,
+    name: ActionName,
+    current_ref: []const u8,
+    version_hint: []const u8 = "",
+    scope: []const u8,
+    source: SourceLocation,
+};
 
 pub fn collectReferences(
     allocator: std.mem.Allocator,
     file_path: []const u8,
     contents: []const u8,
-) ![]types.Reference {
-    var found: std.ArrayList(types.Reference) = .empty;
+) ![]Reference {
+    var found: std.ArrayList(Reference) = .empty;
     errdefer {
         for (found.items) |action| deinitReference(allocator, action);
         found.deinit(allocator);
@@ -27,7 +84,7 @@ pub fn collectReferences(
     return found.toOwnedSlice(allocator);
 }
 
-pub fn deinitReference(allocator: std.mem.Allocator, action: types.Reference) void {
+pub fn deinitReference(allocator: std.mem.Allocator, action: Reference) void {
     allocator.free(action.name.repository.owner);
     allocator.free(action.name.repository.name);
     if (action.name.path.len > 0) allocator.free(action.name.path);
@@ -37,7 +94,7 @@ pub fn deinitReference(allocator: std.mem.Allocator, action: types.Reference) vo
     allocator.free(action.source.file);
 }
 
-pub fn deinitReferences(allocator: std.mem.Allocator, found: []const types.Reference) void {
+pub fn deinitReferences(allocator: std.mem.Allocator, found: []const Reference) void {
     for (found) |action| deinitReference(allocator, action);
     allocator.free(found);
 }
@@ -47,7 +104,7 @@ fn collectWorkflowActions(
     contents: []const u8,
     root_mapping: ts.Node,
     file_path: []const u8,
-    found: *std.ArrayList(types.Reference),
+    found: *std.ArrayList(Reference),
 ) anyerror!void {
     const jobs_node = yaml_tree.pairValueByKey(contents, root_mapping, "jobs") orelse return;
     const jobs_mapping = yaml_tree.mappingNode(jobs_node) orelse return;
@@ -70,7 +127,7 @@ fn collectJobActions(
     job_node: ts.Node,
     file_path: []const u8,
     job_scope: []const u8,
-    found: *std.ArrayList(types.Reference),
+    found: *std.ArrayList(Reference),
 ) anyerror!void {
     const job_mapping = yaml_tree.mappingNode(job_node) orelse return;
 
@@ -88,7 +145,7 @@ fn collectCompositeActions(
     contents: []const u8,
     root_mapping: ts.Node,
     file_path: []const u8,
-    found: *std.ArrayList(types.Reference),
+    found: *std.ArrayList(Reference),
 ) anyerror!void {
     const runs_node = yaml_tree.pairValueByKey(contents, root_mapping, "runs") orelse return;
     const runs_mapping = yaml_tree.mappingNode(runs_node) orelse return;
@@ -107,8 +164,8 @@ fn collectStepActions(
     steps_node: ts.Node,
     file_path: []const u8,
     scope: []const u8,
-    kind: types.ReferenceKind,
-    found: *std.ArrayList(types.Reference),
+    kind: ReferenceKind,
+    found: *std.ArrayList(Reference),
 ) anyerror!void {
     const steps_sequence = yaml_tree.sequenceNode(steps_node) orelse return;
 
@@ -126,9 +183,9 @@ fn appendActionReference(
     contents: []const u8,
     value_node: ts.Node,
     scope: []const u8,
-    kind: types.ReferenceKind,
+    kind: ReferenceKind,
     file_path: []const u8,
-    found: *std.ArrayList(types.Reference),
+    found: *std.ArrayList(Reference),
 ) !void {
     const value_range = yaml_tree.scalarRange(contents, value_node) orelse return;
     if (actionFromUsesValue(
@@ -151,12 +208,12 @@ fn actionFromUsesValue(
     value: []const u8,
     comment: []const u8,
     scope: []const u8,
-    kind: types.ReferenceKind,
+    kind: ReferenceKind,
     file_path: []const u8,
     line: u32,
     value_start: u32,
     value_end: u32,
-) !types.Reference {
+) !Reference {
     if (std.mem.startsWith(u8, value, "./") or
         std.mem.startsWith(u8, value, "../") or
         std.mem.startsWith(u8, value, "docker://"))
@@ -260,8 +317,8 @@ test "collect workflow step and reusable workflow references" {
     defer deinitReferences(std.testing.allocator, found);
 
     try std.testing.expectEqual(@as(usize, 2), found.len);
-    try std.testing.expectEqual(types.ReferenceKind.workflow_job, found[0].kind);
-    try std.testing.expectEqual(types.ReferenceKind.workflow_step, found[1].kind);
+    try std.testing.expectEqual(ReferenceKind.workflow_job, found[0].kind);
+    try std.testing.expectEqual(ReferenceKind.workflow_step, found[1].kind);
 
     const reusable = try found[0].name.allocDisplay(std.testing.allocator);
     defer std.testing.allocator.free(reusable);
@@ -288,7 +345,7 @@ test "collect composite action references only for composite actions" {
     defer deinitReferences(std.testing.allocator, found);
 
     try std.testing.expectEqual(@as(usize, 1), found.len);
-    try std.testing.expectEqual(types.ReferenceKind.composite_step, found[0].kind);
+    try std.testing.expectEqual(ReferenceKind.composite_step, found[0].kind);
     try std.testing.expectEqualStrings("composite", found[0].scope);
 }
 

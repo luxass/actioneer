@@ -1,7 +1,6 @@
 const std = @import("std");
 
 const log = @import("log.zig");
-const parse = @import("parse.zig");
 const actions = @import("../syntax/github_actions.zig");
 
 pub const ScanError = error{
@@ -16,7 +15,7 @@ pub fn scan(
 ) ScanError![]actions.Reference {
     var found: std.ArrayList(actions.Reference) = .empty;
     errdefer {
-        for (found.items) |action| parse.deinitReference(allocator, action);
+        for (found.items) |action| actions.deinitReference(allocator, action);
         found.deinit(allocator);
     }
 
@@ -38,11 +37,7 @@ pub fn scan(
 }
 
 pub fn deinitReferences(allocator: std.mem.Allocator, found: []const actions.Reference) void {
-    parse.deinitReferences(allocator, found);
-}
-
-pub fn deinitFoundActions(allocator: std.mem.Allocator, found: []const actions.Reference) void {
-    deinitReferences(allocator, found);
+    actions.deinitReferences(allocator, found);
 }
 
 fn scanDir(
@@ -118,7 +113,7 @@ fn appendParsedWorkflow(
     contents: []const u8,
     found: *std.ArrayList(actions.Reference),
 ) !void {
-    const parsed = try parse.collectReferencesFromSource(allocator, display_path, contents);
+    const parsed = try actions.collectReferences(allocator, display_path, contents);
     defer allocator.free(parsed);
 
     try found.appendSlice(allocator, parsed);

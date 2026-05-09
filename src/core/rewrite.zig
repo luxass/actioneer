@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const github = @import("github.zig");
-const parse = @import("parse.zig");
+const actions = @import("../syntax/github_actions.zig");
 
 pub const RewriteError = error{
     UpdateTargetNotFound,
@@ -211,8 +211,8 @@ test "apply sha update and version comment" {
         \\      - uses: actions/setup-node@v3
         \\
     ;
-    const found = try parse.parseWorkflowString(std.testing.allocator, ".github/workflows/ci.yml", input);
-    defer parse.deinitFoundActions(std.testing.allocator, found);
+    const found = try actions.collectReferences(std.testing.allocator, ".github/workflows/ci.yml", input);
+    defer actions.deinitReferences(std.testing.allocator, found);
 
     const candidates = [_]github.Candidate{
         .{
@@ -251,8 +251,8 @@ test "apply quoted version update without adding comment" {
         \\      - uses: "actions/setup-node@v3"
         \\
     ;
-    const found = try parse.parseWorkflowString(std.testing.allocator, "ci.yml", input);
-    defer parse.deinitFoundActions(std.testing.allocator, found);
+    const found = try actions.collectReferences(std.testing.allocator, "ci.yml", input);
+    defer actions.deinitReferences(std.testing.allocator, found);
 
     const candidates = [_]github.Candidate{
         .{
@@ -287,8 +287,8 @@ test "apply reusable workflow update" {
         \\    uses: luxass/shared-workflows/.github/workflows/reusable-ci-security.yaml@v0.6.0
         \\
     ;
-    const found = try parse.parseWorkflowString(std.testing.allocator, "ci-security.yml", input);
-    defer parse.deinitFoundActions(std.testing.allocator, found);
+    const found = try actions.collectReferences(std.testing.allocator, "ci-security.yml", input);
+    defer actions.deinitReferences(std.testing.allocator, found);
 
     const candidates = [_]github.Candidate{
         .{

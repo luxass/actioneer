@@ -2,6 +2,7 @@ const std = @import("std");
 const zli = @import("zli");
 
 const apply_updates = @import("../app/apply_updates.zig");
+const check_workflows = @import("../app/check_workflows.zig");
 const prompt = @import("../app/ui/prompt.zig");
 const output = @import("../app/ui/output.zig");
 const cli = @import("../cli.zig");
@@ -28,7 +29,13 @@ pub fn run(ctx: zli.CommandContext) !void {
         input.excludes.len,
     });
 
-    const result = (try cli.runCheck(arena.allocator(), ctx, input)) orelse return;
+    const result = (try check_workflows.runForCommand(arena.allocator(), ctx.io, ctx.writer, .{
+        .paths = input.paths,
+        .recursive = input.recursive,
+        .resolve_options = input.resolveOptions(),
+        .human_output = input.wantsHumanOutput(),
+        .json_output = input.wantsJsonOutput(),
+    })) orelse return;
 
     if (input.wantsHumanOutput()) {
         try output.writeUpdateCount(ctx.writer, result.candidates.len);
@@ -81,14 +88,10 @@ pub fn run(ctx: zli.CommandContext) !void {
 
     try output.writeSelectedUpdates(ctx.writer, result.candidates, selected);
 
-    const applied = apply_updates.run(arena.allocator(), ctx.io, result.candidates, selected) catch |err| {
-        log.debug("apply failed error={s} selected={d}", .{ @errorName(err), selected.len });
-        try output.writeApplyError(ctx.writer, err);
-        return;
-    };
-
-    log.debug("apply complete applied={d}", .{applied});
-    try output.writeApplyComplete(ctx.writer, applied);
+    try apply_updates.runForCommand(arena.allocator(), ctx.io, ctx.writer, .{
+        .candidates = result.candidates,
+        .selected = selected,
+    });
 }
 
 fn selectAll(allocator: std.mem.Allocator, count: usize) ![]usize {

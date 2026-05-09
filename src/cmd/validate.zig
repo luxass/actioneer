@@ -1,6 +1,7 @@
 const std = @import("std");
 const zli = @import("zli");
 
+const check_workflows = @import("../app/check_workflows.zig");
 const cli = @import("../cli.zig");
 const output = @import("../app/ui/output.zig");
 const log = @import("../core/log.zig");
@@ -36,7 +37,13 @@ pub fn run(ctx: zli.CommandContext) !void {
         input.excludes.len,
     });
 
-    const result = (try cli.runCheck(arena.allocator(), ctx, input)) orelse return;
+    const result = (try check_workflows.runForCommand(arena.allocator(), ctx.io, ctx.writer, .{
+        .paths = input.paths,
+        .recursive = input.recursive,
+        .resolve_options = input.resolveOptions(),
+        .human_output = input.wantsHumanOutput(),
+        .json_output = input.wantsJsonOutput(),
+    })) orelse return;
 
     if (input.wantsHumanOutput()) {
         try ctx.writer.print("{s}Verification completed.{s}\n", .{ output.styles.GREEN, output.styles.RESET });

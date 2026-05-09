@@ -5,7 +5,6 @@ const zli = @import("zli");
 const update = @import("cmd/update.zig");
 const validate = @import("cmd/validate.zig");
 const version = @import("cmd/version.zig");
-const check_workflows = @import("app/check_workflows.zig");
 const output = @import("app/ui/output.zig");
 const github = @import("core/github.zig");
 const log = @import("core/log.zig");
@@ -136,61 +135,6 @@ pub fn parseCommandInput(ctx: zli.CommandContext, command: CommandKind) !Command
 
 pub fn initRuntime(input: CommandInput) void {
     log.init(input.verbose);
-}
-
-pub fn runCheck(
-    allocator: std.mem.Allocator,
-    ctx: zli.CommandContext,
-    input: CommandInput,
-) !?check_workflows.Result {
-    if (input.wantsHumanOutput()) {
-        try output.writeScanStart(ctx.writer, input.paths);
-    }
-
-    var diagnostics: github.Diagnostics = .{};
-    const result = check_workflows.run(
-        allocator,
-        ctx.io,
-        input.paths,
-        input.recursive,
-        input.resolveOptions(),
-        &diagnostics,
-    ) catch |err| {
-        log.debug("check failed error={s} repository={s} status={?} cause={s}", .{
-            @errorName(err),
-            diagnostics.repository,
-            diagnostics.status,
-            diagnostics.cause,
-        });
-        try output.writeCheckError(ctx.writer, err, diagnostics);
-        return null;
-    };
-
-    log.debug("check complete found_actions={d} candidates={d} sha_mismatches={d}", .{
-        result.reference_count,
-        result.candidates.len,
-        output.shaMismatchCount(result.candidates),
-    });
-
-    if (result.reference_count == 0) {
-        if (input.wantsJsonOutput()) {
-            const empty: []const github.Candidate = &.{};
-            try output.writeJson(ctx.writer, empty);
-            return null;
-        }
-
-        try output.writeNoReferences(ctx.writer);
-        return null;
-    }
-
-    if (input.wantsHumanOutput()) {
-        try output.writeFoundReferences(ctx.writer, result.reference_count);
-    }
-
-    return .{
-        .reference_count = result.reference_count,
-        .candidates = result.candidates,
-    };
 }
 
 const dry_run_flag = zli.Flag{

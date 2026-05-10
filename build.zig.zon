@@ -36,13 +36,15 @@
             .url = "https://github.com/xcaeser/zli/archive/v5.0.0.tar.gz",
             .hash = "zli-5.0.0-LeUjptjnAAB7S5QkDi3-4NsGAiA9Zg1P24aQ6rx30Pwk",
         },
+        .tree_sitter = .{
+            .url = "git+https://github.com/tree-sitter/zig-tree-sitter?ref=v0.26.0#0cf58172e61f6fdd16f681cde42b4acb531a23db",
+            .hash = "tree_sitter-0.26.0-8heIf3CaAQDeVTQc0DMSBhbQAEx5aF-dTen4_LPxMgrv",
+        },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
-        // For example...
-        //"LICENSE",
-        //"README.md",
+        "vendor",
     },
 }

@@ -2,6 +2,8 @@
 zig-cache/
 zig-out/
 zig-pkg/
+target/
+Cargo.lock
 
 # Local build/distribution outputs
 dist/

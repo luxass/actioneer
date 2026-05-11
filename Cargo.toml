@@ -1,0 +1,27 @@
+[package]
+name = "actioneer"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[[bin]]
+name = "actioneer"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.1", features = ["derive", "env"] }
+clap-verbosity-flag = { version = "3.0.4", default-features = false }
+tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread", "io-std"] }
+anyhow = "1.0.102"
+async-trait = "0.1.89"
+anstream = "1.0.0"
+thiserror = "2.0.18"
+owo-colors = "4.3.0"
+crossterm = "0.28"
+ratatui = "0.29"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = { package = "yaml_serde", version = "0.10" }
+serde_json = "1"
+walkdir = "2"
+yamlpath = "1.24.1"

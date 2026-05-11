@@ -21,7 +21,7 @@ Windows can use the release archives from [GitHub Releases](https://github.com/l
 ```sh
 actioneer --dry-run
 actioneer --yes
-actioneer validate
+actioneer audit
 ```
 
 By default, `actioneer` scans `.github`. Use `--recursive` to scan from the current directory, or pass a file or directory explicitly.
@@ -36,14 +36,41 @@ By default, `actioneer` scans `.github`. Use `--recursive` to scan from the curr
 
 ## Notes
 
-- `--style sha` is the default.
-- `validate` exits non-zero on SHA/comment mismatches.
+- Updates are currently rewritten as pinned SHAs with version comments.
+- `audit` exits non-zero on SHA/comment mismatches.
 - Interactive selection requires a TTY.
 - Set `GITHUB_TOKEN` if you want higher GitHub API rate limits.
+- Workflow security analysis runs in CI via `zizmor`.
+
+## Workflow Security Checks
+
+This repository uses [`zizmor`](https://github.com/zizmorcore/zizmor) to statically analyze GitHub Actions workflows.
+`zizmor` itself is a Rust tool, and the upstream project ships both a Cargo-installable CLI and a GitHub Action wrapper.
+
+For local use, install it with Cargo:
+
+```sh
+cargo install --locked zizmor
+just zizmor .
+```
+
+The CI integration lives in `.github/workflows/zizmor.yaml` and uploads results through GitHub code scanning.
 
 ## Build From Source
 
-If you want to build it yourself, use Zig `0.16.0` or newer and run `zig build`.
+Build the Rust CLI directly:
+
+```sh
+cargo build
+./target/debug/actioneer --help
+```
+
+For local iteration:
+
+```sh
+cargo run -- --dry-run
+cargo test
+```
 
 ## 📄 License
 

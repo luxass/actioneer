@@ -25,7 +25,6 @@ pub struct App {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Update(UpdateArgs),
-    Validate(ValidateArgs),
     Audit(AuditArgs),
     Version,
 }
@@ -50,6 +49,9 @@ pub struct UpdateArgs {
     #[arg(long = "include-branches", default_value_t = false)]
     pub include_branches: bool,
 
+    #[arg(long = "update", value_enum, default_value_t = UpdateSelection::Major)]
+    pub update: UpdateSelection,
+
     #[arg(long, short = 'y', default_value_t = false)]
     pub yes: bool,
 
@@ -65,17 +67,8 @@ pub struct AuditArgs {
     #[arg(long = "include-branches", default_value_t = false)]
     pub include_branches: bool,
 
-    #[arg(value_name = "INPUT")]
-    pub inputs: Vec<String>,
-}
-
-#[derive(Clone, Debug, Args)]
-pub struct ValidateArgs {
-    #[arg(long, short = 'r', default_value_t = false)]
-    pub recursive: bool,
-
-    #[arg(long = "include-branches", default_value_t = false)]
-    pub include_branches: bool,
+    #[arg(long = "update", value_enum, default_value_t = UpdateSelection::Major)]
+    pub update: UpdateSelection,
 
     #[arg(value_name = "INPUT")]
     pub inputs: Vec<String>,
@@ -88,11 +81,18 @@ pub enum Mode {
     Beautiful,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum UpdateSelection {
+    Major,
+    Minor,
+    Patch,
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;
 
-    use super::{App, Command, Mode};
+    use super::{App, Command, Mode, UpdateSelection};
 
     #[test]
     fn root_command_uses_update_args() {
@@ -106,11 +106,12 @@ mod tests {
 
     #[test]
     fn explicit_update_command_uses_update_args() {
-        let app = App::parse_from(["actioneer", "update", ".github"]);
+        let app = App::parse_from(["actioneer", "update", "--update", "patch", ".github"]);
 
         match app.command {
             Some(Command::Update(args)) => {
                 assert_eq!(vec![String::from(".github")], args.inputs);
+                assert_eq!(UpdateSelection::Patch, args.update);
             }
             other => panic!("expected update command, got {other:?}"),
         }
@@ -118,11 +119,19 @@ mod tests {
 
     #[test]
     fn audit_command_uses_audit_args() {
-        let app = App::parse_from(["actioneer", "audit", "--recursive", "."]);
+        let app = App::parse_from([
+            "actioneer",
+            "audit",
+            "--recursive",
+            "--update",
+            "minor",
+            ".",
+        ]);
 
         match app.command {
             Some(Command::Audit(args)) => {
                 assert!(args.recursive);
+                assert_eq!(UpdateSelection::Minor, args.update);
                 assert_eq!(vec![String::from(".")], args.inputs);
             }
             other => panic!("expected audit command, got {other:?}"),
@@ -130,15 +139,10 @@ mod tests {
     }
 
     #[test]
-    fn validate_command_uses_validate_args() {
-        let app = App::parse_from(["actioneer", "validate", ".github"]);
+    fn root_command_defaults_update_mode_to_major() {
+        let app = App::parse_from(["actioneer", ".github/workflows"]);
 
-        match app.command {
-            Some(Command::Validate(args)) => {
-                assert_eq!(vec![String::from(".github")], args.inputs);
-            }
-            other => panic!("expected validate command, got {other:?}"),
-        }
+        assert_eq!(UpdateSelection::Major, app.update.update);
     }
 
     #[test]

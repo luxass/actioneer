@@ -4,7 +4,10 @@ use thiserror::Error;
 
 use crate::engine::git::{is_likely_sha, parse_version, sha_matches, Version};
 use crate::github::{Error as GitHubError, Tag};
-use crate::model::{PinStyle, Reference, Repository, ResolveOptions, ResolvedUpdate, UpdateMode};
+use crate::model::{
+    PinStyle, Reference, Repository, ResolveOptions, ResolvedUpdate, UpdateMode, UpdateSource,
+    UpdateTarget, ValidationState,
+};
 
 #[derive(Debug, Error)]
 pub enum ResolveError {
@@ -65,23 +68,29 @@ pub fn resolve_updates(
             continue;
         }
 
-        updates.push(ResolvedUpdate {
-            action: reference.name.display(),
-            job: reference.scope.clone(),
-            current: reference.current_ref.clone(),
-            current_ref: expected_current_sha(reference, context.ref_kind, comment_tag, tags),
-            version_comment: reference.version_hint.clone(),
-            sha_mismatch,
-            next: match options.style {
-                PinStyle::Sha => target_tag.sha.clone(),
-            },
-            next_label: target_tag.name.clone(),
-            next_is_major: is_major_update(context.current_version, target_tag.version),
-            file: reference.source.file.clone(),
-            line: reference.source.line,
-            ref_start: reference.source.ref_span.start,
-            ref_end: reference.source.ref_span.end,
-        });
+        updates.push(ResolvedUpdate::new(
+            reference.name.display(),
+            reference.scope.clone(),
+            reference.current_ref.clone(),
+            ValidationState::new(
+                expected_current_sha(reference, context.ref_kind, comment_tag, tags),
+                reference.version_hint.clone(),
+                sha_mismatch,
+            ),
+            UpdateTarget::new(
+                match options.style {
+                    PinStyle::Sha => target_tag.sha.clone(),
+                },
+                target_tag.name.clone(),
+                is_major_update(context.current_version, target_tag.version),
+            ),
+            UpdateSource::new(
+                reference.source.file.clone(),
+                reference.source.line,
+                reference.source.ref_span.start,
+                reference.source.ref_span.end,
+            ),
+        ));
     }
 
     Ok(updates)
@@ -145,6 +154,7 @@ fn target_tag(tags: &[Tag], current: Option<Version>, mode: UpdateMode) -> Optio
     tags.iter()
         .filter(|tag| match current {
             Some(current_version) => match mode {
+                UpdateMode::Minor => tag.version.major == current_version.major,
                 UpdateMode::Patch => {
                     tag.version.major == current_version.major
                         && tag.version.minor == current_version.minor
@@ -251,6 +261,36 @@ mod tests {
             .unwrap()
             .name
         );
+
+        assert_eq!(
+            "v1.3.0",
+            target_tag(
+                &tags,
+                Some(Version {
+                    major: 1,
+                    minor: 2,
+                    patch: 0,
+                }),
+                UpdateMode::Minor,
+            )
+            .unwrap()
+            .name
+        );
+
+        assert_eq!(
+            "v2.0.0",
+            target_tag(
+                &tags,
+                Some(Version {
+                    major: 1,
+                    minor: 2,
+                    patch: 0,
+                }),
+                UpdateMode::Major,
+            )
+            .unwrap()
+            .name
+        );
     }
 
     #[test]
@@ -300,7 +340,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(1, updates.len());
-        assert!(updates[0].sha_mismatch);
+        assert!(updates[0].has_sha_mismatch());
     }
 
     #[test]

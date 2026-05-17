@@ -115,7 +115,7 @@ fn run_prompt(
             }
             Key::Toggle => selected[cursor] = !selected[cursor],
             Key::ToggleAll => toggle_all(&mut selected),
-            Key::ToggleFile => toggle_file(updates, &mut selected, &updates[cursor].file),
+            Key::ToggleFile => toggle_file(updates, &mut selected, updates[cursor].file()),
             Key::Invert => invert_selected(&mut selected),
             Key::SelectNone => selected.fill(false),
             Key::Accept => {
@@ -168,7 +168,7 @@ fn render(
         .iter()
         .enumerate()
         .map(|(index, update)| {
-            let file_changed = index == 0 || updates[index - 1].file != update.file;
+            let file_changed = index == 0 || updates[index - 1].file() != update.file();
             let marker = if selected[index] { "●" } else { "○" };
             let marker_style = if selected[index] {
                 Style::default().fg(Color::Green)
@@ -188,7 +188,7 @@ fn render(
                 lines.push(Line::from(vec![
                     Span::styled("▸ ", Style::default().fg(Color::Cyan)),
                     Span::styled(
-                        &update.file,
+                        update.file(),
                         Style::default()
                             .fg(Color::Cyan)
                             .add_modifier(Modifier::BOLD),
@@ -215,7 +215,7 @@ fn render(
                     Span::raw("")
                 },
                 if update.has_version_comment() {
-                    Span::styled(&update.version_comment, Style::default().fg(Color::Blue))
+                    Span::styled(update.version_comment(), Style::default().fg(Color::Blue))
                 } else {
                     Span::raw("")
                 },
@@ -313,10 +313,10 @@ fn short_sha(sha: &str) -> &str {
 }
 
 fn short_sha_or_full(update: &ResolvedUpdate) -> String {
-    if update.current_ref.is_empty() {
+    if !update.has_current_ref() {
         update.current.clone()
     } else {
-        short_sha(&update.current_ref).to_string()
+        short_sha(update.current_ref()).to_string()
     }
 }
 
@@ -324,9 +324,9 @@ fn workflow_count(updates: &[ResolvedUpdate]) -> usize {
     let mut count = 0usize;
     let mut last_file: Option<&str> = None;
     for update in updates {
-        if last_file != Some(update.file.as_str()) {
+        if last_file != Some(update.file()) {
             count += 1;
-            last_file = Some(update.file.as_str());
+            last_file = Some(update.file());
         }
     }
     count
@@ -347,11 +347,11 @@ fn toggle_file(updates: &[ResolvedUpdate], selected: &mut [bool], file: &str) {
     let all_selected = updates
         .iter()
         .zip(selected.iter())
-        .filter(|(update, _)| update.file == file)
+        .filter(|(update, _)| update.file() == file)
         .all(|(_, is_selected)| *is_selected);
 
     for (update, is_selected) in updates.iter().zip(selected.iter_mut()) {
-        if update.file == file {
+        if update.file() == file {
             *is_selected = !all_selected;
         }
     }

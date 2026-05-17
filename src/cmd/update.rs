@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use owo_colors::OwoColorize;
 use thiserror::Error;
 
-use crate::cli::{GlobalArgs, UpdateArgs};
+use crate::cli::{GlobalArgs, UpdateArgs, UpdateSelection};
 use crate::cmd::prompt;
 use crate::engine::rewrite::RewriteError;
 use crate::engine::{self, ApplyResult, CheckError, CheckOptions, ResolveError};
@@ -47,7 +47,7 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
         resolve_options: ResolveOptions {
             excludes: global.excludes,
             include_branches: args.include_branches,
-            mode: UpdateMode::Major,
+            mode: resolve_mode(args.update),
             style: PinStyle::Sha,
         },
     }) {
@@ -150,17 +150,17 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
             let mut line = format!(
                 "  - {} at {}:{} uses {}",
                 update.action.bold(),
-                update.file.cyan(),
-                update.line,
+                update.file().cyan(),
+                update.line(),
                 update.current.red()
             );
             if update.has_version_comment() {
-                line.push_str(&format!(" but says {}", update.version_comment.yellow()));
+                line.push_str(&format!(" but says {}", update.version_comment().yellow()));
             }
             if update.has_current_ref() {
                 line.push_str(&format!(
                     "; expected {}",
-                    short_sha(&update.current_ref).green()
+                    short_sha(update.current_ref()).green()
                 ));
             }
             logger.warn(format!("{line}."));
@@ -188,11 +188,11 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
                 update.job.bright_black(),
                 update.current.yellow(),
                 target,
-                update.file.bright_black(),
-                update.line
+                update.file().bright_black(),
+                update.line()
             );
             if update.has_version_comment() {
-                line.push_str(&format!(" #{}", update.version_comment.bright_black()));
+                line.push_str(&format!(" #{}", update.version_comment().bright_black()));
             }
             if update.has_sha_mismatch() {
                 line.push_str(&format!(" {}", "(SHA/comment mismatch)".red()));
@@ -260,15 +260,15 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
         };
         let mut line = format!(
             "  - {}:{} [{}] {} {} -> {}",
-            update.file.cyan(),
-            update.line,
+            update.file().cyan(),
+            update.line(),
             update.job.bright_black(),
             update.action.bold(),
             summarize_ref(&update.current).bright_black(),
             target
         );
         if update.has_version_comment() {
-            line.push_str(&format!(" #{}", update.version_comment.bright_black()));
+            line.push_str(&format!(" #{}", update.version_comment().bright_black()));
         }
         if update.has_sha_mismatch() {
             line.push_str(&format!(" {}", "(SHA/comment mismatch)".red()));
@@ -320,10 +320,18 @@ fn default_inputs(inputs: Vec<String>, recursive: bool) -> Vec<String> {
     }
 }
 
+fn resolve_mode(selection: UpdateSelection) -> UpdateMode {
+    match selection {
+        UpdateSelection::Major => UpdateMode::Major,
+        UpdateSelection::Minor => UpdateMode::Minor,
+        UpdateSelection::Patch => UpdateMode::Patch,
+    }
+}
+
 fn update_file_count(updates: &[ResolvedUpdate]) -> usize {
     updates
         .iter()
-        .map(|update| update.file.as_str())
+        .map(|update| update.file())
         .collect::<BTreeSet<_>>()
         .len()
 }
@@ -350,7 +358,10 @@ fn summarize_ref(reference: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::default_inputs;
+    use crate::cli::UpdateSelection;
+    use crate::model::UpdateMode;
+
+    use super::{default_inputs, resolve_mode};
 
     #[test]
     fn defaults_to_dot_github() {
@@ -363,5 +374,12 @@ mod tests {
     #[test]
     fn defaults_to_dot_when_recursive() {
         assert_eq!(vec![String::from(".")], default_inputs(Vec::new(), true));
+    }
+
+    #[test]
+    fn maps_update_selection_to_resolve_mode() {
+        assert_eq!(UpdateMode::Major, resolve_mode(UpdateSelection::Major));
+        assert_eq!(UpdateMode::Minor, resolve_mode(UpdateSelection::Minor));
+        assert_eq!(UpdateMode::Patch, resolve_mode(UpdateSelection::Patch));
     }
 }

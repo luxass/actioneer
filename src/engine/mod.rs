@@ -78,7 +78,7 @@ fn count_selected_files(updates: &[ResolvedUpdate], selected: &[usize]) -> usize
     selected
         .iter()
         .filter_map(|index| updates.get(*index))
-        .map(|update| update.file.as_str())
+        .map(|update| update.file())
         .collect::<BTreeSet<_>>()
         .len()
 }

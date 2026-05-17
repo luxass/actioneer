@@ -3,7 +3,7 @@ use std::fs;
 
 use thiserror::Error;
 
-use crate::model::ResolvedUpdate;
+use crate::model::{ResolvedUpdate, UpdateSource, UpdateTarget, ValidationState};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TextEdit {
@@ -85,7 +85,7 @@ fn collect_updates_by_file<'a>(
     for &index in selected {
         if let Some(update) = updates.get(index) {
             grouped
-                .entry(update.file.clone())
+                .entry(update.file().to_string())
                 .or_insert_with(Vec::new)
                 .push(update);
         }
@@ -100,16 +100,16 @@ fn validate_and_sort_updates<'a>(
     updates: &[&'a ResolvedUpdate],
 ) -> Result<Vec<&'a ResolvedUpdate>, RewriteError> {
     let mut ordered = updates.to_vec();
-    ordered.sort_by_key(|update| update.ref_start);
+    ordered.sort_by_key(|update| update.ref_start());
 
     for update in &ordered {
-        if update.file != file {
+        if update.file() != file {
             continue;
         }
-        if update.ref_start > update.ref_end || update.ref_end > contents.len() {
+        if update.ref_start() > update.ref_end() || update.ref_end() > contents.len() {
             return Err(RewriteError::UpdateTargetNotFound);
         }
-        if contents[update.ref_start..update.ref_end] != update.current {
+        if contents[update.ref_start()..update.ref_end()] != update.current {
             return Err(RewriteError::UpdateTargetNotFound);
         }
     }
@@ -122,19 +122,19 @@ fn build_text_edits(contents: &str, updates: &[&ResolvedUpdate]) -> Vec<TextEdit
 
     for update in updates {
         edits.push(TextEdit {
-            start: update.ref_start,
-            end: update.ref_end,
-            replacement: update.next.clone(),
+            start: update.ref_start(),
+            end: update.ref_end(),
+            replacement: update.next_ref().to_string(),
         });
 
         if !update.should_write_version_comment() {
             continue;
         }
 
-        let line_end = line_end_offset(contents, update.ref_end);
-        let comment_start = comment_start_offset(contents, update.ref_end);
+        let line_end = line_end_offset(contents, update.ref_end());
+        let comment_start = comment_start_offset(contents, update.ref_end());
         let replacement_start = comment_start
-            .map(|start| trim_comment_padding(contents, update.ref_end, start))
+            .map(|start| trim_comment_padding(contents, update.ref_end(), start))
             .unwrap_or(line_end);
 
         edits.push(TextEdit {
@@ -231,21 +231,19 @@ mod tests {
             "      - uses: actions/checkout@oldsha # v4.1.0\n",
             "      - uses: actions/setup-node@v3\n",
         );
-        let update = ResolvedUpdate {
-            action: "actions/checkout".into(),
-            job: "build".into(),
-            current: "oldsha".into(),
-            current_ref: String::new(),
-            version_comment: "v4.1.0".into(),
-            sha_mismatch: false,
-            next: "newsha".into(),
-            next_label: "v4.2.0".into(),
-            next_is_major: false,
-            file: ".github/workflows/ci.yml".into(),
-            line: 4,
-            ref_start: input.find("oldsha").unwrap(),
-            ref_end: input.find("oldsha").unwrap() + "oldsha".len(),
-        };
+        let update = ResolvedUpdate::new(
+            "actions/checkout",
+            "build",
+            "oldsha",
+            ValidationState::new("", "v4.1.0", false),
+            UpdateTarget::new("newsha", "v4.2.0", false),
+            UpdateSource::new(
+                ".github/workflows/ci.yml",
+                4,
+                input.find("oldsha").unwrap(),
+                input.find("oldsha").unwrap() + "oldsha".len(),
+            ),
+        );
 
         let rewrite = apply_updates_to_text(input, ".github/workflows/ci.yml", &[&update]).unwrap();
 
@@ -271,21 +269,19 @@ mod tests {
             "      - uses: \"actions/setup-node@oldsha\" # v6.2.0\n",
         );
         let current = "oldsha";
-        let update = ResolvedUpdate {
-            action: "actions/setup-node".into(),
-            job: "build".into(),
-            current: current.into(),
-            current_ref: String::new(),
-            version_comment: "v6.2.0".into(),
-            sha_mismatch: false,
-            next: "newsha".into(),
-            next_label: "v6.4.0".into(),
-            next_is_major: false,
-            file: ".github/workflows/ci.yml".into(),
-            line: 4,
-            ref_start: input.find(current).unwrap(),
-            ref_end: input.find(current).unwrap() + current.len(),
-        };
+        let update = ResolvedUpdate::new(
+            "actions/setup-node",
+            "build",
+            current,
+            ValidationState::new("", "v6.2.0", false),
+            UpdateTarget::new("newsha", "v6.4.0", false),
+            UpdateSource::new(
+                ".github/workflows/ci.yml",
+                4,
+                input.find(current).unwrap(),
+                input.find(current).unwrap() + current.len(),
+            ),
+        );
 
         let rewrite = apply_updates_to_text(input, ".github/workflows/ci.yml", &[&update]).unwrap();
 
@@ -309,36 +305,32 @@ mod tests {
             "      - uses: actions/checkout@oldcheckout # v4.1.0\n",
             "      - uses: actions/setup-node@oldnode # v6.2.0\n",
         );
-        let checkout = ResolvedUpdate {
-            action: "actions/checkout".into(),
-            job: "build".into(),
-            current: "oldcheckout".into(),
-            current_ref: String::new(),
-            version_comment: "v4.1.0".into(),
-            sha_mismatch: false,
-            next: "newcheckout".into(),
-            next_label: "v4.2.0".into(),
-            next_is_major: false,
-            file: ".github/workflows/ci.yml".into(),
-            line: 4,
-            ref_start: input.find("oldcheckout").unwrap(),
-            ref_end: input.find("oldcheckout").unwrap() + "oldcheckout".len(),
-        };
-        let setup_node = ResolvedUpdate {
-            action: "actions/setup-node".into(),
-            job: "build".into(),
-            current: "oldnode".into(),
-            current_ref: String::new(),
-            version_comment: "v6.2.0".into(),
-            sha_mismatch: false,
-            next: "newnode".into(),
-            next_label: "v6.4.0".into(),
-            next_is_major: false,
-            file: ".github/workflows/ci.yml".into(),
-            line: 5,
-            ref_start: input.find("oldnode").unwrap(),
-            ref_end: input.find("oldnode").unwrap() + "oldnode".len(),
-        };
+        let checkout = ResolvedUpdate::new(
+            "actions/checkout",
+            "build",
+            "oldcheckout",
+            ValidationState::new("", "v4.1.0", false),
+            UpdateTarget::new("newcheckout", "v4.2.0", false),
+            UpdateSource::new(
+                ".github/workflows/ci.yml",
+                4,
+                input.find("oldcheckout").unwrap(),
+                input.find("oldcheckout").unwrap() + "oldcheckout".len(),
+            ),
+        );
+        let setup_node = ResolvedUpdate::new(
+            "actions/setup-node",
+            "build",
+            "oldnode",
+            ValidationState::new("", "v6.2.0", false),
+            UpdateTarget::new("newnode", "v6.4.0", false),
+            UpdateSource::new(
+                ".github/workflows/ci.yml",
+                5,
+                input.find("oldnode").unwrap(),
+                input.find("oldnode").unwrap() + "oldnode".len(),
+            ),
+        );
 
         let rewrite =
             apply_updates_to_text(input, ".github/workflows/ci.yml", &[&checkout, &setup_node])
@@ -364,21 +356,19 @@ mod tests {
             "    steps:\n",
             "      - uses: actions/checkout@oldsha # v4.1.0\n",
         );
-        let update = ResolvedUpdate {
-            action: "actions/checkout".into(),
-            job: "build".into(),
-            current: "wrongsha".into(),
-            current_ref: String::new(),
-            version_comment: "v4.1.0".into(),
-            sha_mismatch: false,
-            next: "newsha".into(),
-            next_label: "v4.2.0".into(),
-            next_is_major: false,
-            file: ".github/workflows/ci.yml".into(),
-            line: 4,
-            ref_start: input.find("oldsha").unwrap(),
-            ref_end: input.find("oldsha").unwrap() + "oldsha".len(),
-        };
+        let update = ResolvedUpdate::new(
+            "actions/checkout",
+            "build",
+            "wrongsha",
+            ValidationState::new("", "v4.1.0", false),
+            UpdateTarget::new("newsha", "v4.2.0", false),
+            UpdateSource::new(
+                ".github/workflows/ci.yml",
+                4,
+                input.find("oldsha").unwrap(),
+                input.find("oldsha").unwrap() + "oldsha".len(),
+            ),
+        );
 
         let err = apply_updates_to_text(input, ".github/workflows/ci.yml", &[&update]).unwrap_err();
 

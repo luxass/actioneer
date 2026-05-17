@@ -28,7 +28,6 @@ fn run(app: App) -> Result<ExitCode, errors::Error> {
     let global = app.global.clone();
     match app.command {
         Some(Command::Update(args)) => Ok(cmd::update::run(global, args)?),
-        Some(Command::Validate(args)) => Ok(cmd::validate::run(global, args)?),
         Some(Command::Audit(args)) => Ok(cmd::audit::run(global, args)?),
         Some(Command::Version) => Ok(cmd::version::run()),
         None => Ok(cmd::update::run(global, app.update)?),

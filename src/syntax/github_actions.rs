@@ -1,10 +1,8 @@
 use serde_yaml::Value;
 use thiserror::Error;
-use yamlpath::Route;
+use yamlpath::{Document, Feature, Route};
 
 use crate::model::{ActionName, ByteSpan, Reference, ReferenceKind, Repository, SourceLocation};
-
-use super::yaml_tree;
 
 #[derive(Debug, Error)]
 pub enum SyntaxError {
@@ -13,7 +11,7 @@ pub enum SyntaxError {
 }
 
 pub fn collect_references(file_path: &str, contents: &str) -> Result<Vec<Reference>, SyntaxError> {
-    let document = yaml_tree::parse(contents)?;
+    let document = parse_document(contents)?;
     let root: Value = serde_yaml::from_str(contents).map_err(|_| SyntaxError::InvalidYaml)?;
     let mut found = Vec::new();
     if is_composite_action(file_path) {
@@ -25,7 +23,7 @@ pub fn collect_references(file_path: &str, contents: &str) -> Result<Vec<Referen
 }
 
 fn collect_workflow_actions(
-    document: &yamlpath::Document,
+    document: &Document,
     root: &Value,
     file_path: &str,
     found: &mut Vec<Reference>,
@@ -53,7 +51,7 @@ fn collect_workflow_actions(
 }
 
 fn collect_job_actions(
-    document: &yamlpath::Document,
+    document: &Document,
     job: &Value,
     job_route: Route<'_>,
     file_path: &str,
@@ -85,7 +83,7 @@ fn collect_job_actions(
 }
 
 fn collect_composite_actions(
-    document: &yamlpath::Document,
+    document: &Document,
     root: &Value,
     file_path: &str,
     found: &mut Vec<Reference>,
@@ -120,7 +118,7 @@ fn collect_composite_actions(
 }
 
 fn collect_step_actions(
-    document: &yamlpath::Document,
+    document: &Document,
     steps: &[Value],
     steps_route: &Route<'_>,
     file_path: &str,
@@ -144,14 +142,14 @@ fn collect_step_actions(
 }
 
 fn append_action_reference(
-    document: &yamlpath::Document,
+    document: &Document,
     route: &Route<'_>,
     scope: &str,
     kind: ReferenceKind,
     file_path: &str,
     found: &mut Vec<Reference>,
 ) {
-    let Some(value_range) = yaml_tree::scalar_at_route(document, route).ok().flatten() else {
+    let Some(value_range) = scalar_at_route(document, route).ok().flatten() else {
         return;
     };
     if let Some(reference) = action_from_uses_value(
@@ -170,6 +168,77 @@ fn append_action_reference(
 
 fn mapping_value<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
     value.as_mapping()?.get(Value::String(key.to_string()))
+}
+
+#[derive(Debug)]
+struct ScalarRange<'a> {
+    text: &'a str,
+    start_byte: usize,
+    end_byte: usize,
+    line: usize,
+    trailing_comment: String,
+}
+
+fn parse_document(contents: &str) -> Result<Document, SyntaxError> {
+    Document::new(contents.to_string()).map_err(|_| SyntaxError::InvalidYaml)
+}
+
+fn scalar_at_route<'a>(
+    document: &'a Document,
+    route: &Route<'_>,
+) -> Result<Option<ScalarRange<'a>>, SyntaxError> {
+    let Some(feature) = document
+        .query_exact(route)
+        .map_err(|_| SyntaxError::InvalidYaml)?
+    else {
+        return Ok(None);
+    };
+
+    let raw = document.extract(&feature);
+    let text = clean_scalar(raw);
+    let leading = raw.find(text).unwrap_or(0);
+    let start_byte = feature.location.byte_span.0 + leading;
+    let end_byte = start_byte + text.len();
+    let line = feature.location.point_span.0 .0 + 1;
+    let trailing_comment = trailing_comment(document, &feature);
+
+    Ok(Some(ScalarRange {
+        text,
+        start_byte,
+        end_byte,
+        line,
+        trailing_comment,
+    }))
+}
+
+fn trailing_comment(document: &Document, feature: &Feature<'_>) -> String {
+    document
+        .feature_comments(feature)
+        .into_iter()
+        .filter(|comment| comment.location.point_span.0 .0 == feature.location.point_span.0 .0)
+        .filter(|comment| comment.location.byte_span.0 >= feature.location.byte_span.1)
+        .min_by_key(|comment| comment.location.byte_span.0)
+        .map(|comment| {
+            document
+                .extract(&comment)
+                .trim_start_matches('#')
+                .trim_matches([' ', '\t'])
+                .to_string()
+        })
+        .unwrap_or_default()
+}
+
+fn clean_scalar(value: &str) -> &str {
+    let trimmed = value.trim_matches([' ', '\t']);
+    if trimmed.len() >= 2 {
+        let bytes = trimmed.as_bytes();
+        let first = bytes[0];
+        let last = bytes[bytes.len() - 1];
+        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+            return &trimmed[1..trimmed.len() - 1];
+        }
+    }
+    trimmed
 }
 
 fn action_from_uses_value(
@@ -272,7 +341,33 @@ fn is_composite_action(path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use yamlpath::route;
+
     use super::*;
+
+    #[test]
+    fn scalar_at_route_removes_quotes_and_preserves_ref_span() {
+        let source = "uses: \"actions/setup-node@v4\"\n";
+        let document = parse_document(source).unwrap();
+        let value = scalar_at_route(&document, &route!("uses"))
+            .unwrap()
+            .unwrap();
+        assert_eq!("actions/setup-node@v4", value.text);
+        assert_eq!(
+            "actions/setup-node@v4",
+            &source[value.start_byte..value.end_byte]
+        );
+    }
+
+    #[test]
+    fn scalar_at_route_finds_trailing_comment() {
+        let source = "uses: \"actions/setup-node@v4#literal\" # v4.2.0\n";
+        let document = parse_document(source).unwrap();
+        let value = scalar_at_route(&document, &route!("uses"))
+            .unwrap()
+            .unwrap();
+        assert_eq!("v4.2.0", value.trailing_comment);
+    }
 
     #[test]
     fn collects_workflow_step_and_reusable_workflow_references() {

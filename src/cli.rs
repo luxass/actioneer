@@ -1,3 +1,4 @@
+use crate::model::UpdateMode;
 use clap::{
     builder::styling::{AnsiColor, Effects, Styles},
     Args, Parser, Subcommand, ValueEnum,
@@ -49,8 +50,11 @@ pub struct UpdateArgs {
     #[arg(long = "include-branches", default_value_t = false)]
     pub include_branches: bool,
 
-    #[arg(long = "update", value_enum, default_value_t = UpdateSelection::Major)]
-    pub update: UpdateSelection,
+    #[arg(long = "update", value_enum, default_value_t = UpdateMode::Major)]
+    pub update: UpdateMode,
+
+    #[arg(long, default_value_t = false)]
+    pub tag: bool,
 
     #[arg(long, short = 'y', default_value_t = false)]
     pub yes: bool,
@@ -67,8 +71,11 @@ pub struct AuditArgs {
     #[arg(long = "include-branches", default_value_t = false)]
     pub include_branches: bool,
 
-    #[arg(long = "update", value_enum, default_value_t = UpdateSelection::Major)]
-    pub update: UpdateSelection,
+    #[arg(long = "update", value_enum, default_value_t = UpdateMode::Major)]
+    pub update: UpdateMode,
+
+    #[arg(long, default_value_t = false)]
+    pub tag: bool,
 
     #[arg(value_name = "INPUT")]
     pub inputs: Vec<String>,
@@ -81,18 +88,13 @@ pub enum Mode {
     Beautiful,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum UpdateSelection {
-    Major,
-    Minor,
-    Patch,
-}
-
 #[cfg(test)]
 mod tests {
     use clap::Parser;
 
-    use super::{App, Command, Mode, UpdateSelection};
+    use crate::model::UpdateMode;
+
+    use super::{App, Command, Mode};
 
     #[test]
     fn root_command_uses_update_args() {
@@ -106,12 +108,20 @@ mod tests {
 
     #[test]
     fn explicit_update_command_uses_update_args() {
-        let app = App::parse_from(["actioneer", "update", "--update", "patch", ".github"]);
+        let app = App::parse_from([
+            "actioneer",
+            "update",
+            "--update",
+            "patch",
+            "--tag",
+            ".github",
+        ]);
 
         match app.command {
             Some(Command::Update(args)) => {
                 assert_eq!(vec![String::from(".github")], args.inputs);
-                assert_eq!(UpdateSelection::Patch, args.update);
+                assert_eq!(UpdateMode::Patch, args.update);
+                assert!(args.tag);
             }
             other => panic!("expected update command, got {other:?}"),
         }
@@ -131,7 +141,8 @@ mod tests {
         match app.command {
             Some(Command::Audit(args)) => {
                 assert!(args.recursive);
-                assert_eq!(UpdateSelection::Minor, args.update);
+                assert_eq!(UpdateMode::Minor, args.update);
+                assert!(!args.tag);
                 assert_eq!(vec![String::from(".")], args.inputs);
             }
             other => panic!("expected audit command, got {other:?}"),
@@ -142,7 +153,8 @@ mod tests {
     fn root_command_defaults_update_mode_to_major() {
         let app = App::parse_from(["actioneer", ".github/workflows"]);
 
-        assert_eq!(UpdateSelection::Major, app.update.update);
+        assert_eq!(UpdateMode::Major, app.update.update);
+        assert!(!app.update.tag);
     }
 
     #[test]

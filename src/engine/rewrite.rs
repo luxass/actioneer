@@ -3,7 +3,7 @@ use std::fs;
 
 use thiserror::Error;
 
-use crate::model::{ResolvedUpdate, UpdateSource, UpdateTarget, ValidationState};
+use crate::model::ResolvedUpdate;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TextEdit {
@@ -220,6 +220,8 @@ fn apply_text_edits(contents: &str, edits: &[TextEdit]) -> Result<String, ApplyE
 
 #[cfg(test)]
 mod tests {
+    use crate::model::{UpdateSource, UpdateTarget, ValidationState};
+
     use super::*;
 
     #[test]

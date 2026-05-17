@@ -4,13 +4,13 @@ use std::process::ExitCode;
 use owo_colors::OwoColorize;
 use thiserror::Error;
 
-use crate::cli::{GlobalArgs, UpdateArgs, UpdateSelection};
+use crate::cli::{GlobalArgs, UpdateArgs};
 use crate::cmd::prompt;
 use crate::engine::rewrite::RewriteError;
 use crate::engine::{self, ApplyResult, CheckError, CheckOptions, ResolveError};
 use crate::github;
 use crate::logger;
-use crate::model::{PinStyle, ResolveOptions, ResolvedUpdate, UpdateMode};
+use crate::model::{PinStyle, ResolveOptions, ResolvedUpdate};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -47,8 +47,12 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
         resolve_options: ResolveOptions {
             excludes: global.excludes,
             include_branches: args.include_branches,
-            mode: resolve_mode(args.update),
-            style: PinStyle::Sha,
+            mode: args.update,
+            style: if args.tag {
+                PinStyle::Tag
+            } else {
+                PinStyle::Sha
+            },
         },
     }) {
         Ok(result) => result,
@@ -69,8 +73,12 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
                         status.to_string().yellow()
                     ));
                     let hint = match status {
-                        401 => "GitHub rejected the request as unauthorized.",
-                        403 => "This is usually a GitHub rate limit or access restriction.",
+                        401 => {
+                            "Set GITHUB_TOKEN or run `gh auth login` so actioneer can authenticate GitHub requests."
+                        }
+                        403 => {
+                            "This is usually a rate limit or access restriction. Set GITHUB_TOKEN or run `gh auth login` before retrying."
+                        }
                         404 => "The repository was not found or is not publicly accessible.",
                         429 => "GitHub is rate limiting these requests.",
                         502 | 503 | 504 => "GitHub appears temporarily unavailable.",
@@ -82,7 +90,9 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
                 }
                 github::Error::Request(err) => {
                     logger.error(format!("Request error: {}.", err.to_string().yellow()));
-                    logger.info("Check network, DNS, proxy, and TLS settings before retrying.");
+                    logger.info(
+                        "Check network, DNS, proxy, and TLS settings. If you are unauthenticated, set GITHUB_TOKEN or run `gh auth login`.",
+                    );
                 }
             }
             return Ok(ExitCode::FAILURE);
@@ -91,7 +101,7 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
 
     if result.reference_count == 0 {
         if logger.is_json() {
-            logger.info(
+            logger.json(
                 serde_json::to_string(&serde_json::json!({ "updates": [] }))
                     .expect("serializing updates payload"),
             );
@@ -106,7 +116,7 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
     }
 
     if logger.is_json() {
-        logger.info(
+        logger.json(
             serde_json::to_string(&serde_json::json!({ "updates": result.updates }))
                 .expect("serializing updates payload"),
         );
@@ -213,7 +223,7 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
         match prompt::select_updates(&result.updates) {
             Ok(selected) => selected,
             Err(prompt::Error::NotATerminal) => {
-                logger.warn(format!(
+                logger.error(format!(
                     "{} in this terminal.",
                     "Interactive selection is not available".yellow()
                 ));
@@ -223,7 +233,7 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
                     "--dry-run".cyan(),
                     "--mode json".cyan()
                 ));
-                return Ok(ExitCode::SUCCESS);
+                return Ok(ExitCode::FAILURE);
             }
             Err(prompt::Error::Canceled) => {
                 logger.warn(format!("{}", "Selection canceled.".yellow()));
@@ -320,14 +330,6 @@ fn default_inputs(inputs: Vec<String>, recursive: bool) -> Vec<String> {
     }
 }
 
-fn resolve_mode(selection: UpdateSelection) -> UpdateMode {
-    match selection {
-        UpdateSelection::Major => UpdateMode::Major,
-        UpdateSelection::Minor => UpdateMode::Minor,
-        UpdateSelection::Patch => UpdateMode::Patch,
-    }
-}
-
 fn update_file_count(updates: &[ResolvedUpdate]) -> usize {
     updates
         .iter()
@@ -358,10 +360,7 @@ fn summarize_ref(reference: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use crate::cli::UpdateSelection;
-    use crate::model::UpdateMode;
-
-    use super::{default_inputs, resolve_mode};
+    use super::default_inputs;
 
     #[test]
     fn defaults_to_dot_github() {
@@ -374,12 +373,5 @@ mod tests {
     #[test]
     fn defaults_to_dot_when_recursive() {
         assert_eq!(vec![String::from(".")], default_inputs(Vec::new(), true));
-    }
-
-    #[test]
-    fn maps_update_selection_to_resolve_mode() {
-        assert_eq!(UpdateMode::Major, resolve_mode(UpdateSelection::Major));
-        assert_eq!(UpdateMode::Minor, resolve_mode(UpdateSelection::Minor));
-        assert_eq!(UpdateMode::Patch, resolve_mode(UpdateSelection::Patch));
     }
 }

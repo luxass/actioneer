@@ -1,4 +1,6 @@
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+use clap::ValueEnum;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum UpdateMode {
     #[default]
     Major,
@@ -10,6 +12,7 @@ pub enum UpdateMode {
 pub enum PinStyle {
     #[default]
     Sha,
+    Tag,
 }
 
 /// Controls how GitHub references are turned into proposed updates.

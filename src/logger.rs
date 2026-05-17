@@ -1,3 +1,5 @@
+use std::io::{self, IsTerminal, Write};
+
 use crate::cli::Mode;
 
 pub struct Logger {
@@ -14,28 +16,73 @@ impl Logger {
     }
 
     pub fn debug(&self, message: impl AsRef<str>) {
-        self.write(message.as_ref());
+        self.write_human(message.as_ref());
     }
 
     pub fn info(&self, message: impl AsRef<str>) {
-        self.write(message.as_ref());
+        self.write_human(message.as_ref());
     }
 
     pub fn warn(&self, message: impl AsRef<str>) {
-        self.write(message.as_ref());
+        self.write_human(message.as_ref());
     }
 
     pub fn error(&self, message: impl AsRef<str>) {
-        self.write(message.as_ref());
+        self.write_human(message.as_ref());
     }
 
-    fn write(&self, message: &str) {
-        if self.mode == Mode::Plain {
-            println!("{}", strip_ansi(message));
+    pub fn json(&self, message: impl AsRef<str>) {
+        let mut stdout = io::stdout().lock();
+        let _ = writeln!(stdout, "{}", message.as_ref());
+    }
+
+    fn write_human(&self, message: &str) {
+        let formatted = if self.effective_human_mode() == Mode::Plain {
+            strip_ansi(message)
         } else {
-            println!("{message}");
+            message.to_string()
+        };
+
+        if self.is_json() {
+            let mut stderr = io::stderr().lock();
+            let _ = writeln!(stderr, "{formatted}");
+        } else {
+            let mut stdout = io::stdout().lock();
+            let _ = writeln!(stdout, "{formatted}");
         }
     }
+
+    fn effective_human_mode(&self) -> Mode {
+        match self.mode {
+            Mode::Plain => Mode::Plain,
+            Mode::Json => {
+                if supports_color_on_stderr() {
+                    Mode::Json
+                } else {
+                    Mode::Plain
+                }
+            }
+            Mode::Beautiful => {
+                if supports_color_on_stdout() {
+                    Mode::Beautiful
+                } else {
+                    Mode::Plain
+                }
+            }
+        }
+    }
+}
+
+fn supports_color_on_stdout() -> bool {
+    color_enabled() && io::stdout().is_terminal()
+}
+
+fn supports_color_on_stderr() -> bool {
+    color_enabled() && io::stderr().is_terminal()
+}
+
+fn color_enabled() -> bool {
+    std::env::var_os("NO_COLOR").is_none()
 }
 
 fn strip_ansi(input: &str) -> String {

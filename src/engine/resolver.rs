@@ -80,6 +80,7 @@ pub fn resolve_updates(
             UpdateTarget::new(
                 match options.style {
                     PinStyle::Sha => target_tag.sha.clone(),
+                    PinStyle::Tag => target_tag.name.clone(),
                 },
                 target_tag.name.clone(),
                 is_major_update(context.current_version, target_tag.version),
@@ -341,6 +342,57 @@ mod tests {
 
         assert_eq!(1, updates.len());
         assert!(updates[0].has_sha_mismatch());
+    }
+
+    #[test]
+    fn pin_style_tag_uses_tag_name_instead_of_sha() {
+        let repository = Repository {
+            owner: "actions".into(),
+            name: "checkout".into(),
+        };
+        let tags = HashMap::from([(
+            repository.clone(),
+            vec![Tag {
+                name: "v4.2.0".into(),
+                sha: "abcdef0123456789".into(),
+                version: Version {
+                    major: 4,
+                    minor: 2,
+                    patch: 0,
+                },
+            }],
+        )]);
+        let reference = Reference {
+            kind: ReferenceKind::WorkflowStep,
+            name: ActionName {
+                repository,
+                path: String::new(),
+            },
+            current_ref: "v4.1.0".into(),
+            version_hint: String::new(),
+            scope: "build".into(),
+            source: SourceLocation {
+                file: "ci.yml".into(),
+                line: 4,
+                ref_span: ByteSpan { start: 0, end: 6 },
+            },
+        };
+
+        let updates = resolve_updates(
+            &|repository| Ok(tags.get(repository).cloned().unwrap_or_default()),
+            &[reference],
+            &ResolveOptions {
+                excludes: Vec::new(),
+                include_branches: false,
+                mode: UpdateMode::Major,
+                style: PinStyle::Tag,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(1, updates.len());
+        assert_eq!("v4.2.0", updates[0].next_ref());
+        assert_eq!("v4.2.0", updates[0].display_target());
     }
 
     #[test]

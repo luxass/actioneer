@@ -29,9 +29,7 @@ impl Default for Client {
     fn default() -> Self {
         Self {
             http: HttpClient::builder().build().expect("reqwest client"),
-            token: std::env::var("GITHUB_TOKEN")
-                .ok()
-                .filter(|token| !token.is_empty()),
+            token: resolve_token(),
         }
     }
 }
@@ -81,4 +79,42 @@ struct ApiTagCommit {
 struct ApiTag {
     name: String,
     commit: ApiTagCommit,
+}
+
+fn resolve_token() -> Option<String> {
+    std::env::var("GITHUB_TOKEN")
+        .ok()
+        .and_then(|token| normalize_token(&token))
+        .or_else(resolve_gh_auth_token)
+}
+
+fn resolve_gh_auth_token() -> Option<String> {
+    let output = std::process::Command::new("gh")
+        .args(["auth", "token"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let token = String::from_utf8(output.stdout).ok()?;
+    normalize_token(&token)
+}
+
+fn normalize_token(token: &str) -> Option<String> {
+    let trimmed = token.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_token;
+
+    #[test]
+    fn normalize_token_trims_and_rejects_empty_values() {
+        assert_eq!(Some(String::from("abc123")), normalize_token("  abc123 \n"));
+        assert_eq!(None, normalize_token(""));
+        assert_eq!(None, normalize_token("   \n\t"));
+    }
 }

@@ -35,6 +35,9 @@ pub struct GlobalArgs {
     #[arg(long, global = true, default_value_t = false)]
     pub dry_run: bool,
 
+    #[arg(long = "no-cache", global = true, default_value_t = false)]
+    pub no_cache: bool,
+
     #[arg(long = "exclude", global = true)]
     pub excludes: Vec<String>,
 
@@ -103,6 +106,7 @@ mod tests {
         assert!(app.command.is_none());
         assert_eq!(vec![String::from(".github/workflows")], app.update.inputs);
         assert!(!app.global.dry_run);
+        assert!(!app.global.no_cache);
         assert_eq!(Mode::Beautiful, app.global.mode);
     }
 
@@ -164,6 +168,7 @@ mod tests {
             "--dry-run",
             "--exclude",
             "actions/cache",
+            "--no-cache",
             "--mode",
             "json",
             ".github",
@@ -171,6 +176,7 @@ mod tests {
 
         assert!(app.command.is_none());
         assert!(app.global.dry_run);
+        assert!(app.global.no_cache);
         assert_eq!(vec![String::from("actions/cache")], app.global.excludes);
         assert_eq!(Mode::Json, app.global.mode);
         assert_eq!(vec![String::from(".github")], app.update.inputs);
@@ -182,6 +188,7 @@ mod tests {
             "actioneer",
             "audit",
             "--dry-run",
+            "--no-cache",
             "--exclude",
             "actions/cache",
             "--mode",
@@ -190,6 +197,7 @@ mod tests {
         ]);
 
         assert!(app.global.dry_run);
+        assert!(app.global.no_cache);
         assert_eq!(vec![String::from("actions/cache")], app.global.excludes);
         assert_eq!(Mode::Plain, app.global.mode);
         match app.command {

@@ -44,6 +44,7 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
     let result = match engine::check(CheckOptions {
         paths: inputs,
         recursive: args.recursive,
+        no_cache: global.no_cache,
         resolve_options: ResolveOptions {
             excludes: global.excludes,
             include_branches: args.include_branches,

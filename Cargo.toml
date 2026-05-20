@@ -3,6 +3,9 @@ name = "actioneer"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+description = "CLI to scan GitHub Actions workflow files, resolve action references, detect updates, and apply them"
+repository = "https://github.com/luxass/actioneer"
+readme = "README.md"
 
 [[bin]]
 name = "actioneer"

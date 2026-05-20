@@ -1,0 +1,120 @@
+use reqwest::blocking::Client as HttpClient;
+use serde::Deserialize;
+use thiserror::Error;
+
+use crate::engine::git::{parse_version, Version};
+use crate::model::Repository;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Tag {
+    pub name: String,
+    pub sha: String,
+    pub version: Version,
+}
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("github request failed")]
+    HttpStatus(u16),
+    #[error(transparent)]
+    Request(#[from] reqwest::Error),
+}
+
+pub struct Client {
+    http: HttpClient,
+    token: Option<String>,
+}
+
+impl Default for Client {
+    fn default() -> Self {
+        Self {
+            http: HttpClient::builder().build().expect("reqwest client"),
+            token: resolve_token(),
+        }
+    }
+}
+
+impl Client {
+    pub fn fetch_tags(&self, repository: &Repository) -> Result<Vec<Tag>, Error> {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/tags?per_page=100",
+            repository.owner, repository.name
+        );
+        let mut request = self
+            .http
+            .get(url)
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "actioneer")
+            .header("X-GitHub-Api-Version", "2022-11-28");
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(token);
+        }
+
+        let response = request.send()?;
+        if !response.status().is_success() {
+            return Err(Error::HttpStatus(response.status().as_u16()));
+        }
+
+        let body: Vec<ApiTag> = response.json()?;
+        Ok(body
+            .into_iter()
+            .filter_map(|tag| {
+                let version = parse_version(&tag.name)?;
+                Some(Tag {
+                    name: tag.name,
+                    sha: tag.commit.sha,
+                    version,
+                })
+            })
+            .collect())
+    }
+}
+
+#[derive(Deserialize)]
+struct ApiTagCommit {
+    sha: String,
+}
+
+#[derive(Deserialize)]
+struct ApiTag {
+    name: String,
+    commit: ApiTagCommit,
+}
+
+fn resolve_token() -> Option<String> {
+    std::env::var("GITHUB_TOKEN")
+        .ok()
+        .and_then(|token| normalize_token(&token))
+        .or_else(resolve_gh_auth_token)
+}
+
+fn resolve_gh_auth_token() -> Option<String> {
+    let output = std::process::Command::new("gh")
+        .args(["auth", "token"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let token = String::from_utf8(output.stdout).ok()?;
+    normalize_token(&token)
+}
+
+fn normalize_token(token: &str) -> Option<String> {
+    let trimmed = token.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_token;
+
+    #[test]
+    fn normalize_token_trims_and_rejects_empty_values() {
+        assert_eq!(Some(String::from("abc123")), normalize_token("  abc123 \n"));
+        assert_eq!(None, normalize_token(""));
+        assert_eq!(None, normalize_token("   \n\t"));
+    }
+}

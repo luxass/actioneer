@@ -8,6 +8,10 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     name: Build and test (${{ matrix.os }})
@@ -28,24 +32,24 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Zig
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: 0.16.0
+      - name: Setup Rust
+        run: rustup default stable
 
-      - name: Fetch dependencies
-        run: zig build --fetch
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Build
-        run: zig build
+        run: cargo build
 
       - name: Test
-        run: zig build test
+        run: cargo test
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: actioneer-${{ matrix.os }}
-          path: zig-out/bin/actioneer*
+          path: |
+            target/debug/actioneer
+            target/debug/actioneer.exe
           if-no-files-found: error
           retention-days: 7

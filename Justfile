@@ -4,22 +4,25 @@ default:
     @just --list
 
 build:
-    zig build
+    cargo build
 
 test:
-    zig build test
+    cargo test
 
 fmt:
-    zig fmt build.zig src
+    cargo fmt --all
 
 run *args:
-    zig build run -- "$@"
+    cargo run -- "$@"
 
 validate *args:
-    zig build run -- validate "$@"
+    cargo run -- validate "$@"
+
+zizmor *args:
+    zizmor "$@"
 
 verbose *args:
-    VERBOSE=true zig build run -- "$@"
+    VERBOSE=true cargo run -- "$@"
 
 clean:
-    rm -rf .zig-cache zig-out
+    rm -rf target .zig-cache zig-out zig-pkg

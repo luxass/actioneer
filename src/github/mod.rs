@@ -1,4 +1,11 @@
+use std::time::SystemTime;
+
+mod cache;
+
+use cache::{cache_file_path, no_cache_from_env, read_cached_tags, write_cached_tags};
 use reqwest::blocking::Client as HttpClient;
+use reqwest::header::{ETAG, IF_NONE_MATCH};
+use reqwest::StatusCode;
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -23,19 +30,30 @@ pub enum Error {
 pub struct Client {
     http: HttpClient,
     token: Option<String>,
+    no_cache: bool,
 }
 
 impl Default for Client {
     fn default() -> Self {
-        Self {
-            http: HttpClient::builder().build().expect("reqwest client"),
-            token: resolve_token(),
-        }
+        Self::new(false)
     }
 }
 
 impl Client {
+    pub fn new(no_cache: bool) -> Self {
+        Self {
+            http: HttpClient::builder().build().expect("reqwest client"),
+            token: resolve_token(),
+            no_cache: no_cache || no_cache_from_env(),
+        }
+    }
+
     pub fn fetch_tags(&self, repository: &Repository) -> Result<Vec<Tag>, Error> {
+        let cache_path = cache_file_path(repository);
+        let cached = (!self.no_cache)
+            .then(|| read_cached_tags(&cache_path))
+            .flatten();
+
         let url = format!(
             "https://api.github.com/repos/{}/{}/tags?per_page=100",
             repository.owner, repository.name
@@ -49,24 +67,34 @@ impl Client {
         if let Some(token) = &self.token {
             request = request.bearer_auth(token);
         }
+        if let Some(entry) = &cached {
+            if let Some(etag) = &entry.etag {
+                request = request.header(IF_NONE_MATCH, etag);
+            }
+        }
 
         let response = request.send()?;
+        if response.status() == StatusCode::NOT_MODIFIED {
+            if let Some(entry) = cached {
+                return Ok(entry.into_tags());
+            }
+            return Err(Error::HttpStatus(StatusCode::NOT_MODIFIED.as_u16()));
+        }
         if !response.status().is_success() {
             return Err(Error::HttpStatus(response.status().as_u16()));
         }
 
+        let etag = response
+            .headers()
+            .get(ETAG)
+            .and_then(|value| value.to_str().ok())
+            .map(ToOwned::to_owned);
         let body: Vec<ApiTag> = response.json()?;
-        Ok(body
-            .into_iter()
-            .filter_map(|tag| {
-                let version = parse_version(&tag.name)?;
-                Some(Tag {
-                    name: tag.name,
-                    sha: tag.commit.sha,
-                    version,
-                })
-            })
-            .collect())
+        let tags = parse_api_tags(body);
+        if !self.no_cache {
+            let _ = write_cached_tags(&cache_path, &tags, etag, SystemTime::now());
+        }
+        Ok(tags)
     }
 }
 
@@ -105,6 +133,19 @@ fn resolve_gh_auth_token() -> Option<String> {
 fn normalize_token(token: &str) -> Option<String> {
     let trimmed = token.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn parse_api_tags(body: Vec<ApiTag>) -> Vec<Tag> {
+    body.into_iter()
+        .filter_map(|tag| {
+            let version = parse_version(&tag.name)?;
+            Some(Tag {
+                name: tag.name,
+                sha: tag.commit.sha,
+                version,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

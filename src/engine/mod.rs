@@ -18,6 +18,7 @@ pub use resolver::ResolveError;
 pub struct CheckOptions {
     pub paths: Vec<String>,
     pub recursive: bool,
+    pub no_cache: bool,
     pub resolve_options: ResolveOptions,
 }
 
@@ -44,7 +45,7 @@ pub enum CheckError {
 
 pub fn check(options: CheckOptions) -> Result<CheckResult, CheckError> {
     let references = scan(&options.paths, options.recursive).map_err(CheckError::Scan)?;
-    let github = GitHubClient::default();
+    let github = GitHubClient::new(options.no_cache);
     let updates = resolver::resolve_updates(
         &|repository| github.fetch_tags(repository),
         &references,

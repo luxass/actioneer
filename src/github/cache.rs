@@ -104,13 +104,21 @@ mod tests {
 
     #[test]
     fn no_cache_env_recognizes_common_truthy_values() {
-        std::env::set_var("ACTIONEER_NO_CACHE", "1");
+        unsafe {
+            std::env::set_var("ACTIONEER_NO_CACHE", "1");
+        }
         assert!(no_cache_from_env());
-        std::env::set_var("ACTIONEER_NO_CACHE", "true");
+        unsafe {
+            std::env::set_var("ACTIONEER_NO_CACHE", "true");
+        }
         assert!(no_cache_from_env());
-        std::env::set_var("ACTIONEER_NO_CACHE", "yes");
+        unsafe {
+            std::env::set_var("ACTIONEER_NO_CACHE", "yes");
+        }
         assert!(no_cache_from_env());
-        std::env::remove_var("ACTIONEER_NO_CACHE");
+        unsafe {
+            std::env::remove_var("ACTIONEER_NO_CACHE");
+        }
     }
 
     #[test]

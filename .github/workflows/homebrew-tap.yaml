@@ -17,5 +17,6 @@ jobs:
       tap-repository: luxass/homebrew-tap
       formula-path: Formula/actioneer.rb
       formula-name: actioneer
+    secrets:
       app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}
       app-private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}

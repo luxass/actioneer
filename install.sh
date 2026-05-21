@@ -103,7 +103,7 @@ install_via_release() {
     arch="$2"
     ver="$3"
 
-    target="${arch}-unknown-linux-musl"
+    target="${arch}-unknown-linux-gnu"
     if [ "$os" = "macos" ]; then
         target="${arch}-apple-darwin"
     fi

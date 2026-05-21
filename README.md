@@ -7,8 +7,7 @@
 ### Homebrew (macOS and Linux)
 
 ```sh
-brew tap luxass/homebrew-tap
-brew install actioneer
+brew install luxass/homebrew-tap/actioneer
 ```
 
 ### Cargo

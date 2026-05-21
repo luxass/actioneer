@@ -7,7 +7,14 @@
 ### Homebrew (macOS and Linux)
 
 ```sh
-brew install luxass/tap/actioneer
+brew tap luxass/homebrew-tap
+brew install actioneer
+```
+
+### Cargo
+
+```sh
+cargo install --locked actioneer
 ```
 
 ### Install Script

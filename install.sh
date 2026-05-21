@@ -16,7 +16,7 @@ need_cmd() {
 detect_os() {
     case "$(uname -s)" in
         Darwin) echo "macos" ;;
-        Linux) echo "linux-musl" ;;
+        Linux) echo "linux" ;;
         *)
             echo "error: unsupported operating system: $(uname -s)" >&2
             exit 1
@@ -89,13 +89,65 @@ resolve_latest_version() {
     download_to_stdout "$api_url" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\(v[^"]*\)".*/\1/p' | head -n 1
 }
 
+install_via_brew() {
+    if command -v brew >/dev/null 2>&1; then
+        echo "detected Homebrew, installing via brew..."
+        brew install luxass/tap/actioneer
+        return 0
+    fi
+    return 1
+}
+
+install_via_release() {
+    os="$1"
+    arch="$2"
+    ver="$3"
+
+    target="${arch}-unknown-linux-musl"
+    if [ "$os" = "macos" ]; then
+        target="${arch}-apple-darwin"
+    fi
+
+    archive_url="https://github.com/${repo}/releases/download/v${ver}/actioneer-${ver}-${target}.tar.gz"
+
+    tmp_dir="$(mktemp -d)"
+    trap 'rm -rf "$tmp_dir"' EXIT INT TERM
+
+    archive_path="${tmp_dir}/actioneer.tar.gz"
+    extract_dir="${tmp_dir}/extract"
+    mkdir -p "$extract_dir"
+
+    download "$archive_url" "$archive_path"
+
+    tar -xzf "$archive_path" -C "$extract_dir"
+
+    binary_path="$(find "$extract_dir" -type f -name actioneer | head -n 1)"
+
+    if [ -z "$binary_path" ]; then
+        echo "error: actioneer binary not found in release archive" >&2
+        exit 1
+    fi
+
+    install_binary "$binary_path" "$install_dir"
+    echo "installed actioneer to ${install_dir}/actioneer"
+}
+
 need_cmd uname
 need_cmd tar
 need_cmd mktemp
 
 os="$(detect_os)"
 arch="$(detect_arch)"
-target="${arch}-${os}"
+
+if [ "$os" = "macos" ]; then
+    if install_via_brew; then
+        exit 0
+    fi
+elif [ "$os" = "linux" ]; then
+    if install_via_brew; then
+        exit 0
+    fi
+fi
 
 if [ "$version" = "latest" ]; then
     resolved_version="$(resolve_latest_version)"
@@ -108,26 +160,4 @@ if [ "$version" = "latest" ]; then
     version="${resolved_version#v}"
 fi
 
-archive_url="https://github.com/${repo}/releases/download/v${version}/actioneer-${version}-${target}.tar.gz"
-
-tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT INT TERM
-
-archive_path="${tmp_dir}/actioneer.tar.gz"
-extract_dir="${tmp_dir}/extract"
-mkdir -p "$extract_dir"
-
-download "$archive_url" "$archive_path"
-
-tar -xzf "$archive_path" -C "$extract_dir"
-
-binary_path="$(find "$extract_dir" -type f -name actioneer | head -n 1)"
-
-if [ -z "$binary_path" ]; then
-    echo "error: actioneer binary not found in release archive" >&2
-    exit 1
-fi
-
-install_binary "$binary_path" "$install_dir"
-
-echo "installed actioneer to ${install_dir}/actioneer"
+install_via_release "$os" "$arch" "$version"

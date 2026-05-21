@@ -4,13 +4,21 @@
 
 ## Install
 
+### Homebrew (macOS and Linux)
+
+```sh
+brew install luxass/tap/actioneer
+```
+
+### Install Script
+
 macOS and Linux:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/luxass/actioneer/main/install.sh | sh
 ```
 
-The installer downloads the correct release for your platform and installs `actioneer` into `~/.local/bin` by default.
+The installer uses Homebrew if available, otherwise downloads the correct release for your platform and installs `actioneer` into `~/.local/bin` by default.
 
 You can override the target directory with `ACTIONEER_INSTALL_DIR`, and pin a specific release with `ACTIONEER_VERSION`.
 

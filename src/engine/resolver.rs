@@ -36,9 +36,10 @@ pub fn resolve_updates(
     fetch_tags: &impl Fn(&Repository) -> Result<Vec<Tag>, GitHubError>,
     references: &[Reference],
     options: &ResolveOptions,
-) -> Result<Vec<ResolvedUpdate>, ResolveError> {
+) -> Result<(Vec<ResolvedUpdate>, usize), ResolveError> {
     let mut tag_cache: HashMap<Repository, Vec<Tag>> = HashMap::new();
     let mut updates = Vec::new();
+    let mut skipped_branches = 0;
 
     for reference in references {
         if is_excluded(reference, &options.excludes) {
@@ -46,6 +47,7 @@ pub fn resolve_updates(
         }
 
         let Some(context) = classify_reference(reference, options.include_branches) else {
+            skipped_branches += 1;
             continue;
         };
 
@@ -94,9 +96,8 @@ pub fn resolve_updates(
         ));
     }
 
-    Ok(updates)
+    Ok((updates, skipped_branches))
 }
-
 fn is_excluded(reference: &Reference, excludes: &[String]) -> bool {
     let action = reference.name.display();
     excludes.iter().any(|exclude| action.contains(exclude))
@@ -328,7 +329,7 @@ mod tests {
             },
         };
 
-        let updates = resolve_updates(
+        let (updates, _) = resolve_updates(
             &|repository| Ok(tags.get(repository).cloned().unwrap_or_default()),
             &[reference],
             &ResolveOptions {
@@ -378,7 +379,7 @@ mod tests {
             },
         };
 
-        let updates = resolve_updates(
+        let (updates, _) = resolve_updates(
             &|repository| Ok(tags.get(repository).cloned().unwrap_or_default()),
             &[reference],
             &ResolveOptions {
@@ -499,7 +500,7 @@ mod tests {
             },
         };
 
-        let skipped = resolve_updates(
+        let (updates_without, skipped_branches) = resolve_updates(
             &|repository| Ok(tags.get(repository).cloned().unwrap_or_default()),
             std::slice::from_ref(&reference),
             &ResolveOptions {
@@ -510,7 +511,7 @@ mod tests {
             },
         )
         .unwrap();
-        let included = resolve_updates(
+        let (updates_with, _) = resolve_updates(
             &|repository| Ok(tags.get(repository).cloned().unwrap_or_default()),
             &[reference],
             &ResolveOptions {
@@ -522,8 +523,9 @@ mod tests {
         )
         .unwrap();
 
-        assert!(skipped.is_empty());
-        assert_eq!(1, included.len());
+        assert!(updates_without.is_empty());
+        assert_eq!(1, skipped_branches);
+        assert_eq!(1, updates_with.len());
     }
 
     #[test]
@@ -560,7 +562,7 @@ mod tests {
             },
         };
 
-        let updates = resolve_updates(
+        let (updates, _) = resolve_updates(
             &|repository| Ok(tags.get(repository).cloned().unwrap_or_default()),
             &[reference],
             &ResolveOptions {
@@ -597,7 +599,7 @@ mod tests {
             },
         };
 
-        let updates = resolve_updates(
+        let (updates, _) = resolve_updates(
             &|_| Ok(Vec::new()),
             &[reference],
             &ResolveOptions {

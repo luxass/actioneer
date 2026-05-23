@@ -489,7 +489,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use ratatui::backend::TestBackend;
 
-    use crate::model::{ResolvedUpdate, ValidationState, UpdateTarget, UpdateSource};
+    use crate::model::{ResolvedUpdate, UpdateSource, UpdateTarget, ValidationState};
 
     use super::*;
 
@@ -705,10 +705,8 @@ mod tests {
 
     #[test]
     fn read_key_maps_ctrl_c_to_interrupted() {
-        let mut src = TestEventSource::new(vec![make_event(
-            KeyCode::Char('c'),
-            KeyModifiers::CONTROL,
-        )]);
+        let mut src =
+            TestEventSource::new(vec![make_event(KeyCode::Char('c'), KeyModifiers::CONTROL)]);
         let result = read_key(&mut src);
         assert!(matches!(result, Err(Error::Interrupted)));
     }
@@ -844,10 +842,7 @@ mod tests {
             make_update("a.yml", "actions/checkout"),
             make_update("b.yml", "actions/cache"),
         ];
-        let events = vec![
-            char_event('f'),
-            special_event(KeyCode::Enter),
-        ];
+        let events = vec![char_event('f'), special_event(KeyCode::Enter)];
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut src = TestEventSource::new(events);

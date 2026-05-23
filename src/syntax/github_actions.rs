@@ -160,11 +160,9 @@ fn append_action_reference(
         value_start: value_range.start_byte,
         value_end: value_range.end_byte,
     };
-    if let Some(reference) = action_from_uses_value(
-        value_range.text,
-        &value_range.trailing_comment,
-        &ctx,
-    ) {
+    if let Some(reference) =
+        action_from_uses_value(value_range.text, &value_range.trailing_comment, &ctx)
+    {
         found.push(reference);
     }
 }
@@ -253,11 +251,7 @@ struct UsesContext<'a> {
     value_end: usize,
 }
 
-fn action_from_uses_value(
-    value: &str,
-    comment: &str,
-    ctx: &UsesContext<'_>,
-) -> Option<Reference> {
+fn action_from_uses_value(value: &str, comment: &str, ctx: &UsesContext<'_>) -> Option<Reference> {
     if value.starts_with("./") || value.starts_with("../") || value.starts_with("docker://") {
         return None;
     }

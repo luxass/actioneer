@@ -410,7 +410,10 @@ mod tests {
         let rewrite = apply_updates_to_text(input, ".github/workflows/ci.yml", &[&update]).unwrap();
 
         assert_eq!(1, rewrite.applied);
-        assert_eq!("jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@newsha # v4.2.0\r\n      - uses: actions/setup-node@v3\r\n", rewrite.contents);
+        assert_eq!(
+            "jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@newsha # v4.2.0\r\n      - uses: actions/setup-node@v3\r\n",
+            rewrite.contents
+        );
     }
 
     #[test]
@@ -434,7 +437,10 @@ mod tests {
         let rewrite = apply_updates_to_text(input, ".github/workflows/ci.yml", &[&update]).unwrap();
 
         assert_eq!(1, rewrite.applied);
-        assert_eq!("jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@newsha # v4.2.0\r\n", rewrite.contents);
+        assert_eq!(
+            "jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@newsha # v4.2.0\r\n",
+            rewrite.contents
+        );
     }
 
     #[test]
@@ -458,7 +464,10 @@ mod tests {
         let rewrite = apply_updates_to_text(input, ".github/workflows/ci.yml", &[&update]).unwrap();
 
         assert_eq!(1, rewrite.applied);
-        assert_eq!("jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@v4.2.0\r\n", rewrite.contents);
+        assert_eq!(
+            "jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@v4.2.0\r\n",
+            rewrite.contents
+        );
     }
 
     #[test]
@@ -482,6 +491,9 @@ mod tests {
         let rewrite = apply_updates_to_text(input, ".github/workflows/ci.yml", &[&update]).unwrap();
 
         assert_eq!(1, rewrite.applied);
-        assert_eq!("jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@newsha # v4.2.0\r\n", rewrite.contents);
+        assert_eq!(
+            "jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@newsha # v4.2.0\r\n",
+            rewrite.contents
+        );
     }
 }

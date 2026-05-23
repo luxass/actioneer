@@ -70,7 +70,8 @@ impl Client {
             request = request.bearer_auth(token);
         }
         if let Some(entry) = &cached
-            && let Some(etag) = &entry.etag {
+            && let Some(etag) = &entry.etag
+        {
             request = request.header(IF_NONE_MATCH, etag);
         }
 

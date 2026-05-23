@@ -150,7 +150,14 @@ fn build_text_edits(contents: &str, updates: &[&ResolvedUpdate]) -> Vec<TextEdit
 fn line_end_offset(contents: &str, offset: usize) -> usize {
     contents[offset..]
         .find('\n')
-        .map(|relative| offset + relative)
+        .map(|relative| {
+            let abs = offset + relative;
+            if abs > 0 && contents.as_bytes()[abs - 1] == b'\r' {
+                abs - 1
+            } else {
+                abs
+            }
+        })
         .unwrap_or(contents.len())
 }
 
@@ -380,5 +387,101 @@ mod tests {
         let err = apply_updates_to_text(input, ".github/workflows/ci.yml", &[&update]).unwrap_err();
 
         assert!(matches!(err, RewriteError::UpdateTargetNotFound));
+    }
+
+    #[test]
+    fn preserves_crlf_line_endings() {
+        let input = "jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@oldsha # v4.1.0\r\n      - uses: actions/setup-node@v3\r\n";
+        let update = ResolvedUpdate::new(
+            "actions/checkout",
+            "build",
+            "oldsha",
+            ValidationState::new("", "v4.1.0", false),
+            UpdateTarget::new("newsha", "v4.2.0", false),
+            UpdateSource::new(
+                ".github/workflows/ci.yml",
+                4,
+                input.find("oldsha").unwrap(),
+                input.find("oldsha").unwrap() + "oldsha".len(),
+            ),
+            false,
+        );
+
+        let rewrite = apply_updates_to_text(input, ".github/workflows/ci.yml", &[&update]).unwrap();
+
+        assert_eq!(1, rewrite.applied);
+        assert_eq!("jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@newsha # v4.2.0\r\n      - uses: actions/setup-node@v3\r\n", rewrite.contents);
+    }
+
+    #[test]
+    fn preserves_crlf_without_existing_comment() {
+        let input = "jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@oldsha\r\n";
+        let update = ResolvedUpdate::new(
+            "actions/checkout",
+            "build",
+            "oldsha",
+            ValidationState::new("", "", false),
+            UpdateTarget::new("newsha", "v4.2.0", false),
+            UpdateSource::new(
+                ".github/workflows/ci.yml",
+                4,
+                input.find("oldsha").unwrap(),
+                input.find("oldsha").unwrap() + "oldsha".len(),
+            ),
+            false,
+        );
+
+        let rewrite = apply_updates_to_text(input, ".github/workflows/ci.yml", &[&update]).unwrap();
+
+        assert_eq!(1, rewrite.applied);
+        assert_eq!("jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@newsha # v4.2.0\r\n", rewrite.contents);
+    }
+
+    #[test]
+    fn preserves_crlf_when_no_comment_written() {
+        let input = "jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@oldsha\r\n";
+        let update = ResolvedUpdate::new(
+            "actions/checkout",
+            "build",
+            "oldsha",
+            ValidationState::new("", "", false),
+            UpdateTarget::new("v4.2.0", "v4.2.0", false),
+            UpdateSource::new(
+                ".github/workflows/ci.yml",
+                4,
+                input.find("oldsha").unwrap(),
+                input.find("oldsha").unwrap() + "oldsha".len(),
+            ),
+            false,
+        );
+
+        let rewrite = apply_updates_to_text(input, ".github/workflows/ci.yml", &[&update]).unwrap();
+
+        assert_eq!(1, rewrite.applied);
+        assert_eq!("jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@v4.2.0\r\n", rewrite.contents);
+    }
+
+    #[test]
+    fn preserves_crlf_with_version_comment_write() {
+        let input = "jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@oldsha\r\n";
+        let update = ResolvedUpdate::new(
+            "actions/checkout",
+            "build",
+            "oldsha",
+            ValidationState::new("abc123", "v4.1.0", true),
+            UpdateTarget::new("newsha", "v4.2.0", false),
+            UpdateSource::new(
+                ".github/workflows/ci.yml",
+                4,
+                input.find("oldsha").unwrap(),
+                input.find("oldsha").unwrap() + "oldsha".len(),
+            ),
+            false,
+        );
+
+        let rewrite = apply_updates_to_text(input, ".github/workflows/ci.yml", &[&update]).unwrap();
+
+        assert_eq!(1, rewrite.applied);
+        assert_eq!("jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@newsha # v4.2.0\r\n", rewrite.contents);
     }
 }

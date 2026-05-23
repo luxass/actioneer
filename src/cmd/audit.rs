@@ -18,18 +18,16 @@ pub fn run(global: GlobalArgs, args: AuditArgs) -> Result<ExitCode, Error> {
 
     if inputs.len() == 1 {
         logger.info(format!(
-            "{} workflows in {}",
-            "Scanning".cyan(),
+            "Scanning workflows in {}",
             inputs[0].bold()
         ));
     } else {
         logger.info(format!(
-            "{} {} input paths:",
-            "Scanning".cyan(),
+            "Scanning {} input paths:",
             inputs.len().to_string().yellow()
         ));
         for input in &inputs {
-            logger.debug(format!("  - {}", input.bright_black()));
+            logger.debug(format!("  {}", input.bright_black()));
         }
     }
 
@@ -39,7 +37,7 @@ pub fn run(global: GlobalArgs, args: AuditArgs) -> Result<ExitCode, Error> {
         no_cache: global.no_cache,
         resolve_options: ResolveOptions {
             excludes: global.excludes,
-            include_branches: args.include_branches,
+            skip_branches: args.skip_branches,
             mode: args.update,
             style: if args.tag {
                 PinStyle::Tag
@@ -50,15 +48,11 @@ pub fn run(global: GlobalArgs, args: AuditArgs) -> Result<ExitCode, Error> {
     }) {
         Ok(result) => result,
         Err(CheckError::Scan(err)) => {
-            logger.error(format!("{} {}", "Scan failed:".red(), err));
+            logger.error(format!("Scan failed: {}", err));
             return Ok(ExitCode::FAILURE);
         }
         Err(CheckError::Resolve(ResolveError::GitHub { repository, source })) => {
-            logger.error(format!(
-                "{} for {}.",
-                "GitHub lookup failed".red(),
-                repository.bold()
-            ));
+            logger.error(format!("GitHub lookup failed for {}.", repository.bold()));
             match source {
                 github::Error::HttpStatus(status) => {
                     logger.error(format!(
@@ -79,7 +73,7 @@ pub fn run(global: GlobalArgs, args: AuditArgs) -> Result<ExitCode, Error> {
                             "Retry later, or run with --dry-run/--mode json to inspect scanned references."
                         }
                     };
-                    logger.info(format!("{} {}", "Hint:".cyan(), hint));
+                    logger.info(hint);
                 }
                 github::Error::Request(err) => {
                     logger.error(format!("Request error: {}.", err.to_string().yellow()));
@@ -99,11 +93,8 @@ pub fn run(global: GlobalArgs, args: AuditArgs) -> Result<ExitCode, Error> {
                     .expect("serializing updates payload"),
             );
         } else {
-            logger.warn(format!("{}", "No action references found.".yellow()));
-            logger.info(format!(
-                "{} point actioneer at a workflow file or directory with `uses:` entries.",
-                "Hint:".bright_black()
-            ));
+            logger.warn("No action references found.");
+            logger.info("Point actioneer at a workflow file or directory with `uses:` entries.");
         }
         return Ok(ExitCode::SUCCESS);
     }
@@ -117,7 +108,7 @@ pub fn run(global: GlobalArgs, args: AuditArgs) -> Result<ExitCode, Error> {
             if result
                 .updates
                 .iter()
-                .any(|update| update.has_sha_mismatch())
+                .any(|update| update.has_sha_mismatch() || update.is_branch_ref())
             {
                 ExitCode::FAILURE
             } else {
@@ -127,57 +118,87 @@ pub fn run(global: GlobalArgs, args: AuditArgs) -> Result<ExitCode, Error> {
     }
 
     logger.info(format!(
-        "{} {} action reference{} across {} workflow file{}.",
-        "Scanned".green(),
+        "Scanned {} action reference{} across {} workflow file{}.",
         result.reference_count.to_string().yellow(),
         plural_suffix(result.reference_count),
         result.reference_file_count.to_string().yellow(),
         plural_suffix(result.reference_file_count)
     ));
 
+    let branch_count = result.branch_ref_count;
     let mismatch_count = result
         .updates
         .iter()
         .filter(|update| update.has_sha_mismatch())
         .count();
-    if mismatch_count == 0 {
-        logger.info("Validation passed. All pinned SHA version comments are consistent.");
+
+    if branch_count == 0 && mismatch_count == 0 {
+        logger.info("All references are securely pinned.");
         return Ok(ExitCode::SUCCESS);
     }
 
-    logger.error(format!(
-        "{} {} pinned SHA{} do not match their stated versions.",
-        "Validation failed:".red(),
-        mismatch_count.to_string().yellow(),
-        plural_suffix(mismatch_count)
-    ));
-    for update in result
-        .updates
-        .iter()
-        .filter(|update| update.has_sha_mismatch())
-    {
-        let mut line = format!(
-            "  - {} at {}:{} uses {}",
-            update.action.bold(),
-            update.file().cyan(),
-            update.line(),
-            update.current.red()
-        );
-        if update.has_version_comment() {
-            line.push_str(&format!(" but says {}", update.version_comment().yellow()));
-        }
-        if update.has_current_ref() {
-            line.push_str(&format!(
-                "; expected {}",
-                short_sha(update.current_ref()).green()
+    if branch_count > 0 {
+        logger.error(format!(
+            "{} action reference{} use{} mutable branch refs and are insecure.",
+            branch_count.to_string().yellow(),
+            plural_suffix(branch_count),
+            if branch_count == 1 { "s" } else { "" },
+        ));
+        for update in result
+            .updates
+            .iter()
+            .filter(|update| update.is_branch_ref())
+        {
+            logger.error(format!(
+                "{} at {}:{} uses {} (unpinned branch ref)",
+                update.action.bold(),
+                update.file().cyan(),
+                update.line(),
+                update.current.red()
             ));
         }
-        logger.error(format!("{line}."));
     }
-    logger.info(format!(
-        "{} update the SHA to the tag commit, or correct the version comment before trusting the reference.",
-        "Fix:".cyan()
-    ));
+
+    if mismatch_count > 0 {
+        if branch_count > 0 {
+            logger.error(format!(
+                "{} pinned SHA{} do not match their stated versions.",
+                mismatch_count.to_string().yellow(),
+                plural_suffix(mismatch_count)
+            ));
+        } else {
+            logger.error(format!(
+                "{} pinned SHA{} do not match their stated versions.",
+                mismatch_count.to_string().yellow(),
+                plural_suffix(mismatch_count)
+            ));
+        }
+        for update in result
+            .updates
+            .iter()
+            .filter(|update| update.has_sha_mismatch())
+        {
+            let mut line = format!(
+                "{} at {}:{} uses {}",
+                update.action.bold(),
+                update.file().cyan(),
+                update.line(),
+                update.current.red()
+            );
+            if update.has_version_comment() {
+                line.push_str(&format!(" but says {}", update.version_comment().yellow()));
+            }
+            if update.has_current_ref() {
+                line.push_str(&format!(
+                    "; expected {}",
+                    short_sha(update.current_ref()).green()
+                ));
+            }
+            logger.error(format!("{}.", line));
+        }
+    }
+
+    logger.info("Run `actioneer update` to pin branch refs to version tags, or fix SHA/comment mismatches.");
     Ok(ExitCode::FAILURE)
 }
 

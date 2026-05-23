@@ -16,19 +16,19 @@ impl Logger {
     }
 
     pub fn debug(&self, message: impl AsRef<str>) {
-        self.write_human(message.as_ref());
+        self.write_human(message.as_ref(), Level::Debug);
     }
 
     pub fn info(&self, message: impl AsRef<str>) {
-        self.write_human(message.as_ref());
+        self.write_human(message.as_ref(), Level::Info);
     }
 
     pub fn warn(&self, message: impl AsRef<str>) {
-        self.write_human(message.as_ref());
+        self.write_human(message.as_ref(), Level::Warn);
     }
 
     pub fn error(&self, message: impl AsRef<str>) {
-        self.write_human(message.as_ref());
+        self.write_human(message.as_ref(), Level::Error);
     }
 
     pub fn json(&self, message: impl AsRef<str>) {
@@ -36,11 +36,17 @@ impl Logger {
         let _ = writeln!(stdout, "{}", message.as_ref());
     }
 
-    fn write_human(&self, message: &str) {
-        let formatted = if self.effective_human_mode() == Mode::Plain {
-            strip_ansi(message)
+    fn write_human(&self, message: &str, level: Level) {
+        let prefixed = if self.effective_human_mode() == Mode::Beautiful {
+            format!("{} {}", level.prefix(), message)
         } else {
             message.to_string()
+        };
+
+        let formatted = if self.effective_human_mode() == Mode::Plain {
+            strip_ansi(&prefixed)
+        } else {
+            prefixed
         };
 
         if self.is_json() {
@@ -69,6 +75,27 @@ impl Logger {
                     Mode::Plain
                 }
             }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Level {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+use owo_colors::OwoColorize;
+
+impl Level {
+    fn prefix(&self) -> String {
+        match self {
+            Level::Debug => format!("{}", "·".bright_black()),
+            Level::Info => format!("{}", "›".cyan()),
+            Level::Warn => format!("{}", "!".yellow()),
+            Level::Error => format!("{}", "✗".red()),
         }
     }
 }

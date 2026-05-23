@@ -27,7 +27,7 @@ pub struct CheckResult {
     pub reference_count: usize,
     pub reference_file_count: usize,
     pub updates: Vec<ResolvedUpdate>,
-    pub skipped_branches: usize,
+    pub branch_ref_count: usize,
 }
 
 #[derive(Debug)]
@@ -47,7 +47,7 @@ pub enum CheckError {
 pub fn check(options: CheckOptions) -> Result<CheckResult, CheckError> {
     let references = scan(&options.paths, options.recursive).map_err(CheckError::Scan)?;
     let github = GitHubClient::new(options.no_cache);
-    let (updates, skipped_branches) = resolver::resolve_updates(
+    let (updates, branch_ref_count) = resolver::resolve_updates(
         &|repository| github.fetch_tags(repository),
         &references,
         &options.resolve_options,
@@ -57,7 +57,7 @@ pub fn check(options: CheckOptions) -> Result<CheckResult, CheckError> {
         reference_count: references.len(),
         reference_file_count: count_reference_files(&references),
         updates,
-        skipped_branches,
+        branch_ref_count,
     })
 }
 

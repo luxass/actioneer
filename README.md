@@ -18,7 +18,7 @@ cargo install --locked actioneer
 
 ### GitHub Releases
 
-Pre-built binaries are available for Linux and macOS at [github.com/luxass/actioneer/releases](https://github.com/luxass/actioneer/releases).
+Pre-built binaries are available for Linux, macOS, and Windows at [github.com/luxass/actioneer/releases](https://github.com/luxass/actioneer/releases).
 
 ## Quick Start
 

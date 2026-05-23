@@ -69,10 +69,9 @@ impl Client {
         if let Some(token) = &self.token {
             request = request.bearer_auth(token);
         }
-        if let Some(entry) = &cached {
-            if let Some(etag) = &entry.etag {
-                request = request.header(IF_NONE_MATCH, etag);
-            }
+        if let Some(entry) = &cached
+            && let Some(etag) = &entry.etag {
+            request = request.header(IF_NONE_MATCH, etag);
         }
 
         let response = request.send()?;

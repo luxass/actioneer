@@ -73,7 +73,7 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
                         }
                         404 => "The repository was not found or is not publicly accessible.",
                         429 => "GitHub is rate limiting these requests.",
-                        502 | 503 | 504 => "GitHub appears temporarily unavailable.",
+                        502..=504 => "GitHub appears temporarily unavailable.",
                         _ => {
                             "Retry later, or run with --dry-run/--mode json to inspect scanned references."
                         }

@@ -65,7 +65,7 @@ pub fn run(global: GlobalArgs, args: AuditArgs) -> Result<ExitCode, Error> {
                         }
                         404 => "The repository was not found or is not publicly accessible.",
                         429 => "GitHub is rate limiting these requests.",
-                        502 | 503 | 504 => "GitHub appears temporarily unavailable.",
+                        502..=504 => "GitHub appears temporarily unavailable.",
                         _ => {
                             "Retry later, or run with --dry-run/--mode json to inspect scanned references."
                         }
@@ -157,19 +157,11 @@ pub fn run(global: GlobalArgs, args: AuditArgs) -> Result<ExitCode, Error> {
     }
 
     if mismatch_count > 0 {
-        if branch_count > 0 {
-            logger.error(format!(
-                "{} pinned SHA{} do not match their stated versions.",
-                mismatch_count.to_string().yellow(),
-                plural_suffix(mismatch_count)
-            ));
-        } else {
-            logger.error(format!(
-                "{} pinned SHA{} do not match their stated versions.",
-                mismatch_count.to_string().yellow(),
-                plural_suffix(mismatch_count)
-            ));
-        }
+        logger.error(format!(
+            "{} pinned SHA{} do not match their stated versions.",
+            mismatch_count.to_string().yellow(),
+            plural_suffix(mismatch_count)
+        ));
         for update in result
             .updates
             .iter()

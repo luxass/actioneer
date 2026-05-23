@@ -219,24 +219,21 @@ fn render(
 
     let items: Vec<ListItem<'_>> = visible_rows
         .iter()
-        .scan(None, |last_file, row| {
-            let result = match row {
-                VisibleRow::FileHeader { file } => {
-                    *last_file = Some(file.clone());
-                    Some(render_file_header(file))
-                }
-                VisibleRow::Update { original_index } => {
-                    let update = &updates[*original_index];
-                    let file_changed = last_file.as_deref() != Some(update.file());
-                    *last_file = Some(update.file().to_string());
-                    Some(render_update_item(
-                        update,
-                        selected[*original_index],
-                        file_changed,
-                    ))
-                }
-            };
-            result
+        .scan(None, |last_file, row| match row {
+            VisibleRow::FileHeader { file } => {
+                *last_file = Some(file.clone());
+                Some(render_file_header(file))
+            }
+            VisibleRow::Update { original_index } => {
+                let update = &updates[*original_index];
+                let file_changed = last_file.as_deref() != Some(update.file());
+                *last_file = Some(update.file().to_string());
+                Some(render_update_item(
+                    update,
+                    selected[*original_index],
+                    file_changed,
+                ))
+            }
         })
         .collect();
 
@@ -264,20 +261,21 @@ fn render(
 }
 
 fn render_file_header(file: &str) -> ListItem<'_> {
-    let mut lines = Vec::new();
-    lines.push(Line::from(vec![
-        Span::styled("▸ ", Style::default().fg(Color::Cyan)),
-        Span::styled(
-            file,
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("  ⋯ ", Style::default().fg(Color::DarkGray)),
-        Span::styled("collapsed", Style::default().fg(Color::DarkGray)),
-    ]));
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("▸ ", Style::default().fg(Color::Cyan)),
+            Span::styled(
+                file,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  ⋯ ", Style::default().fg(Color::DarkGray)),
+            Span::styled("collapsed", Style::default().fg(Color::DarkGray)),
+        ]),
+    ];
     ListItem::new(lines)
 }
 

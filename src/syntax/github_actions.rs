@@ -134,7 +134,7 @@ fn collect_step_actions(
             document,
             &steps_route.with_key(index).with_key("uses"),
             scope,
-            kind.clone(),
+            kind,
             file_path,
             found,
         );
@@ -152,15 +152,18 @@ fn append_action_reference(
     let Some(value_range) = scalar_at_route(document, route).ok().flatten() else {
         return;
     };
+    let ctx = UsesContext {
+        kind,
+        scope,
+        file_path,
+        line: value_range.line,
+        value_start: value_range.start_byte,
+        value_end: value_range.end_byte,
+    };
     if let Some(reference) = action_from_uses_value(
         value_range.text,
         &value_range.trailing_comment,
-        scope,
-        kind,
-        file_path,
-        value_range.line,
-        value_range.start_byte,
-        value_range.end_byte,
+        &ctx,
     ) {
         found.push(reference);
     }
@@ -241,24 +244,28 @@ fn clean_scalar(value: &str) -> &str {
     trimmed
 }
 
-fn action_from_uses_value(
-    value: &str,
-    comment: &str,
-    scope: &str,
+struct UsesContext<'a> {
     kind: ReferenceKind,
-    file_path: &str,
+    scope: &'a str,
+    file_path: &'a str,
     line: usize,
     value_start: usize,
     value_end: usize,
+}
+
+fn action_from_uses_value(
+    value: &str,
+    comment: &str,
+    ctx: &UsesContext<'_>,
 ) -> Option<Reference> {
     if value.starts_with("./") || value.starts_with("../") || value.starts_with("docker://") {
         return None;
     }
     let parsed = parse_action_ref(value)?;
     let version_comment = extract_version_comment(comment).unwrap_or_default();
-    let ref_start = value_start + parsed.action.len() + 1;
+    let ref_start = ctx.value_start + parsed.action.len() + 1;
     Some(Reference {
-        kind,
+        kind: ctx.kind,
         name: ActionName {
             repository: Repository {
                 owner: parsed.owner.to_string(),
@@ -268,13 +275,13 @@ fn action_from_uses_value(
         },
         current_ref: parsed.r#ref.to_string(),
         version_hint: version_comment.to_string(),
-        scope: scope.to_string(),
+        scope: ctx.scope.to_string(),
         source: SourceLocation {
-            file: file_path.to_string(),
-            line,
+            file: ctx.file_path.to_string(),
+            line: ctx.line,
             ref_span: ByteSpan {
                 start: ref_start,
-                end: value_end,
+                end: ctx.value_end,
             },
         },
     })

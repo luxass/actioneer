@@ -16,19 +16,9 @@ brew install luxass/homebrew-tap/actioneer
 cargo install --locked actioneer
 ```
 
-### Install Script
+### GitHub Releases
 
-macOS and Linux:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/luxass/actioneer/main/install.sh | sh
-```
-
-The installer uses Homebrew if available, otherwise downloads the correct release for your platform and installs `actioneer` into `~/.local/bin` by default.
-
-You can override the target directory with `ACTIONEER_INSTALL_DIR`, and pin a specific release with `ACTIONEER_VERSION`.
-
-Windows can use the release archives from [GitHub Releases](https://github.com/luxass/actioneer/releases).
+Pre-built binaries are available for Linux and macOS at [github.com/luxass/actioneer/releases](https://github.com/luxass/actioneer/releases).
 
 ## Quick Start
 

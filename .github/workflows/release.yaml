@@ -96,8 +96,7 @@ jobs:
             mkdir -p "${name}"
             cp LICENSE "${name}/"
             cp "${bin}" "${name}/"
-            cd "${name}"
-            zip -r "../dist/${name}.zip" .
+            powershell -Command "Compress-Archive -Path '${name}' -DestinationPath 'dist/${name}.zip'"
           else
             mkdir -p "${name}"
             cp LICENSE "${name}/"

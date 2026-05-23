@@ -224,7 +224,11 @@ fn render(
                 } else {
                     Span::raw("")
                 },
-                Span::styled("  ->  ", Style::default().fg(Color::DarkGray)),
+            ]));
+
+            lines.push(Line::from(vec![
+                Span::raw("    "),
+                Span::styled("to ", Style::default().fg(Color::DarkGray)),
                 Span::styled(update.display_target(), target_style),
             ]));
 

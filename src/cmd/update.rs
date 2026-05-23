@@ -178,6 +178,17 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
         }
     }
 
+    if result.skipped_branches > 0 {
+        logger.warn(format!(
+            "{} {} action reference{} use{} branch refs (e.g. @main, @master) and were skipped. \
+             Use --include-branches to include them.",
+            "Warning:".yellow(),
+            result.skipped_branches.to_string().yellow(),
+            plural_suffix(result.skipped_branches),
+            if result.skipped_branches == 1 { "s" } else { "" },
+        ));
+    }
+
     if global.dry_run {
         logger.info(format!(
             "{}: {} scanned reference{}, {} available update{}.",

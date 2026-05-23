@@ -4,13 +4,15 @@ mod cache;
 
 use cache::{cache_file_path, no_cache_from_env, read_cached_tags, write_cached_tags};
 use reqwest::blocking::Client as HttpClient;
-use reqwest::header::{ETAG, IF_NONE_MATCH};
+use reqwest::header::{ETAG, IF_NONE_MATCH, LINK};
 use reqwest::StatusCode;
 use serde::Deserialize;
 use thiserror::Error;
 
 use crate::engine::git::{parse_version, Version};
 use crate::model::Repository;
+
+const MAX_PAGES: usize = 10;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Tag {
@@ -54,13 +56,13 @@ impl Client {
             .then(|| read_cached_tags(&cache_path))
             .flatten();
 
-        let url = format!(
+        let base_url = format!(
             "https://api.github.com/repos/{}/{}/tags?per_page=100",
             repository.owner, repository.name
         );
         let mut request = self
             .http
-            .get(url)
+            .get(&base_url)
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", "actioneer")
             .header("X-GitHub-Api-Version", "2022-11-28");
@@ -89,8 +91,38 @@ impl Client {
             .get(ETAG)
             .and_then(|value| value.to_str().ok())
             .map(ToOwned::to_owned);
+        let next_link = response.headers().get(LINK).cloned();
         let body: Vec<ApiTag> = response.json()?;
-        let tags = parse_api_tags(body);
+        let mut tags = parse_api_tags(body);
+
+        let mut next_url = parse_next_link(next_link.as_ref());
+        let mut page_count = 1;
+
+        while let Some(page_url) = next_url {
+            if page_count >= MAX_PAGES {
+                break;
+            }
+
+            let page_response = self
+                .http
+                .get(&page_url)
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "actioneer")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .send()?;
+
+            if !page_response.status().is_success() {
+                return Err(Error::HttpStatus(page_response.status().as_u16()));
+            }
+
+            let page_next_link = page_response.headers().get(LINK).cloned();
+            let page_body: Vec<ApiTag> = page_response.json()?;
+            tags.extend(parse_api_tags(page_body));
+
+            next_url = parse_next_link(page_next_link.as_ref());
+            page_count += 1;
+        }
+
         if !self.no_cache {
             let _ = write_cached_tags(&cache_path, &tags, etag, SystemTime::now());
         }
@@ -146,6 +178,19 @@ fn parse_api_tags(body: Vec<ApiTag>) -> Vec<Tag> {
             })
         })
         .collect()
+}
+
+fn parse_next_link(header: Option<&reqwest::header::HeaderValue>) -> Option<String> {
+    let value = header?.to_str().ok()?;
+    for part in value.split(',') {
+        let trimmed = part.trim();
+        if trimmed.contains("rel=\"next\"") {
+            let start = trimmed.find('<')? + 1;
+            let end = trimmed.find('>')?;
+            return Some(trimmed[start..end].to_string());
+        }
+    }
+    None
 }
 
 #[cfg(test)]

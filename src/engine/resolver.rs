@@ -39,15 +39,14 @@ pub fn resolve_updates(
 ) -> Result<(Vec<ResolvedUpdate>, usize), ResolveError> {
     let mut tag_cache: HashMap<Repository, Vec<Tag>> = HashMap::new();
     let mut updates = Vec::new();
-    let mut skipped_branches = 0;
+    let mut branch_ref_count = 0;
 
     for reference in references {
         if is_excluded(reference, &options.excludes) {
             continue;
         }
 
-        let Some(context) = classify_reference(reference, options.include_branches) else {
-            skipped_branches += 1;
+        let Some(context) = classify_reference(reference, options.skip_branches) else {
             continue;
         };
 
@@ -68,6 +67,11 @@ pub fn resolve_updates(
 
         if !sha_mismatch && current_ref_matches_target(reference, target_tag) {
             continue;
+        }
+
+        let is_branch = matches!(context.ref_kind, CurrentRefKind::Branch);
+        if is_branch {
+            branch_ref_count += 1;
         }
 
         updates.push(ResolvedUpdate::new(
@@ -93,17 +97,18 @@ pub fn resolve_updates(
                 reference.source.ref_span.start,
                 reference.source.ref_span.end,
             ),
+            is_branch,
         ));
     }
 
-    Ok((updates, skipped_branches))
+    Ok((updates, branch_ref_count))
 }
 fn is_excluded(reference: &Reference, excludes: &[String]) -> bool {
     let action = reference.name.display();
     excludes.iter().any(|exclude| action.contains(exclude))
 }
 
-fn classify_reference(reference: &Reference, include_branches: bool) -> Option<UpdateContext> {
+fn classify_reference(reference: &Reference, skip_branches: bool) -> Option<UpdateContext> {
     let comment_version = parse_version(&reference.version_hint);
 
     if let Some(version) = parse_version(&reference.current_ref) {
@@ -120,7 +125,11 @@ fn classify_reference(reference: &Reference, include_branches: bool) -> Option<U
         });
     }
 
-    include_branches.then_some(UpdateContext {
+    if skip_branches {
+        return None;
+    }
+
+    Some(UpdateContext {
         ref_kind: CurrentRefKind::Branch,
         current_version: None,
     })
@@ -334,7 +343,7 @@ mod tests {
             &[reference],
             &ResolveOptions {
                 excludes: Vec::new(),
-                include_branches: false,
+                skip_branches: false,
                 mode: UpdateMode::Major,
                 style: PinStyle::Sha,
             },
@@ -384,7 +393,7 @@ mod tests {
             &[reference],
             &ResolveOptions {
                 excludes: Vec::new(),
-                include_branches: false,
+                skip_branches: false,
                 mode: UpdateMode::Major,
                 style: PinStyle::Tag,
             },
@@ -456,7 +465,7 @@ mod tests {
             &references,
             &ResolveOptions {
                 excludes: Vec::new(),
-                include_branches: false,
+                skip_branches: false,
                 mode: UpdateMode::Major,
                 style: PinStyle::Sha,
             },
@@ -467,7 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn skips_branch_reference_without_branch_updates_enabled() {
+    fn includes_branch_references_by_default() {
         let repository = Repository {
             owner: "actions".into(),
             name: "checkout".into(),
@@ -500,32 +509,34 @@ mod tests {
             },
         };
 
-        let (updates_without, skipped_branches) = resolve_updates(
+        let (updates_default, branch_count_default) = resolve_updates(
             &|repository| Ok(tags.get(repository).cloned().unwrap_or_default()),
             std::slice::from_ref(&reference),
             &ResolveOptions {
                 excludes: Vec::new(),
-                include_branches: false,
+                skip_branches: false,
                 mode: UpdateMode::Major,
                 style: PinStyle::Sha,
             },
         )
         .unwrap();
-        let (updates_with, _) = resolve_updates(
+        let (updates_skipped, branch_count_skipped) = resolve_updates(
             &|repository| Ok(tags.get(repository).cloned().unwrap_or_default()),
             &[reference],
             &ResolveOptions {
                 excludes: Vec::new(),
-                include_branches: true,
+                skip_branches: true,
                 mode: UpdateMode::Major,
                 style: PinStyle::Sha,
             },
         )
         .unwrap();
 
-        assert!(updates_without.is_empty());
-        assert_eq!(1, skipped_branches);
-        assert_eq!(1, updates_with.len());
+        assert_eq!(1, updates_default.len());
+        assert!(updates_default[0].is_branch_ref());
+        assert_eq!(1, branch_count_default);
+        assert!(updates_skipped.is_empty());
+        assert_eq!(0, branch_count_skipped);
     }
 
     #[test]
@@ -567,7 +578,7 @@ mod tests {
             &[reference],
             &ResolveOptions {
                 excludes: vec![String::from("setup"), String::from("checkout")],
-                include_branches: false,
+                skip_branches: false,
                 mode: UpdateMode::Major,
                 style: PinStyle::Sha,
             },
@@ -604,7 +615,7 @@ mod tests {
             &[reference],
             &ResolveOptions {
                 excludes: Vec::new(),
-                include_branches: false,
+                skip_branches: false,
                 mode: UpdateMode::Major,
                 style: PinStyle::Sha,
             },
@@ -641,7 +652,7 @@ mod tests {
             &[reference],
             &ResolveOptions {
                 excludes: Vec::new(),
-                include_branches: false,
+                skip_branches: false,
                 mode: UpdateMode::Major,
                 style: PinStyle::Sha,
             },

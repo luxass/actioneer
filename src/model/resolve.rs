@@ -20,8 +20,8 @@ pub enum PinStyle {
 pub struct ResolveOptions {
     /// Substring filters applied to the rendered action name, e.g. `actions/cache`.
     pub excludes: Vec<String>,
-    /// Whether non-version symbolic refs like `main` should be considered updatable.
-    pub include_branches: bool,
+    /// Whether non-version symbolic refs like `main` should be excluded from updates.
+    pub skip_branches: bool,
     /// How far updates are allowed to move from the current version.
     pub mode: UpdateMode,
     /// Whether rewritten refs should be pinned to the resolved SHA.

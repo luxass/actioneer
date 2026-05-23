@@ -5,7 +5,7 @@ use owo_colors::OwoColorize;
 use thiserror::Error;
 
 use crate::cli::{GlobalArgs, UpdateArgs};
-use crate::cmd::prompt;
+use crate::ui::prompt;
 use crate::engine::rewrite::RewriteError;
 use crate::engine::{self, ApplyResult, CheckError, CheckOptions, ResolveError};
 use crate::github;
@@ -26,18 +26,16 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
 
     if inputs.len() == 1 {
         logger.info(format!(
-            "{} workflows in {}",
-            "Scanning".cyan(),
+            "Scanning workflows in {}",
             inputs[0].bold()
         ));
     } else {
         logger.info(format!(
-            "{} {} input paths:",
-            "Scanning".cyan(),
+            "Scanning {} input paths:",
             inputs.len().to_string().yellow()
         ));
         for input in &inputs {
-            logger.debug(format!("  - {}", input.bright_black()));
+            logger.debug(format!("  {}", input.bright_black()));
         }
     }
 
@@ -47,7 +45,7 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
         no_cache: global.no_cache,
         resolve_options: ResolveOptions {
             excludes: global.excludes,
-            include_branches: args.include_branches,
+            skip_branches: args.skip_branches,
             mode: args.update,
             style: if args.tag {
                 PinStyle::Tag
@@ -58,15 +56,11 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
     }) {
         Ok(result) => result,
         Err(CheckError::Scan(err)) => {
-            logger.error(format!("{} {}", "Scan failed:".red(), err));
+            logger.error(format!("Scan failed: {}", err));
             return Ok(ExitCode::FAILURE);
         }
         Err(CheckError::Resolve(ResolveError::GitHub { repository, source })) => {
-            logger.error(format!(
-                "{} for {}.",
-                "GitHub lookup failed".red(),
-                repository.bold()
-            ));
+            logger.error(format!("GitHub lookup failed for {}.", repository.bold()));
             match source {
                 github::Error::HttpStatus(status) => {
                     logger.error(format!(
@@ -87,7 +81,7 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
                             "Retry later, or run with --dry-run/--mode json to inspect scanned references."
                         }
                     };
-                    logger.info(format!("{} {}", "Hint:".cyan(), hint));
+                    logger.info(hint);
                 }
                 github::Error::Request(err) => {
                     logger.error(format!("Request error: {}.", err.to_string().yellow()));
@@ -107,11 +101,8 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
                     .expect("serializing updates payload"),
             );
         } else {
-            logger.warn(format!("{}", "No action references found.".yellow()));
-            logger.info(format!(
-                "{} point actioneer at a workflow file or directory with `uses:` entries.",
-                "Hint:".bright_black()
-            ));
+            logger.warn("No action references found.");
+            logger.info("Point actioneer at a workflow file or directory with `uses:` entries.");
         }
         return Ok(ExitCode::SUCCESS);
     }
@@ -125,16 +116,14 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
     }
 
     logger.info(format!(
-        "{} {} action reference{} across {} workflow file{}.",
-        "Scanned".green(),
+        "Scanned {} action reference{} across {} workflow file{}.",
         result.reference_count.to_string().yellow(),
         plural_suffix(result.reference_count),
         result.reference_file_count.to_string().yellow(),
         plural_suffix(result.reference_file_count)
     ));
     logger.info(format!(
-        "{} {} available update{} across {} workflow file{}.",
-        "Resolved".green(),
+        "Resolved {} available update{} across {} workflow file{}.",
         result.updates.len().to_string().yellow(),
         plural_suffix(result.updates.len()),
         update_file_count(&result.updates).to_string().yellow(),
@@ -148,8 +137,7 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
         .count();
     if mismatch_count > 0 {
         logger.warn(format!(
-            "{} {} pinned SHA{} do not match their version comments.",
-            "Warning:".yellow(),
+            "{} pinned SHA{} do not match their version comments.",
             mismatch_count.to_string().yellow(),
             plural_suffix(mismatch_count)
         ));
@@ -159,7 +147,7 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
             .filter(|update| update.has_sha_mismatch())
         {
             let mut line = format!(
-                "  - {} at {}:{} uses {}",
+                "{} at {}:{} uses {}",
                 update.action.bold(),
                 update.file().cyan(),
                 update.line(),
@@ -174,38 +162,36 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
                     short_sha(update.current_ref()).green()
                 ));
             }
-            logger.warn(format!("{line}."));
+            logger.warn(format!("{}.", line));
         }
     }
 
-    if result.skipped_branches > 0 {
+    if result.branch_ref_count > 0 {
         logger.warn(format!(
-            "{} {} action reference{} use{} branch refs (e.g. @main, @master) and were skipped. \
-             Use --include-branches to include them.",
-            "Warning:".yellow(),
-            result.skipped_branches.to_string().yellow(),
-            plural_suffix(result.skipped_branches),
-            if result.skipped_branches == 1 { "s" } else { "" },
+            "{} action reference{} use{} mutable branch refs (e.g. @main, @master). \
+             These are insecure and should be pinned to a version tag or SHA.",
+            result.branch_ref_count.to_string().yellow(),
+            plural_suffix(result.branch_ref_count),
+            if result.branch_ref_count == 1 { "s" } else { "" },
         ));
     }
 
     if global.dry_run {
         logger.info(format!(
-            "{}: {} scanned reference{}, {} available update{}.",
-            "Preview".cyan(),
+            "Preview: {} scanned reference{}, {} available update{}.",
             result.reference_count.to_string().yellow(),
             plural_suffix(result.reference_count),
             result.updates.len().to_string().yellow(),
             plural_suffix(result.updates.len())
         ));
         for update in &result.updates {
-            let target = if update.is_major_update() {
+            let target = if update.is_major_update() || update.is_branch_ref() {
                 update.display_target().red().to_string()
             } else {
                 update.display_target().green().to_string()
             };
             let mut line = format!(
-                "  - {} [{}]: {} -> {} ({}:{})",
+                "{} [{}]: {} -> {} ({}:{})",
                 update.action.bold(),
                 update.job.bright_black(),
                 update.current.yellow(),
@@ -219,13 +205,16 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
             if update.has_sha_mismatch() {
                 line.push_str(&format!(" {}", "(SHA/comment mismatch)".red()));
             }
+            if update.is_branch_ref() {
+                line.push_str(&format!(" {}", "(unpinned branch ref)".yellow()));
+            }
             logger.info(line);
         }
         return Ok(ExitCode::SUCCESS);
     }
 
     if result.updates.is_empty() {
-        logger.info(format!("{}", "Everything is already up to date.".green()));
+        logger.info("Everything is already up to date.");
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -235,10 +224,7 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
         match prompt::select_updates(&result.updates) {
             Ok(selected) => selected,
             Err(prompt::Error::NotATerminal) => {
-                logger.error(format!(
-                    "{} in this terminal.",
-                    "Interactive selection is not available".yellow()
-                ));
+                logger.error("Interactive selection is not available in this terminal.");
                 logger.info(format!(
                     "Use {}, {}, or {}.",
                     "--yes".cyan(),
@@ -248,11 +234,11 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
                 return Ok(ExitCode::FAILURE);
             }
             Err(prompt::Error::Canceled) => {
-                logger.warn(format!("{}", "Selection canceled.".yellow()));
+                logger.warn("Selection canceled.");
                 return Ok(ExitCode::SUCCESS);
             }
             Err(prompt::Error::Interrupted) => {
-                logger.warn(format!("{}", "Selection interrupted.".yellow()));
+                logger.warn("Selection interrupted.");
                 return Ok(ExitCode::FAILURE);
             }
             Err(prompt::Error::Io(err)) => return Err(Error::Io(err)),
@@ -260,28 +246,24 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
     };
 
     if selected.is_empty() {
-        logger.info(format!(
-            "{}",
-            "No updates selected. No files were changed.".yellow()
-        ));
+        logger.info("No updates selected. No files were changed.");
         return Ok(ExitCode::SUCCESS);
     }
 
     logger.info(format!(
-        "{} {} selected update{}:",
-        "Applying".cyan(),
+        "Applying {} selected update{}:",
         selected.len().to_string().yellow(),
         plural_suffix(selected.len())
     ));
     for &index in &selected {
         let update = &result.updates[index];
-        let target = if update.is_major_update() {
+        let target = if update.is_major_update() || update.is_branch_ref() {
             update.display_target().red().to_string()
         } else {
             update.display_target().green().to_string()
         };
         let mut line = format!(
-            "  - {}:{} [{}] {} {} -> {}",
+            "{}:{} [{}] {} {} -> {}",
             update.file().cyan(),
             update.line(),
             update.job.bright_black(),
@@ -295,6 +277,9 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
         if update.has_sha_mismatch() {
             line.push_str(&format!(" {}", "(SHA/comment mismatch)".red()));
         }
+        if update.is_branch_ref() {
+            line.push_str(&format!(" {}", "(unpinned branch ref)".yellow()));
+        }
         logger.info(line);
     }
 
@@ -304,8 +289,7 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
             selected_files,
         }) => {
             logger.info(format!(
-                "{} {} workflow reference{} across {} file{}.",
-                "Updated".green(),
+                "Updated {} workflow reference{} across {} file{}.",
                 applied.to_string().yellow(),
                 plural_suffix(applied),
                 selected_files.to_string().yellow(),
@@ -314,20 +298,14 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
             Ok(ExitCode::SUCCESS)
         }
         Err(err) => {
-            logger.error(format!(
-                "{} {}.",
-                "Could not write selected updates:".red(),
-                err
-            ));
+            logger.error(format!("Could not write selected updates: {}.", err));
             match err {
-                RewriteError::UpdateTargetNotFound => logger.info(format!(
-                    "{}",
-                    "Fix: re-run actioneer so it can scan the current file contents.".cyan()
-                )),
-                _ => logger.info(format!(
-                    "{}",
-                    "Check: some files may already have been written. Review your working tree before retrying.".cyan()
-                )),
+                RewriteError::UpdateTargetNotFound => logger.info(
+                    "Re-run actioneer so it can scan the current file contents.",
+                ),
+                _ => logger.info(
+                    "Some files may already have been written. Review your working tree before retrying.",
+                ),
             }
             Ok(ExitCode::FAILURE)
         }

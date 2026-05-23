@@ -21,6 +21,7 @@ pub struct ResolvedUpdate {
     pub validation: ValidationState,
     pub target: UpdateTarget,
     pub source: UpdateSource,
+    pub is_branch_ref: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -53,6 +54,7 @@ impl ResolvedUpdate {
         validation: ValidationState,
         target: UpdateTarget,
         source: UpdateSource,
+        is_branch_ref: bool,
     ) -> Self {
         Self {
             action: action.into(),
@@ -61,6 +63,7 @@ impl ResolvedUpdate {
             validation,
             target,
             source,
+            is_branch_ref,
         }
     }
 
@@ -110,6 +113,10 @@ impl ResolvedUpdate {
 
     pub fn ref_end(&self) -> usize {
         self.source.ref_end()
+    }
+
+    pub fn is_branch_ref(&self) -> bool {
+        self.is_branch_ref
     }
 
     pub fn should_write_version_comment(&self) -> bool {
@@ -215,12 +222,13 @@ impl Serialize for ResolvedUpdate {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("ResolvedUpdate", 8)?;
+        let mut state = serializer.serialize_struct("ResolvedUpdate", 9)?;
         state.serialize_field("action", &self.action)?;
         state.serialize_field("job", &self.job)?;
         state.serialize_field("current", &self.current)?;
         state.serialize_field("versionComment", self.version_comment())?;
         state.serialize_field("shaMismatch", &self.has_sha_mismatch())?;
+        state.serialize_field("isBranchRef", &self.is_branch_ref)?;
         state.serialize_field("next", self.next_ref())?;
         state.serialize_field("nextLabel", self.display_target())?;
         state.serialize_field("file", self.file())?;

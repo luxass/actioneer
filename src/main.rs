@@ -6,6 +6,7 @@ mod github;
 mod logger;
 mod model;
 mod syntax;
+mod ui;
 
 use std::process::ExitCode;
 

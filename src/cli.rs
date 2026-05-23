@@ -50,8 +50,8 @@ pub struct UpdateArgs {
     #[arg(long, short = 'r', default_value_t = false)]
     pub recursive: bool,
 
-    #[arg(long = "include-branches", default_value_t = false)]
-    pub include_branches: bool,
+    #[arg(long = "skip-branches", default_value_t = false)]
+    pub skip_branches: bool,
 
     #[arg(long = "update", value_enum, default_value_t = UpdateMode::Major)]
     pub update: UpdateMode,
@@ -71,8 +71,8 @@ pub struct AuditArgs {
     #[arg(long, short = 'r', default_value_t = false)]
     pub recursive: bool,
 
-    #[arg(long = "include-branches", default_value_t = false)]
-    pub include_branches: bool,
+    #[arg(long = "skip-branches", default_value_t = false)]
+    pub skip_branches: bool,
 
     #[arg(long = "update", value_enum, default_value_t = UpdateMode::Major)]
     pub update: UpdateMode,

@@ -245,6 +245,7 @@ mod tests {
                 input.find("oldsha").unwrap(),
                 input.find("oldsha").unwrap() + "oldsha".len(),
             ),
+            false,
         );
 
         let rewrite = apply_updates_to_text(input, ".github/workflows/ci.yml", &[&update]).unwrap();
@@ -283,6 +284,7 @@ mod tests {
                 input.find(current).unwrap(),
                 input.find(current).unwrap() + current.len(),
             ),
+            false,
         );
 
         let rewrite = apply_updates_to_text(input, ".github/workflows/ci.yml", &[&update]).unwrap();
@@ -319,6 +321,7 @@ mod tests {
                 input.find("oldcheckout").unwrap(),
                 input.find("oldcheckout").unwrap() + "oldcheckout".len(),
             ),
+            false,
         );
         let setup_node = ResolvedUpdate::new(
             "actions/setup-node",
@@ -332,6 +335,7 @@ mod tests {
                 input.find("oldnode").unwrap(),
                 input.find("oldnode").unwrap() + "oldnode".len(),
             ),
+            false,
         );
 
         let rewrite =
@@ -370,6 +374,7 @@ mod tests {
                 input.find("oldsha").unwrap(),
                 input.find("oldsha").unwrap() + "oldsha".len(),
             ),
+            false,
         );
 
         let err = apply_updates_to_text(input, ".github/workflows/ci.yml", &[&update]).unwrap_err();

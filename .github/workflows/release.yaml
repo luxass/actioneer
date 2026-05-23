@@ -70,9 +70,11 @@ jobs:
           lookup-only: true
 
       - name: Test
+        shell: bash
         run: cargo test
 
       - name: Build release
+        shell: bash
         env:
           TARGET: ${{ matrix.target }}
         run: cargo build --release --target "$TARGET"

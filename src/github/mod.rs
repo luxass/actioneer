@@ -3,13 +3,13 @@ use std::time::SystemTime;
 mod cache;
 
 use cache::{cache_file_path, no_cache_from_env, read_cached_tags, write_cached_tags};
+use reqwest::StatusCode;
 use reqwest::blocking::Client as HttpClient;
 use reqwest::header::{ETAG, IF_NONE_MATCH, LINK};
-use reqwest::StatusCode;
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::engine::git::{parse_version, Version};
+use crate::engine::git::{Version, parse_version};
 use crate::model::Repository;
 
 const MAX_PAGES: usize = 10;

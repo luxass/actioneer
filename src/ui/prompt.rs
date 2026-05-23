@@ -4,14 +4,14 @@ use std::io::{self, IsTerminal, Stdout};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
-use ratatui::Terminal;
 
 use crate::model::ResolvedUpdate;
 
@@ -66,10 +66,7 @@ enum VisibleRow {
     Update { original_index: usize },
 }
 
-fn build_visible_rows(
-    updates: &[ResolvedUpdate],
-    collapsed: &HashSet<String>,
-) -> Vec<VisibleRow> {
+fn build_visible_rows(updates: &[ResolvedUpdate], collapsed: &HashSet<String>) -> Vec<VisibleRow> {
     let mut rows = Vec::new();
     let mut last_file: Option<&str> = None;
 
@@ -98,7 +95,11 @@ fn build_visible_rows(
     rows
 }
 
-fn file_at_cursor(visible_rows: &[VisibleRow], cursor: usize, updates: &[ResolvedUpdate]) -> String {
+fn file_at_cursor(
+    visible_rows: &[VisibleRow],
+    cursor: usize,
+    updates: &[ResolvedUpdate],
+) -> String {
     if cursor >= visible_rows.len() {
         return updates[0].file().to_string();
     }
@@ -147,9 +148,8 @@ fn run_prompt(
             cursor = visible_rows.len().saturating_sub(1);
         }
 
-        terminal.draw(|frame| {
-            render(frame, updates, &visible_rows, &selected, cursor, &mut state)
-        })?;
+        terminal
+            .draw(|frame| render(frame, updates, &visible_rows, &selected, cursor, &mut state))?;
 
         match read_key()? {
             Key::Up => {
@@ -215,11 +215,7 @@ fn render(
     state: &mut ListState,
 ) {
     let area = frame.area();
-    let sections = Layout::vertical([
-        Constraint::Min(8),
-        Constraint::Length(3),
-    ])
-    .split(area);
+    let sections = Layout::vertical([Constraint::Min(8), Constraint::Length(3)]).split(area);
 
     let items: Vec<ListItem<'_>> = visible_rows
         .iter()
@@ -233,7 +229,11 @@ fn render(
                     let update = &updates[*original_index];
                     let file_changed = last_file.as_deref() != Some(update.file());
                     *last_file = Some(update.file().to_string());
-                    Some(render_update_item(update, selected[*original_index], file_changed))
+                    Some(render_update_item(
+                        update,
+                        selected[*original_index],
+                        file_changed,
+                    ))
                 }
             };
             result
@@ -376,11 +376,7 @@ fn render_update_item(
 }
 
 fn visible_scroll_padding(count: usize) -> usize {
-    if count <= VISIBLE_ROWS_HINT {
-        0
-    } else {
-        2
-    }
+    if count <= VISIBLE_ROWS_HINT { 0 } else { 2 }
 }
 
 fn read_key() -> Result<Key, Error> {

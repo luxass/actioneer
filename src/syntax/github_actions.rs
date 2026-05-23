@@ -199,7 +199,7 @@ fn scalar_at_route<'a>(
     let leading = raw.find(text).unwrap_or(0);
     let start_byte = feature.location.byte_span.0 + leading;
     let end_byte = start_byte + text.len();
-    let line = feature.location.point_span.0 .0 + 1;
+    let line = feature.location.point_span.0.0 + 1;
     let trailing_comment = trailing_comment(document, &feature);
 
     Ok(Some(ScalarRange {
@@ -215,7 +215,7 @@ fn trailing_comment(document: &Document, feature: &Feature<'_>) -> String {
     document
         .feature_comments(feature)
         .into_iter()
-        .filter(|comment| comment.location.point_span.0 .0 == feature.location.point_span.0 .0)
+        .filter(|comment| comment.location.point_span.0.0 == feature.location.point_span.0.0)
         .filter(|comment| comment.location.byte_span.0 >= feature.location.byte_span.1)
         .min_by_key(|comment| comment.location.byte_span.0)
         .map(|comment| {

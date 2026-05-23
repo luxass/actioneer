@@ -1,7 +1,7 @@
 use crate::model::UpdateMode;
 use clap::{
-    builder::styling::{AnsiColor, Effects, Styles},
     Args, Parser, Subcommand, ValueEnum,
+    builder::styling::{AnsiColor, Effects, Styles},
 };
 
 const STYLES: Styles = Styles::styled()

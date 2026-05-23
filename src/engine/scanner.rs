@@ -5,7 +5,7 @@ use thiserror::Error;
 use walkdir::WalkDir;
 
 use crate::model::Reference;
-use crate::syntax::{collect_references, SyntaxError};
+use crate::syntax::{SyntaxError, collect_references};
 
 #[derive(Debug, Error)]
 pub enum ScanError {

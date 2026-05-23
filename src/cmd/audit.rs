@@ -17,10 +17,7 @@ pub fn run(global: GlobalArgs, args: AuditArgs) -> Result<ExitCode, Error> {
     let inputs = default_inputs(args.inputs, args.recursive);
 
     if inputs.len() == 1 {
-        logger.info(format!(
-            "Scanning workflows in {}",
-            inputs[0].bold()
-        ));
+        logger.info(format!("Scanning workflows in {}", inputs[0].bold()));
     } else {
         logger.info(format!(
             "Scanning {} input paths:",
@@ -198,7 +195,9 @@ pub fn run(global: GlobalArgs, args: AuditArgs) -> Result<ExitCode, Error> {
         }
     }
 
-    logger.info("Run `actioneer update` to pin branch refs to version tags, or fix SHA/comment mismatches.");
+    logger.info(
+        "Run `actioneer update` to pin branch refs to version tags, or fix SHA/comment mismatches.",
+    );
     Ok(ExitCode::FAILURE)
 }
 
@@ -211,11 +210,7 @@ fn default_inputs(inputs: Vec<String>, recursive: bool) -> Vec<String> {
 }
 
 fn plural_suffix(count: usize) -> &'static str {
-    if count == 1 {
-        ""
-    } else {
-        "s"
-    }
+    if count == 1 { "" } else { "s" }
 }
 
 fn short_sha(sha: &str) -> &str {

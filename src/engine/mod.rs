@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use thiserror::Error;
 
-use crate::engine::rewrite::{apply_selected_updates, RewriteError};
-use crate::engine::scanner::{scan, ScanError};
+use crate::engine::rewrite::{RewriteError, apply_selected_updates};
+use crate::engine::scanner::{ScanError, scan};
 use crate::github::Client as GitHubClient;
 use crate::model::{Reference, ResolveOptions, ResolvedUpdate};
 

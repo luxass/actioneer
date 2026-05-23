@@ -5,12 +5,12 @@ use owo_colors::OwoColorize;
 use thiserror::Error;
 
 use crate::cli::{GlobalArgs, UpdateArgs};
-use crate::ui::prompt;
 use crate::engine::rewrite::RewriteError;
 use crate::engine::{self, ApplyResult, CheckError, CheckOptions, ResolveError};
 use crate::github;
 use crate::logger;
 use crate::model::{PinStyle, ResolveOptions, ResolvedUpdate};
+use crate::ui::prompt;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -25,10 +25,7 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
     let inputs = default_inputs(args.inputs, args.recursive);
 
     if inputs.len() == 1 {
-        logger.info(format!(
-            "Scanning workflows in {}",
-            inputs[0].bold()
-        ));
+        logger.info(format!("Scanning workflows in {}", inputs[0].bold()));
     } else {
         logger.info(format!(
             "Scanning {} input paths:",
@@ -172,7 +169,11 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
              These are insecure and should be pinned to a version tag or SHA.",
             result.branch_ref_count.to_string().yellow(),
             plural_suffix(result.branch_ref_count),
-            if result.branch_ref_count == 1 { "s" } else { "" },
+            if result.branch_ref_count == 1 {
+                "s"
+            } else {
+                ""
+            },
         ));
     }
 
@@ -329,11 +330,7 @@ fn update_file_count(updates: &[ResolvedUpdate]) -> usize {
 }
 
 fn plural_suffix(count: usize) -> &'static str {
-    if count == 1 {
-        ""
-    } else {
-        "s"
-    }
+    if count == 1 { "" } else { "s" }
 }
 
 fn short_sha(sha: &str) -> &str {

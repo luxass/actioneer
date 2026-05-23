@@ -99,7 +99,7 @@ mod tests {
     use crate::model::Repository;
 
     use super::{
-        cache_file_path, no_cache_from_env, read_cached_tags, write_cached_tags, CacheEntry, Tag,
+        CacheEntry, Tag, cache_file_path, no_cache_from_env, read_cached_tags, write_cached_tags,
     };
 
     #[test]

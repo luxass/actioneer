@@ -1,8 +1,8 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{HashMap, hash_map::Entry};
 
 use thiserror::Error;
 
-use crate::engine::git::{is_likely_sha, parse_version, sha_matches, Version};
+use crate::engine::git::{Version, is_likely_sha, parse_version, sha_matches};
 use crate::github::{Error as GitHubError, Tag};
 use crate::model::{
     PinStyle, Reference, Repository, ResolveOptions, ResolvedUpdate, UpdateMode, UpdateSource,

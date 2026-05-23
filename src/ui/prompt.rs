@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::io::{self, IsTerminal, Stdout};
+use std::io::{self, IsTerminal};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
@@ -7,6 +7,7 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::Terminal;
+use ratatui::backend::Backend;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Modifier, Style};
@@ -66,6 +67,41 @@ enum VisibleRow {
     Update { original_index: usize },
 }
 
+pub(crate) trait EventSource {
+    fn next_event(&mut self) -> io::Result<Event>;
+}
+
+struct RealEventSource;
+
+impl EventSource for RealEventSource {
+    fn next_event(&mut self) -> io::Result<Event> {
+        event::read()
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct TestEventSource {
+    events: std::vec::IntoIter<Event>,
+}
+
+#[cfg(test)]
+impl TestEventSource {
+    pub(crate) fn new(events: Vec<Event>) -> Self {
+        Self {
+            events: events.into_iter(),
+        }
+    }
+}
+
+#[cfg(test)]
+impl EventSource for TestEventSource {
+    fn next_event(&mut self) -> io::Result<Event> {
+        self.events
+            .next()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "no more events"))
+    }
+}
+
 fn build_visible_rows(updates: &[ResolvedUpdate], collapsed: &HashSet<String>) -> Vec<VisibleRow> {
     let mut rows = Vec::new();
     let mut last_file: Option<&str> = None;
@@ -123,7 +159,7 @@ pub fn select_updates(updates: &[ResolvedUpdate]) -> Result<Vec<usize>, Error> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run_prompt(&mut terminal, updates);
+    let result = run_prompt(&mut terminal, &mut RealEventSource, updates);
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -132,10 +168,15 @@ pub fn select_updates(updates: &[ResolvedUpdate]) -> Result<Vec<usize>, Error> {
     result
 }
 
-fn run_prompt(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+fn run_prompt<B: Backend, E: EventSource>(
+    terminal: &mut Terminal<B>,
+    event_source: &mut E,
     updates: &[ResolvedUpdate],
 ) -> Result<Vec<usize>, Error> {
+    if updates.is_empty() {
+        return Ok(Vec::new());
+    }
+
     let mut selected = vec![false; updates.len()];
     let mut collapsed: HashSet<String> = HashSet::new();
     let mut cursor = 0usize;
@@ -151,7 +192,7 @@ fn run_prompt(
         terminal
             .draw(|frame| render(frame, updates, &visible_rows, &selected, cursor, &mut state))?;
 
-        match read_key()? {
+        match read_key(event_source)? {
             Key::Up => {
                 if cursor > 0 {
                     cursor -= 1;
@@ -251,13 +292,13 @@ fn render(
         .highlight_symbol("› ")
         .repeat_highlight_symbol(false)
         .scroll_padding(visible_scroll_padding(visible_rows.len()));
-    frame.render_stateful_widget(list, sections[1], state);
+    frame.render_stateful_widget(list, sections[0], state);
 
     let footer = Paragraph::new(FOOTER)
         .block(Block::default().borders(Borders::ALL).title("Keys"))
         .wrap(Wrap { trim: true })
         .style(Style::default().fg(Color::Cyan));
-    frame.render_widget(footer, sections[2]);
+    frame.render_widget(footer, sections[1]);
 }
 
 fn render_file_header(file: &str) -> ListItem<'_> {
@@ -377,9 +418,9 @@ fn visible_scroll_padding(count: usize) -> usize {
     if count <= VISIBLE_ROWS_HINT { 0 } else { 2 }
 }
 
-fn read_key() -> Result<Key, Error> {
+fn read_key<E: EventSource>(event_source: &mut E) -> Result<Key, Error> {
     loop {
-        let event = event::read()?;
+        let event = event_source.next_event()?;
         let Event::Key(key_event) = event else {
             continue;
         };
@@ -418,18 +459,18 @@ fn short_sha_or_full(update: &ResolvedUpdate) -> String {
     }
 }
 
-fn invert_selected(selected: &mut [bool]) {
+pub(crate) fn invert_selected(selected: &mut [bool]) {
     for is_selected in selected {
         *is_selected = !*is_selected;
     }
 }
 
-fn toggle_all(selected: &mut [bool]) {
+pub(crate) fn toggle_all(selected: &mut [bool]) {
     let all_selected = selected.iter().all(|is_selected| *is_selected);
     selected.fill(!all_selected);
 }
 
-fn toggle_file(updates: &[ResolvedUpdate], selected: &mut [bool], file: &str) {
+pub(crate) fn toggle_file(updates: &[ResolvedUpdate], selected: &mut [bool], file: &str) {
     let all_selected = updates
         .iter()
         .zip(selected.iter())
@@ -440,5 +481,389 @@ fn toggle_file(updates: &[ResolvedUpdate], selected: &mut [bool], file: &str) {
         if update.file() == file {
             *is_selected = !all_selected;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use ratatui::backend::TestBackend;
+
+    use crate::model::{ResolvedUpdate, ValidationState, UpdateTarget, UpdateSource};
+
+    use super::*;
+
+    fn make_update(file: &str, action: &str) -> ResolvedUpdate {
+        ResolvedUpdate::new(
+            action,
+            "build",
+            "v1.0.0",
+            ValidationState::new("abc1234", "1.0.0", false),
+            UpdateTarget::new("v2.0.0", "v2.0.0", false),
+            UpdateSource::new(file, 10, 20, 30),
+            false,
+        )
+    }
+
+    fn make_event(code: KeyCode, modifiers: KeyModifiers) -> Event {
+        Event::Key(KeyEvent {
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        })
+    }
+
+    fn char_event(c: char) -> Event {
+        make_event(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    fn special_event(code: KeyCode) -> Event {
+        make_event(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn build_visible_rows_single_file() {
+        let updates = vec![
+            make_update("a.yml", "actions/checkout"),
+            make_update("a.yml", "actions/setup-node"),
+        ];
+        let collapsed = HashSet::new();
+        let rows = build_visible_rows(&updates, &collapsed);
+
+        assert_eq!(rows.len(), 3);
+        assert!(matches!(&rows[0], VisibleRow::FileHeader { file } if file == "a.yml"));
+        assert!(matches!(&rows[1], VisibleRow::Update { original_index } if *original_index == 0));
+        assert!(matches!(&rows[2], VisibleRow::Update { original_index } if *original_index == 1));
+    }
+
+    #[test]
+    fn build_visible_rows_multiple_files() {
+        let updates = vec![
+            make_update("a.yml", "actions/checkout"),
+            make_update("b.yml", "actions/setup-node"),
+        ];
+        let collapsed = HashSet::new();
+        let rows = build_visible_rows(&updates, &collapsed);
+
+        assert_eq!(rows.len(), 4);
+        assert!(matches!(&rows[0], VisibleRow::FileHeader { file } if file == "a.yml"));
+        assert!(matches!(&rows[1], VisibleRow::Update { original_index } if *original_index == 0));
+        assert!(matches!(&rows[2], VisibleRow::FileHeader { file } if file == "b.yml"));
+        assert!(matches!(&rows[3], VisibleRow::Update { original_index } if *original_index == 1));
+    }
+
+    #[test]
+    fn build_visible_rows_collapsed_file() {
+        let updates = vec![
+            make_update("a.yml", "actions/checkout"),
+            make_update("a.yml", "actions/setup-node"),
+        ];
+        let mut collapsed = HashSet::new();
+        collapsed.insert("a.yml".to_string());
+        let rows = build_visible_rows(&updates, &collapsed);
+
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(&rows[0], VisibleRow::FileHeader { file } if file == "a.yml"));
+    }
+
+    #[test]
+    fn invert_selected_flips_all() {
+        let mut selected = vec![true, false, true];
+        invert_selected(&mut selected);
+        assert_eq!(selected, vec![false, true, false]);
+    }
+
+    #[test]
+    fn toggle_all_selects_when_none_selected() {
+        let mut selected = vec![false, false, false];
+        toggle_all(&mut selected);
+        assert_eq!(selected, vec![true, true, true]);
+    }
+
+    #[test]
+    fn toggle_all_deselects_when_all_selected() {
+        let mut selected = vec![true, true, true];
+        toggle_all(&mut selected);
+        assert_eq!(selected, vec![false, false, false]);
+    }
+
+    #[test]
+    fn toggle_all_selects_when_partial() {
+        let mut selected = vec![true, false, true];
+        toggle_all(&mut selected);
+        assert_eq!(selected, vec![true, true, true]);
+    }
+
+    #[test]
+    fn toggle_file_selects_all_in_file() {
+        let updates = vec![
+            make_update("a.yml", "actions/checkout"),
+            make_update("a.yml", "actions/setup-node"),
+            make_update("b.yml", "actions/cache"),
+        ];
+        let mut selected = vec![false, false, false];
+        toggle_file(&updates, &mut selected, "a.yml");
+        assert_eq!(selected, vec![true, true, false]);
+    }
+
+    #[test]
+    fn toggle_file_deselects_all_in_file() {
+        let updates = vec![
+            make_update("a.yml", "actions/checkout"),
+            make_update("a.yml", "actions/setup-node"),
+            make_update("b.yml", "actions/cache"),
+        ];
+        let mut selected = vec![true, true, false];
+        toggle_file(&updates, &mut selected, "a.yml");
+        assert_eq!(selected, vec![false, false, false]);
+    }
+
+    #[test]
+    fn read_key_maps_up() {
+        let mut src = TestEventSource::new(vec![special_event(KeyCode::Up)]);
+        assert_eq!(read_key(&mut src).unwrap(), Key::Up);
+    }
+
+    #[test]
+    fn read_key_maps_down() {
+        let mut src = TestEventSource::new(vec![special_event(KeyCode::Down)]);
+        assert_eq!(read_key(&mut src).unwrap(), Key::Down);
+    }
+
+    #[test]
+    fn read_key_maps_j_to_down() {
+        let mut src = TestEventSource::new(vec![char_event('j')]);
+        assert_eq!(read_key(&mut src).unwrap(), Key::Down);
+    }
+
+    #[test]
+    fn read_key_maps_k_to_up() {
+        let mut src = TestEventSource::new(vec![char_event('k')]);
+        assert_eq!(read_key(&mut src).unwrap(), Key::Up);
+    }
+
+    #[test]
+    fn read_key_maps_enter_to_accept() {
+        let mut src = TestEventSource::new(vec![special_event(KeyCode::Enter)]);
+        assert_eq!(read_key(&mut src).unwrap(), Key::Accept);
+    }
+
+    #[test]
+    fn read_key_maps_space_to_toggle() {
+        let mut src = TestEventSource::new(vec![char_event(' ')]);
+        assert_eq!(read_key(&mut src).unwrap(), Key::Toggle);
+    }
+
+    #[test]
+    fn read_key_maps_x_to_toggle() {
+        let mut src = TestEventSource::new(vec![char_event('x')]);
+        assert_eq!(read_key(&mut src).unwrap(), Key::Toggle);
+    }
+
+    #[test]
+    fn read_key_maps_a_to_toggle_all() {
+        let mut src = TestEventSource::new(vec![char_event('a')]);
+        assert_eq!(read_key(&mut src).unwrap(), Key::ToggleAll);
+    }
+
+    #[test]
+    fn read_key_maps_f_to_toggle_file() {
+        let mut src = TestEventSource::new(vec![char_event('f')]);
+        assert_eq!(read_key(&mut src).unwrap(), Key::ToggleFile);
+    }
+
+    #[test]
+    fn read_key_maps_tab_to_collapse() {
+        let mut src = TestEventSource::new(vec![special_event(KeyCode::Tab)]);
+        assert_eq!(read_key(&mut src).unwrap(), Key::ToggleCollapse);
+    }
+
+    #[test]
+    fn read_key_maps_i_to_invert() {
+        let mut src = TestEventSource::new(vec![char_event('i')]);
+        assert_eq!(read_key(&mut src).unwrap(), Key::Invert);
+    }
+
+    #[test]
+    fn read_key_maps_n_to_select_none() {
+        let mut src = TestEventSource::new(vec![char_event('n')]);
+        assert_eq!(read_key(&mut src).unwrap(), Key::SelectNone);
+    }
+
+    #[test]
+    fn read_key_maps_q_to_cancel() {
+        let mut src = TestEventSource::new(vec![char_event('q')]);
+        assert_eq!(read_key(&mut src).unwrap(), Key::Cancel);
+    }
+
+    #[test]
+    fn read_key_maps_esc_to_cancel() {
+        let mut src = TestEventSource::new(vec![special_event(KeyCode::Esc)]);
+        assert_eq!(read_key(&mut src).unwrap(), Key::Cancel);
+    }
+
+    #[test]
+    fn read_key_maps_ctrl_c_to_interrupted() {
+        let mut src = TestEventSource::new(vec![make_event(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        )]);
+        let result = read_key(&mut src);
+        assert!(matches!(result, Err(Error::Interrupted)));
+    }
+
+    #[test]
+    fn read_key_ignores_unknown_keys() {
+        let mut src = TestEventSource::new(vec![
+            char_event('z'),
+            special_event(KeyCode::F(1)),
+            char_event('y'),
+            char_event(' '),
+        ]);
+        read_key(&mut src).unwrap();
+        read_key(&mut src).unwrap();
+        read_key(&mut src).unwrap();
+        assert_eq!(read_key(&mut src).unwrap(), Key::Toggle);
+    }
+
+    #[test]
+    fn run_prompt_accept_returns_selected_indices() {
+        let updates = vec![
+            make_update("a.yml", "actions/checkout"),
+            make_update("a.yml", "actions/setup-node"),
+            make_update("b.yml", "actions/cache"),
+        ];
+        let events = vec![
+            special_event(KeyCode::Down),
+            char_event(' '),
+            special_event(KeyCode::Down),
+            char_event(' '),
+            special_event(KeyCode::Enter),
+        ];
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut src = TestEventSource::new(events);
+
+        let result = run_prompt(&mut terminal, &mut src, &updates).unwrap();
+        assert_eq!(result, vec![0, 1]);
+    }
+
+    #[test]
+    fn run_prompt_cancel_returns_error() {
+        let updates = vec![make_update("a.yml", "actions/checkout")];
+        let events = vec![char_event('q')];
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut src = TestEventSource::new(events);
+
+        let result = run_prompt(&mut terminal, &mut src, &updates);
+        assert!(matches!(result, Err(Error::Canceled)));
+    }
+
+    #[test]
+    fn run_prompt_toggle_all_selects_all() {
+        let updates = vec![
+            make_update("a.yml", "actions/checkout"),
+            make_update("b.yml", "actions/cache"),
+        ];
+        let events = vec![char_event('a'), special_event(KeyCode::Enter)];
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut src = TestEventSource::new(events);
+
+        let result = run_prompt(&mut terminal, &mut src, &updates).unwrap();
+        assert_eq!(result, vec![0, 1]);
+    }
+
+    #[test]
+    fn run_prompt_invert_flips_selection() {
+        let updates = vec![
+            make_update("a.yml", "actions/checkout"),
+            make_update("b.yml", "actions/cache"),
+        ];
+        let events = vec![
+            special_event(KeyCode::Down),
+            char_event(' '),
+            char_event('i'),
+            special_event(KeyCode::Enter),
+        ];
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut src = TestEventSource::new(events);
+
+        let result = run_prompt(&mut terminal, &mut src, &updates).unwrap();
+        assert_eq!(result, vec![1]);
+    }
+
+    #[test]
+    fn run_prompt_select_none_clears_selection() {
+        let updates = vec![
+            make_update("a.yml", "actions/checkout"),
+            make_update("b.yml", "actions/cache"),
+        ];
+        let events = vec![
+            char_event('a'),
+            char_event('n'),
+            special_event(KeyCode::Enter),
+        ];
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut src = TestEventSource::new(events);
+
+        let result = run_prompt(&mut terminal, &mut src, &updates).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn run_prompt_collapse_and_toggle_file() {
+        let updates = vec![
+            make_update("a.yml", "actions/checkout"),
+            make_update("a.yml", "actions/setup-node"),
+            make_update("b.yml", "actions/cache"),
+        ];
+        let events = vec![
+            special_event(KeyCode::Down),
+            special_event(KeyCode::Down),
+            special_event(KeyCode::Down),
+            special_event(KeyCode::Down),
+            char_event(' '),
+            special_event(KeyCode::Enter),
+        ];
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut src = TestEventSource::new(events);
+
+        let result = run_prompt(&mut terminal, &mut src, &updates).unwrap();
+        assert_eq!(result, vec![2]);
+    }
+
+    #[test]
+    fn run_prompt_toggle_file_toggles_all_in_file() {
+        let updates = vec![
+            make_update("a.yml", "actions/checkout"),
+            make_update("b.yml", "actions/cache"),
+        ];
+        let events = vec![
+            char_event('f'),
+            special_event(KeyCode::Enter),
+        ];
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut src = TestEventSource::new(events);
+
+        let result = run_prompt(&mut terminal, &mut src, &updates).unwrap();
+        assert_eq!(result, vec![0]);
+    }
+
+    #[test]
+    fn run_prompt_empty_updates_returns_empty() {
+        let updates: Vec<ResolvedUpdate> = vec![];
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut src = TestEventSource::new(vec![]);
+
+        let result = run_prompt(&mut terminal, &mut src, &updates).unwrap();
+        assert!(result.is_empty());
     }
 }

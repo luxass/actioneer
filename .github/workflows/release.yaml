@@ -64,11 +64,6 @@ jobs:
             rustup target add "$TARGET"
           fi
 
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          lookup-only: true
-
       - name: Test
         shell: bash
         run: cargo test
@@ -156,11 +151,6 @@ jobs:
 
       - name: Setup Rust
         run: rustup default stable
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          lookup-only: true
 
       - uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
         id: auth

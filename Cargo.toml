@@ -3,7 +3,7 @@ name = "actioneer"
 version = "0.1.12"
 edition = "2024"
 license = "MIT"
-description = "CLI to scan GitHub Actions workflow files, resolve action references, detect updates, and apply them"
+description = "CLI that detects outdated GitHub Actions and updates them to the latest versions or pinned SHAs"
 repository = "https://github.com/luxass/actioneer"
 readme = "README.md"
 

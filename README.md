@@ -1,6 +1,6 @@
 # actioneer
 
-`actioneer` scans GitHub Actions workflows, finds outdated `uses:` references, and can rewrite them to newer versions or pinned SHAs.
+`actioneer` detects outdated GitHub Actions references in your workflows and updates them to the latest versions or pinned SHAs.
 
 ## Install
 

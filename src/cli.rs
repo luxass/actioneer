@@ -1,4 +1,4 @@
-use crate::model::UpdateMode;
+use crate::model::{PinStyle, UpdateMode};
 use clap::{
     Args, Parser, Subcommand, ValueEnum,
     builder::styling::{AnsiColor, Effects, Styles},
@@ -56,7 +56,10 @@ pub struct UpdateArgs {
     #[arg(long = "update", value_enum, default_value_t = UpdateMode::Major)]
     pub update: UpdateMode,
 
-    #[arg(long, default_value_t = false)]
+    #[arg(long = "pin", value_enum, default_value = "sha")]
+    pub pin: PinStyle,
+
+    #[arg(long, hide = true, default_value_t = false)]
     pub tag: bool,
 
     #[arg(long, short = 'y', default_value_t = false)]
@@ -64,6 +67,12 @@ pub struct UpdateArgs {
 
     #[arg(value_name = "INPUT")]
     pub inputs: Vec<String>,
+}
+
+impl UpdateArgs {
+    pub fn pin_style(&self) -> PinStyle {
+        if self.tag { PinStyle::Tag } else { self.pin }
+    }
 }
 
 #[derive(Clone, Debug, Args)]
@@ -77,11 +86,20 @@ pub struct AuditArgs {
     #[arg(long = "update", value_enum, default_value_t = UpdateMode::Major)]
     pub update: UpdateMode,
 
-    #[arg(long, default_value_t = false)]
+    #[arg(long = "pin", value_enum, default_value = "sha")]
+    pub pin: PinStyle,
+
+    #[arg(long, hide = true, default_value_t = false)]
     pub tag: bool,
 
     #[arg(value_name = "INPUT")]
     pub inputs: Vec<String>,
+}
+
+impl AuditArgs {
+    pub fn pin_style(&self) -> PinStyle {
+        if self.tag { PinStyle::Tag } else { self.pin }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -95,7 +113,7 @@ pub enum Mode {
 mod tests {
     use clap::Parser;
 
-    use crate::model::UpdateMode;
+    use crate::model::{PinStyle, UpdateMode};
 
     use super::{App, Command, Mode};
 
@@ -117,7 +135,8 @@ mod tests {
             "update",
             "--update",
             "patch",
-            "--tag",
+            "--pin",
+            "tag",
             ".github",
         ]);
 
@@ -125,7 +144,7 @@ mod tests {
             Some(Command::Update(args)) => {
                 assert_eq!(vec![String::from(".github")], args.inputs);
                 assert_eq!(UpdateMode::Patch, args.update);
-                assert!(args.tag);
+                assert_eq!(PinStyle::Tag, args.pin_style());
             }
             other => panic!("expected update command, got {other:?}"),
         }
@@ -146,7 +165,7 @@ mod tests {
             Some(Command::Audit(args)) => {
                 assert!(args.recursive);
                 assert_eq!(UpdateMode::Minor, args.update);
-                assert!(!args.tag);
+                assert_eq!(PinStyle::Sha, args.pin_style());
                 assert_eq!(vec![String::from(".")], args.inputs);
             }
             other => panic!("expected audit command, got {other:?}"),
@@ -158,7 +177,19 @@ mod tests {
         let app = App::parse_from(["actioneer", ".github/workflows"]);
 
         assert_eq!(UpdateMode::Major, app.update.update);
-        assert!(!app.update.tag);
+        assert_eq!(PinStyle::Sha, app.update.pin_style());
+    }
+
+    #[test]
+    fn legacy_tag_flag_still_uses_tag_pinning() {
+        let app = App::parse_from(["actioneer", "update", "--tag", ".github"]);
+
+        match app.command {
+            Some(Command::Update(args)) => {
+                assert_eq!(PinStyle::Tag, args.pin_style());
+            }
+            other => panic!("expected update command, got {other:?}"),
+        }
     }
 
     #[test]

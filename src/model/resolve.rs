@@ -8,7 +8,7 @@ pub enum UpdateMode {
     Patch,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum PinStyle {
     #[default]
     Sha,

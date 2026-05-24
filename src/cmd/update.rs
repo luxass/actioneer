@@ -9,7 +9,7 @@ use crate::engine::rewrite::RewriteError;
 use crate::engine::{self, ApplyResult, CheckError, CheckOptions, ResolveError};
 use crate::github;
 use crate::logger;
-use crate::model::{PinStyle, ResolveOptions, ResolvedUpdate};
+use crate::model::{ResolveOptions, ResolvedUpdate};
 use crate::ui::prompt;
 
 #[derive(Debug, Error)]
@@ -22,6 +22,7 @@ pub enum Error {
 
 pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
     let logger = logger::Logger::new(global.mode);
+    let pin_style = args.pin_style();
     let inputs = default_inputs(args.inputs, args.recursive);
 
     if inputs.len() == 1 {
@@ -44,11 +45,7 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
             excludes: global.excludes,
             skip_branches: args.skip_branches,
             mode: args.update,
-            style: if args.tag {
-                PinStyle::Tag
-            } else {
-                PinStyle::Sha
-            },
+            style: pin_style,
         },
     }) {
         Ok(result) => result,

@@ -1,4 +1,4 @@
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 mod cache;
 
@@ -13,6 +13,7 @@ use crate::engine::git::{Version, parse_version};
 use crate::model::Repository;
 
 const MAX_PAGES: usize = 10;
+const CACHE_MAX_AGE: Duration = Duration::from_secs(60 * 60 * 6);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Tag {
@@ -52,9 +53,16 @@ impl Client {
 
     pub fn fetch_tags(&self, repository: &Repository) -> Result<Vec<Tag>, Error> {
         let cache_path = cache_file_path(repository);
+        let now = SystemTime::now();
         let cached = (!self.no_cache)
             .then(|| read_cached_tags(&cache_path))
             .flatten();
+        if let Some(entry) = cached
+            .as_ref()
+            .filter(|entry| entry.is_fresh(now, CACHE_MAX_AGE))
+        {
+            return Ok(entry.clone().into_tags());
+        }
 
         let base_url = format!(
             "https://api.github.com/repos/{}/{}/tags?per_page=100",
@@ -78,7 +86,12 @@ impl Client {
         let response = request.send()?;
         if response.status() == StatusCode::NOT_MODIFIED {
             if let Some(entry) = cached {
-                return Ok(entry.into_tags());
+                let etag = entry.etag.clone();
+                let tags = entry.into_tags();
+                if !self.no_cache {
+                    let _ = write_cached_tags(&cache_path, &tags, etag, now);
+                }
+                return Ok(tags);
             }
             return Err(Error::HttpStatus(StatusCode::NOT_MODIFIED.as_u16()));
         }
@@ -124,7 +137,7 @@ impl Client {
         }
 
         if !self.no_cache {
-            let _ = write_cached_tags(&cache_path, &tags, etag, SystemTime::now());
+            let _ = write_cached_tags(&cache_path, &tags, etag, now);
         }
         Ok(tags)
     }

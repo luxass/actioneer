@@ -7,13 +7,14 @@ use crate::cli::{AuditArgs, GlobalArgs};
 use crate::engine::{self, CheckError, CheckOptions, ResolveError};
 use crate::github;
 use crate::logger;
-use crate::model::{PinStyle, ResolveOptions};
+use crate::model::ResolveOptions;
 
 #[derive(Debug, Error)]
 pub enum Error {}
 
 pub fn run(global: GlobalArgs, args: AuditArgs) -> Result<ExitCode, Error> {
     let logger = logger::Logger::new(global.mode);
+    let pin_style = args.pin_style();
     let inputs = default_inputs(args.inputs, args.recursive);
 
     if inputs.len() == 1 {
@@ -36,11 +37,7 @@ pub fn run(global: GlobalArgs, args: AuditArgs) -> Result<ExitCode, Error> {
             excludes: global.excludes,
             skip_branches: args.skip_branches,
             mode: args.update,
-            style: if args.tag {
-                PinStyle::Tag
-            } else {
-                PinStyle::Sha
-            },
+            style: pin_style,
         },
     }) {
         Ok(result) => result,

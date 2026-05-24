@@ -1,6 +1,6 @@
 [package]
 name = "actioneer"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2024"
 license = "MIT"
 description = "CLI that detects outdated GitHub Actions and updates them to the latest versions or pinned SHAs"

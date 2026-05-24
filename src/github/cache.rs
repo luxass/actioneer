@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -9,13 +9,13 @@ use crate::model::Repository;
 
 use super::Tag;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct CachedTag {
     name: String,
     sha: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct CacheEntry {
     pub(crate) etag: Option<String>,
     fetched_at: u64,
@@ -50,6 +50,13 @@ impl CacheEntry {
                 })
             })
             .collect()
+    }
+
+    pub(crate) fn is_fresh(&self, now: SystemTime, max_age: Duration) -> bool {
+        let fetched_at = UNIX_EPOCH + Duration::from_secs(self.fetched_at);
+        now.duration_since(fetched_at)
+            .map(|age| age <= max_age)
+            .unwrap_or(false)
     }
 }
 
@@ -181,5 +188,20 @@ mod tests {
 
         assert_eq!(None, entry.etag.clone());
         assert_eq!(1, entry.into_tags().len());
+    }
+
+    #[test]
+    fn cache_entry_is_fresh_within_max_age() {
+        let fetched_at = UNIX_EPOCH + Duration::from_secs(1_000);
+        let entry = CacheEntry::from_tags(&[], None, fetched_at);
+
+        assert!(entry.is_fresh(
+            fetched_at + Duration::from_secs(59),
+            Duration::from_secs(60)
+        ));
+        assert!(!entry.is_fresh(
+            fetched_at + Duration::from_secs(61),
+            Duration::from_secs(60)
+        ));
     }
 }

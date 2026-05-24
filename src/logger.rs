@@ -37,17 +37,7 @@ impl Logger {
     }
 
     fn write_human(&self, message: &str, level: Level) {
-        let prefixed = if self.effective_human_mode() == Mode::Beautiful {
-            format!("{} {}", level.prefix(), message)
-        } else {
-            message.to_string()
-        };
-
-        let formatted = if self.effective_human_mode() == Mode::Plain {
-            strip_ansi(&prefixed)
-        } else {
-            prefixed
-        };
+        let formatted = format_human(message, level, self.effective_human_mode());
 
         if self.is_json() {
             let mut stderr = io::stderr().lock();
@@ -76,6 +66,20 @@ impl Logger {
                 }
             }
         }
+    }
+}
+
+fn format_human(message: &str, level: Level, mode: Mode) -> String {
+    let prefixed = if mode == Mode::Beautiful {
+        format!("{} {}", level.prefix(), message)
+    } else {
+        message.to_string()
+    };
+
+    if mode == Mode::Plain {
+        strip_ansi(&prefixed)
+    } else {
+        prefixed
     }
 }
 
@@ -135,7 +139,30 @@ fn strip_ansi(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::strip_ansi;
+    use crate::cli::Mode;
+
+    use super::{Level, format_human, strip_ansi};
+
+    #[test]
+    fn plain_mode_strips_ansi_and_omits_prefix() {
+        assert_eq!(
+            "hello world",
+            format_human("\x1b[31mhello\x1b[0m world", Level::Info, Mode::Plain)
+        );
+    }
+
+    #[test]
+    fn beautiful_mode_adds_level_prefix() {
+        let formatted = format_human("hello", Level::Info, Mode::Beautiful);
+
+        assert!(formatted.contains("hello"));
+        assert!(formatted.starts_with('\u{1b}') || formatted.starts_with('›'));
+    }
+
+    #[test]
+    fn json_mode_keeps_human_diagnostics_unprefixed() {
+        assert_eq!("hello", format_human("hello", Level::Info, Mode::Json));
+    }
 
     #[test]
     fn strip_ansi_removes_escape_sequences() {

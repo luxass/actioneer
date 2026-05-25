@@ -21,6 +21,9 @@ jobs:
       contents: read
     env:
       CARGO_TERM_COLOR: always
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -40,6 +43,7 @@ jobs:
         with:
           save-cache: ${{ github.ref_name == 'main' }}
           components: clippy rustfmt
+          tools: just
 
       - name: fmt
         run: just fmt-check

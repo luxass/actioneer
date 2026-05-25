@@ -207,7 +207,11 @@ fn render_update_item(
     } else {
         Style::default().fg(Color::Green)
     };
-    let change = format!("{} -> {}", update.display_current(), update.display_target());
+    let change = format!(
+        "{} -> {}",
+        update.display_current(),
+        update.display_target()
+    );
     let location = format!("{}:{}", update.job, update.line());
     let pin = if update.next_ref() != update.display_target() {
         format!("@{}", short_sha(update.next_ref()))

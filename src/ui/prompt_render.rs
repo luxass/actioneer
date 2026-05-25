@@ -48,7 +48,7 @@ fn natural_column_widths(updates: &[ResolvedUpdate]) -> ColumnWidths {
 fn total_content_width(widths: &ColumnWidths) -> usize {
     let mut w = 6 + widths.action + 2 + widths.change + 2 + widths.location;
     if widths.pin > 0 {
-        w += 2 + widths.pin;
+        w += 2 + widths.pin + 1;
     }
     w
 }
@@ -236,6 +236,7 @@ fn render_update_item(
             format!("{:1$}", pin, widths.pin),
             Style::default().fg(Color::Blue),
         ));
+        spans.push(Span::raw(" "));
     }
     if update.has_version_comment() {
         spans.push(Span::styled("#", Style::default().fg(Color::DarkGray)));

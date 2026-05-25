@@ -65,7 +65,9 @@ pub fn resolve_updates(
             continue;
         };
 
-        if !sha_mismatch && current_ref_matches_target(reference, target_tag) {
+        if !sha_mismatch
+            && current_ref_matches_requested_style(reference, target_tag, options.style)
+        {
             continue;
         }
 
@@ -177,8 +179,15 @@ fn target_tag(tags: &[Tag], current: Option<Version>, mode: UpdateMode) -> Optio
         .max_by_key(|tag| tag.version)
 }
 
-fn current_ref_matches_target(reference: &Reference, target: &Tag) -> bool {
-    reference.current_ref == target.name || reference.current_ref == target.sha
+fn current_ref_matches_requested_style(
+    reference: &Reference,
+    target: &Tag,
+    style: PinStyle,
+) -> bool {
+    match style {
+        PinStyle::Tag => reference.current_ref == target.name,
+        PinStyle::Sha => sha_matches(&reference.current_ref, &target.sha),
+    }
 }
 
 fn expected_current_sha(
@@ -578,6 +587,155 @@ mod tests {
             &[reference],
             &ResolveOptions {
                 excludes: vec![String::from("setup"), String::from("checkout")],
+                skip_branches: false,
+                mode: UpdateMode::Major,
+                style: PinStyle::Sha,
+            },
+        )
+        .unwrap();
+
+        assert!(updates.is_empty());
+    }
+
+    #[test]
+    fn pin_style_sha_converts_latest_tag_to_sha() {
+        let repository = Repository {
+            owner: "release-plz".into(),
+            name: "action".into(),
+        };
+        let tags = HashMap::from([(
+            repository.clone(),
+            vec![Tag {
+                name: "v0.5.129".into(),
+                sha: "abcdef0123456789".into(),
+                version: Version {
+                    major: 0,
+                    minor: 5,
+                    patch: 129,
+                },
+            }],
+        )]);
+        let reference = Reference {
+            kind: ReferenceKind::WorkflowStep,
+            name: ActionName {
+                repository,
+                path: String::new(),
+            },
+            current_ref: "v0.5.129".into(),
+            version_hint: String::new(),
+            scope: "build".into(),
+            source: SourceLocation {
+                file: "ci.yml".into(),
+                line: 4,
+                ref_span: ByteSpan { start: 0, end: 9 },
+            },
+        };
+
+        let (updates, _) = resolve_updates(
+            &|repository| Ok(tags.get(repository).cloned().unwrap_or_default()),
+            &[reference],
+            &ResolveOptions {
+                excludes: Vec::new(),
+                skip_branches: false,
+                mode: UpdateMode::Major,
+                style: PinStyle::Sha,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(1, updates.len());
+        assert_eq!("abcdef0123456789", updates[0].next_ref());
+        assert_eq!("v0.5.129", updates[0].display_target());
+    }
+
+    #[test]
+    fn pin_style_tag_skips_already_pinned_tag() {
+        let repository = Repository {
+            owner: "release-plz".into(),
+            name: "action".into(),
+        };
+        let tags = HashMap::from([(
+            repository.clone(),
+            vec![Tag {
+                name: "v0.5.129".into(),
+                sha: "abcdef0123456789".into(),
+                version: Version {
+                    major: 0,
+                    minor: 5,
+                    patch: 129,
+                },
+            }],
+        )]);
+        let reference = Reference {
+            kind: ReferenceKind::WorkflowStep,
+            name: ActionName {
+                repository,
+                path: String::new(),
+            },
+            current_ref: "v0.5.129".into(),
+            version_hint: String::new(),
+            scope: "build".into(),
+            source: SourceLocation {
+                file: "ci.yml".into(),
+                line: 4,
+                ref_span: ByteSpan { start: 0, end: 9 },
+            },
+        };
+
+        let (updates, _) = resolve_updates(
+            &|repository| Ok(tags.get(repository).cloned().unwrap_or_default()),
+            &[reference],
+            &ResolveOptions {
+                excludes: Vec::new(),
+                skip_branches: false,
+                mode: UpdateMode::Major,
+                style: PinStyle::Tag,
+            },
+        )
+        .unwrap();
+
+        assert!(updates.is_empty());
+    }
+
+    #[test]
+    fn pin_style_sha_skips_already_pinned_sha() {
+        let repository = Repository {
+            owner: "release-plz".into(),
+            name: "action".into(),
+        };
+        let tags = HashMap::from([(
+            repository.clone(),
+            vec![Tag {
+                name: "v0.5.129".into(),
+                sha: "abcdef0123456789".into(),
+                version: Version {
+                    major: 0,
+                    minor: 5,
+                    patch: 129,
+                },
+            }],
+        )]);
+        let reference = Reference {
+            kind: ReferenceKind::WorkflowStep,
+            name: ActionName {
+                repository,
+                path: String::new(),
+            },
+            current_ref: "abcdef0123456789".into(),
+            version_hint: "v0.5.129".into(),
+            scope: "build".into(),
+            source: SourceLocation {
+                file: "ci.yml".into(),
+                line: 4,
+                ref_span: ByteSpan { start: 0, end: 16 },
+            },
+        };
+
+        let (updates, _) = resolve_updates(
+            &|repository| Ok(tags.get(repository).cloned().unwrap_or_default()),
+            &[reference],
+            &ResolveOptions {
+                excludes: Vec::new(),
                 skip_branches: false,
                 mode: UpdateMode::Major,
                 style: PinStyle::Sha,

@@ -28,7 +28,7 @@ fn natural_column_widths(updates: &[ResolvedUpdate]) -> ColumnWidths {
         |mut w, u| {
             w.action = w.action.max(u.action.chars().count());
             w.change = w.change.max(
-                format!("{} -> {}", u.current, u.display_target())
+                format!("{} -> {}", u.display_current(), u.display_target())
                     .chars()
                     .count(),
             );
@@ -207,7 +207,11 @@ fn render_update_item(
     } else {
         Style::default().fg(Color::Green)
     };
-    let change = format!("{} -> {}", update.current, update.display_target());
+    let change = format!(
+        "{} -> {}",
+        update.display_current(),
+        update.display_target()
+    );
     let location = format!("{}:{}", update.job, update.line());
     let pin = if update.next_ref() != update.display_target() {
         format!("@{}", short_sha(update.next_ref()))

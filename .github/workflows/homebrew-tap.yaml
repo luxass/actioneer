@@ -15,7 +15,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    uses: luxass/shared-workflows/.github/workflows/reusable-homebrew-tap.yaml@306df1ba2ab60f117e6e05c2f736e3f2bd4a0366 # v0.8.2
+    uses: luxass/shared-workflows/.github/workflows/reusable-homebrew-tap.yaml@495f6427f288e78bddfca573876da1357549379d # v0.8.3
     with:
       tap-repository: luxass/homebrew-tap
       formula-path: Formula/actioneer.rb
@@ -23,5 +23,10 @@ jobs:
       environment: homebrew-tap
       targets: '["aarch64-apple-darwin", "x86_64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]'
     secrets:
+      # These two secrets are from the "homebrew-tap" environment. But since you can't
+      # specify an environment for a reusable workflow, we need to pass them explicitly here.
+      #
+      # And then in the reusable workflow, we use the "environment" input to specify
+      # that the job should run in the "homebrew-tap" environment, which has access to these secrets.
       app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}
       app-private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}

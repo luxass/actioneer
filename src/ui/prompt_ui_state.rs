@@ -143,11 +143,17 @@ pub fn build_visible_rows(
     updates: &[ResolvedUpdate],
     collapsed: &HashSet<String>,
 ) -> Vec<VisibleRow> {
+    let mut indexed: Vec<(usize, &str)> = updates
+        .iter()
+        .enumerate()
+        .map(|(i, u)| (i, u.file()))
+        .collect();
+    indexed.sort_by_key(|(_, f)| *f);
+
     let mut rows = Vec::new();
     let mut last_file: Option<&str> = None;
 
-    for (index, update) in updates.iter().enumerate() {
-        let file = update.file();
+    for (index, file) in indexed {
         let is_first = last_file != Some(file);
 
         if is_first {
@@ -260,6 +266,41 @@ mod tests {
 
         assert_eq!(rows.len(), 1);
         assert!(matches!(&rows[0], VisibleRow::FileHeader { file } if file == "a.yml"));
+    }
+
+    #[test]
+    fn build_visible_rows_interleaved_files() {
+        let updates = vec![
+            make_update("b.yml", "actions/checkout"),
+            make_update("a.yml", "actions/setup-node"),
+            make_update("b.yml", "actions/cache"),
+        ];
+        let collapsed = HashSet::new();
+        let rows = build_visible_rows(&updates, &collapsed);
+
+        assert_eq!(rows.len(), 5);
+        assert!(matches!(&rows[0], VisibleRow::FileHeader { file } if file == "a.yml"));
+        assert!(matches!(&rows[1], VisibleRow::Update { original_index } if *original_index == 1));
+        assert!(matches!(&rows[2], VisibleRow::FileHeader { file } if file == "b.yml"));
+        assert!(matches!(&rows[3], VisibleRow::Update { original_index } if *original_index == 0));
+        assert!(matches!(&rows[4], VisibleRow::Update { original_index } if *original_index == 2));
+    }
+
+    #[test]
+    fn build_visible_rows_interleaved_collapsed() {
+        let updates = vec![
+            make_update("b.yml", "actions/checkout"),
+            make_update("a.yml", "actions/setup-node"),
+            make_update("b.yml", "actions/cache"),
+        ];
+        let mut collapsed = HashSet::new();
+        collapsed.insert("b.yml".to_string());
+        let rows = build_visible_rows(&updates, &collapsed);
+
+        assert_eq!(rows.len(), 3);
+        assert!(matches!(&rows[0], VisibleRow::FileHeader { file } if file == "a.yml"));
+        assert!(matches!(&rows[1], VisibleRow::Update { original_index } if *original_index == 1));
+        assert!(matches!(&rows[2], VisibleRow::FileHeader { file } if file == "b.yml"));
     }
 
     #[test]

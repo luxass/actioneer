@@ -107,6 +107,14 @@ impl ResolvedUpdate {
         self.source.line()
     }
 
+    pub fn display_current(&self) -> &str {
+        if self.has_current_ref() && !self.validation.version_comment().is_empty() {
+            self.validation.version_comment()
+        } else {
+            &self.current
+        }
+    }
+
     pub fn ref_start(&self) -> usize {
         self.source.ref_start()
     }

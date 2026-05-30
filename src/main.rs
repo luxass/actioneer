@@ -1,12 +1,12 @@
 mod cli;
 mod cmd;
-mod engine;
-mod errors;
+mod display;
 mod github;
-mod logger;
 mod model;
-mod syntax;
-mod ui;
+mod prompt;
+mod resolve;
+mod rewrite;
+mod scan;
 
 use std::process::ExitCode;
 
@@ -25,12 +25,12 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(app: App) -> Result<ExitCode, errors::Error> {
+fn run(app: App) -> anyhow::Result<ExitCode> {
     let global = app.global.clone();
     match app.command {
-        Some(Command::Update(args)) => Ok(cmd::update::run(global, args)?),
-        Some(Command::Audit(args)) => Ok(cmd::audit::run(global, args)?),
+        Some(Command::Update(args)) => cmd::update::run(global, args),
+        Some(Command::Audit(args)) => cmd::audit::run(global, args),
         Some(Command::Version) => Ok(cmd::version::run()),
-        None => Ok(cmd::update::run(global, app.update)?),
+        None => cmd::update::run(global, app.update),
     }
 }

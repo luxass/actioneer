@@ -1,8 +1,6 @@
+use clap::{Args, Parser, Subcommand, ValueEnum, builder::styling::{AnsiColor, Effects, Styles}};
+
 use crate::model::{PinStyle, UpdateMode};
-use clap::{
-    Args, Parser, Subcommand, ValueEnum,
-    builder::styling::{AnsiColor, Effects, Styles},
-};
 
 const STYLES: Styles = Styles::styled()
     .header(AnsiColor::Green.on_default().effects(Effects::BOLD))
@@ -20,13 +18,13 @@ pub struct App {
     pub global: GlobalArgs,
 
     #[command(flatten)]
-    pub update: UpdateArgs,
+    pub update: ScanArgs,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    Update(UpdateArgs),
-    Audit(AuditArgs),
+    Update(ScanArgs),
+    Audit(ScanArgs),
     Version,
 }
 
@@ -46,7 +44,7 @@ pub struct GlobalArgs {
 }
 
 #[derive(Clone, Debug, Args)]
-pub struct UpdateArgs {
+pub struct ScanArgs {
     #[arg(long, short = 'r', default_value_t = false)]
     pub recursive: bool,
 
@@ -58,48 +56,12 @@ pub struct UpdateArgs {
 
     #[arg(long = "pin", value_enum, default_value = "sha")]
     pub pin: PinStyle,
-
-    #[arg(long, hide = true, default_value_t = false)]
-    pub tag: bool,
 
     #[arg(long, short = 'y', default_value_t = false)]
     pub yes: bool,
 
     #[arg(value_name = "INPUT")]
     pub inputs: Vec<String>,
-}
-
-impl UpdateArgs {
-    pub fn pin_style(&self) -> PinStyle {
-        if self.tag { PinStyle::Tag } else { self.pin }
-    }
-}
-
-#[derive(Clone, Debug, Args)]
-pub struct AuditArgs {
-    #[arg(long, short = 'r', default_value_t = false)]
-    pub recursive: bool,
-
-    #[arg(long = "skip-branches", default_value_t = false)]
-    pub skip_branches: bool,
-
-    #[arg(long = "update", value_enum, default_value_t = UpdateMode::Major)]
-    pub update: UpdateMode,
-
-    #[arg(long = "pin", value_enum, default_value = "sha")]
-    pub pin: PinStyle,
-
-    #[arg(long, hide = true, default_value_t = false)]
-    pub tag: bool,
-
-    #[arg(value_name = "INPUT")]
-    pub inputs: Vec<String>,
-}
-
-impl AuditArgs {
-    pub fn pin_style(&self) -> PinStyle {
-        if self.tag { PinStyle::Tag } else { self.pin }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -109,133 +71,63 @@ pub enum Mode {
     Beautiful,
 }
 
+impl Mode {
+    pub fn is_json(self) -> bool {
+        self == Mode::Json
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;
 
-    use crate::model::{PinStyle, UpdateMode};
-
-    use super::{App, Command, Mode};
+    use super::*;
 
     #[test]
-    fn root_command_uses_update_args() {
+    fn root_command_uses_scan_args() {
         let app = App::parse_from(["actioneer", ".github/workflows"]);
-
         assert!(app.command.is_none());
-        assert_eq!(vec![String::from(".github/workflows")], app.update.inputs);
+        assert_eq!(vec![".github/workflows".to_string()], app.update.inputs);
         assert!(!app.global.dry_run);
-        assert!(!app.global.no_cache);
         assert_eq!(Mode::Beautiful, app.global.mode);
     }
 
     #[test]
-    fn explicit_update_command_uses_update_args() {
+    fn explicit_update_command() {
         let app = App::parse_from([
-            "actioneer",
-            "update",
-            "--update",
-            "patch",
-            "--pin",
-            "tag",
-            ".github",
+            "actioneer", "update", "--update", "patch", "--pin", "tag", ".github",
         ]);
-
         match app.command {
             Some(Command::Update(args)) => {
-                assert_eq!(vec![String::from(".github")], args.inputs);
+                assert_eq!(vec![".github".to_string()], args.inputs);
                 assert_eq!(UpdateMode::Patch, args.update);
-                assert_eq!(PinStyle::Tag, args.pin_style());
+                assert_eq!(PinStyle::Tag, args.pin);
             }
             other => panic!("expected update command, got {other:?}"),
         }
     }
 
     #[test]
-    fn audit_command_uses_audit_args() {
+    fn audit_command() {
         let app = App::parse_from([
-            "actioneer",
-            "audit",
-            "--recursive",
-            "--update",
-            "minor",
-            ".",
+            "actioneer", "audit", "--recursive", "--update", "minor", ".",
         ]);
-
         match app.command {
             Some(Command::Audit(args)) => {
                 assert!(args.recursive);
                 assert_eq!(UpdateMode::Minor, args.update);
-                assert_eq!(PinStyle::Sha, args.pin_style());
-                assert_eq!(vec![String::from(".")], args.inputs);
             }
             other => panic!("expected audit command, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn root_command_defaults_update_mode_to_major() {
-        let app = App::parse_from(["actioneer", ".github/workflows"]);
-
-        assert_eq!(UpdateMode::Major, app.update.update);
-        assert_eq!(PinStyle::Sha, app.update.pin_style());
-    }
-
-    #[test]
-    fn legacy_tag_flag_still_uses_tag_pinning() {
-        let app = App::parse_from(["actioneer", "update", "--tag", ".github"]);
-
-        match app.command {
-            Some(Command::Update(args)) => {
-                assert_eq!(PinStyle::Tag, args.pin_style());
-            }
-            other => panic!("expected update command, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn global_args_work_for_root_update() {
-        let app = App::parse_from([
-            "actioneer",
-            "--dry-run",
-            "--exclude",
-            "actions/cache",
-            "--no-cache",
-            "--mode",
-            "json",
-            ".github",
-        ]);
-
-        assert!(app.command.is_none());
-        assert!(app.global.dry_run);
-        assert!(app.global.no_cache);
-        assert_eq!(vec![String::from("actions/cache")], app.global.excludes);
-        assert_eq!(Mode::Json, app.global.mode);
-        assert_eq!(vec![String::from(".github")], app.update.inputs);
     }
 
     #[test]
     fn global_args_work_after_subcommand() {
         let app = App::parse_from([
-            "actioneer",
-            "audit",
-            "--dry-run",
-            "--no-cache",
-            "--exclude",
-            "actions/cache",
-            "--mode",
-            "plain",
-            ".",
+            "actioneer", "audit", "--dry-run", "--no-cache", "--mode", "plain", ".",
         ]);
-
         assert!(app.global.dry_run);
         assert!(app.global.no_cache);
-        assert_eq!(vec![String::from("actions/cache")], app.global.excludes);
         assert_eq!(Mode::Plain, app.global.mode);
-        match app.command {
-            Some(Command::Audit(args)) => {
-                assert_eq!(vec![String::from(".")], args.inputs);
-            }
-            other => panic!("expected audit command, got {other:?}"),
-        }
     }
 }

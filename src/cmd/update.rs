@@ -1,229 +1,196 @@
-use std::collections::BTreeSet;
+use std::collections::{HashMap, HashSet};
 use std::process::ExitCode;
 
 use owo_colors::OwoColorize;
-use thiserror::Error;
 
-use crate::cli::{GlobalArgs, UpdateArgs};
-use crate::engine::rewrite::RewriteError;
-use crate::engine::{self, ApplyResult, CheckError, CheckOptions, ResolveError};
-use crate::github;
-use crate::logger;
-use crate::model::{ResolveOptions, ResolvedUpdate};
-use crate::ui::prompt;
+use crate::cli::{GlobalArgs, ScanArgs};
+use crate::cmd::default_inputs;
+use crate::display::{Printer, print_json, short_sha, update_file_count};
+use crate::github::{Error as GitHubError, GitHubClient};
+use crate::model::ResolveConfig;
+use crate::{resolve, scan};
 
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error(transparent)]
-    Check(#[from] CheckError),
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-}
-
-pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
-    let logger = logger::Logger::new(global.mode);
-    let pin_style = args.pin_style();
+pub fn run(global: GlobalArgs, args: ScanArgs) -> anyhow::Result<ExitCode> {
+    let printer = Printer::new(global.mode);
     let inputs = default_inputs(args.inputs, args.recursive);
 
     if inputs.len() == 1 {
-        logger.info(format!("Scanning workflows in {}", inputs[0].bold()));
+        printer.info(&format!("Scanning workflows in {}", inputs[0].bold()));
     } else {
-        logger.info(format!(
+        printer.info(&format!(
             "Scanning {} input paths:",
             inputs.len().to_string().yellow()
         ));
         for input in &inputs {
-            logger.debug(format!("  {}", input.bright_black()));
+            printer.debug(&format!("  {}", input.bright_black()));
         }
     }
 
-    let result = match engine::check(CheckOptions {
-        paths: inputs,
-        recursive: args.recursive,
-        no_cache: global.no_cache,
-        resolve_options: ResolveOptions {
-            excludes: global.excludes,
-            skip_branches: args.skip_branches,
-            mode: args.update,
-            style: pin_style,
-        },
-    }) {
-        Ok(result) => result,
-        Err(CheckError::Scan(err)) => {
-            logger.error(format!("Scan failed: {}", err));
-            return Ok(ExitCode::FAILURE);
-        }
-        Err(CheckError::Resolve(ResolveError::GitHub { repository, source })) => {
-            logger.error(format!("GitHub lookup failed for {}.", repository.bold()));
-            match source {
-                github::Error::HttpStatus(status) => {
-                    logger.error(format!(
-                        "GitHub returned HTTP {}.",
-                        status.to_string().yellow()
-                    ));
-                    let hint = match status {
-                        401 => {
-                            "Set GITHUB_TOKEN or run `gh auth login` so actioneer can authenticate GitHub requests."
-                        }
-                        403 => {
-                            "This is usually a rate limit or access restriction. Set GITHUB_TOKEN or run `gh auth login` before retrying."
-                        }
-                        404 => "The repository was not found or is not publicly accessible.",
-                        429 => "GitHub is rate limiting these requests.",
-                        502..=504 => "GitHub appears temporarily unavailable.",
-                        _ => {
-                            "Retry later, or run with --dry-run/--mode json to inspect scanned references."
-                        }
-                    };
-                    logger.info(hint);
-                }
-                github::Error::Request(err) => {
-                    logger.error(format!("Request error: {}.", err.to_string().yellow()));
-                    logger.info(
-                        "Check network, DNS, proxy, and TLS settings. If you are unauthenticated, set GITHUB_TOKEN or run `gh auth login`.",
-                    );
-                }
-            }
+    let mut actions = match scan::scan(&inputs, args.recursive) {
+        Ok(a) => a,
+        Err(err) => {
+            printer.error(&format!("Scan failed: {err}"));
             return Ok(ExitCode::FAILURE);
         }
     };
 
-    if result.reference_count == 0 {
-        if logger.is_json() {
-            logger.json(
-                serde_json::to_string(&serde_json::json!({ "updates": [] }))
-                    .expect("serializing updates payload"),
-            );
+    if actions.is_empty() {
+        if global.mode.is_json() {
+            print_json(&[]);
         } else {
-            logger.warn("No action references found.");
-            logger.info("Point actioneer at a workflow file or directory with `uses:` entries.");
+            printer.warn("No action references found.");
+            printer.info("Point actioneer at a workflow file or directory with `uses:` entries.");
         }
         return Ok(ExitCode::SUCCESS);
     }
 
-    if logger.is_json() {
-        logger.json(
-            serde_json::to_string(&serde_json::json!({ "updates": result.updates }))
-                .expect("serializing updates payload"),
-        );
+    let repos: HashSet<(String, String)> = actions
+        .iter()
+        .map(|a| (a.owner.clone(), a.name.clone()))
+        .collect();
+    let mut tags: HashMap<(String, String), Vec<crate::model::Tag>> = HashMap::new();
+    let gh = GitHubClient::new(!global.no_cache);
+
+    for (owner, name) in &repos {
+        match gh.fetch_tags(owner, name) {
+            Ok(repo_tags) => {
+                tags.insert((owner.clone(), name.clone()), repo_tags);
+            }
+            Err(e) => {
+                printer.error(&format!(
+                    "GitHub lookup failed for {}/{}.",
+                    owner.bold(),
+                    name.bold()
+                ));
+                match &e {
+                    GitHubError::HttpStatus(status) => {
+                        printer.error(&format!(
+                            "GitHub returned HTTP {}.",
+                            status.to_string().yellow()
+                        ));
+                        let hint = match status {
+                            401 => "Set GITHUB_TOKEN or run `gh auth login` so actioneer can authenticate GitHub requests.",
+                            403 => "This is usually a rate limit or access restriction. Set GITHUB_TOKEN or run `gh auth login` before retrying.",
+                            404 => "The repository was not found or is not publicly accessible.",
+                            429 => "GitHub is rate limiting these requests.",
+                            502..=504 => "GitHub appears temporarily unavailable.",
+                            _ => "Retry later, or run with --dry-run/--mode json to inspect scanned references.",
+                        };
+                        printer.info(hint);
+                    }
+                    GitHubError::Request(err) => {
+                        printer.error(&format!("Request error: {}.", err.to_string().yellow()));
+                        printer.info("Check network, DNS, proxy, and TLS settings. If you are unauthenticated, set GITHUB_TOKEN or run `gh auth login`.");
+                    }
+                }
+                return Ok(ExitCode::FAILURE);
+            }
+        }
+    }
+
+    let resolve_config = ResolveConfig {
+        excludes: global.excludes,
+        skip_branches: args.skip_branches,
+        mode: args.update,
+        style: args.pin,
+    };
+    resolve::resolve(&mut actions, &tags, &resolve_config);
+    actions.retain(|a| a.needs_update);
+
+    if global.mode.is_json() {
+        print_json(&actions);
         return Ok(ExitCode::SUCCESS);
     }
 
-    logger.info(format!(
-        "Scanned {} action reference{} across {} workflow file{}.",
-        result.reference_count.to_string().yellow(),
-        plural_suffix(result.reference_count),
-        result.reference_file_count.to_string().yellow(),
-        plural_suffix(result.reference_file_count)
-    ));
-    logger.info(format!(
+    printer.info(&format!(
         "Resolved {} available update{} across {} workflow file{}.",
-        result.updates.len().to_string().yellow(),
-        plural_suffix(result.updates.len()),
-        update_file_count(&result.updates).to_string().yellow(),
-        plural_suffix(update_file_count(&result.updates))
+        actions.len().to_string().yellow(),
+        if actions.len() == 1 { "" } else { "s" },
+        update_file_count(&actions).to_string().yellow(),
+        if update_file_count(&actions) == 1 { "" } else { "s" },
     ));
 
-    let mismatch_count = result
-        .updates
-        .iter()
-        .filter(|update| update.has_sha_mismatch())
-        .count();
+    let mismatch_count = actions.iter().filter(|a| a.sha_mismatch).count();
     if mismatch_count > 0 {
-        logger.warn(format!(
+        printer.warn(&format!(
             "{} pinned SHA{} do not match their version comments.",
             mismatch_count.to_string().yellow(),
-            plural_suffix(mismatch_count)
+            if mismatch_count == 1 { "" } else { "s" },
         ));
-        for update in result
-            .updates
-            .iter()
-            .filter(|update| update.has_sha_mismatch())
-        {
+        for a in actions.iter().filter(|a| a.sha_mismatch) {
             let mut line = format!(
                 "{} at {}:{} uses {}",
-                update.action.bold(),
-                update.file().cyan(),
-                update.line(),
-                update.current.red()
+                a.action_name().bold(),
+                a.file.cyan(),
+                a.line,
+                a.current_ref.red()
             );
-            if update.has_version_comment() {
-                line.push_str(&format!(" but says {}", update.version_comment().yellow()));
+            if let Some(vc) = &a.version_comment {
+                line.push_str(&format!(" but says {}", vc.yellow()));
             }
-            if update.has_current_ref() {
-                line.push_str(&format!(
-                    "; expected {}",
-                    short_sha(update.current_ref()).green()
-                ));
+            if !a.expected_sha.is_empty() {
+                line.push_str(&format!("; expected {}", short_sha(&a.expected_sha).green()));
             }
-            logger.warn(format!("{}.", line));
+            printer.warn(&format!("{line}."));
         }
     }
 
-    if result.branch_ref_count > 0 {
-        logger.warn(format!(
-            "{} action reference{} use{} mutable branch refs (e.g. @main, @master). \
-             These are insecure and should be pinned to a version tag or SHA.",
-            result.branch_ref_count.to_string().yellow(),
-            plural_suffix(result.branch_ref_count),
-            if result.branch_ref_count == 1 {
-                "s"
-            } else {
-                ""
-            },
+    let branch_count = actions.iter().filter(|a| a.is_branch).count();
+    if branch_count > 0 {
+        printer.warn(&format!(
+            "{} action reference{} use mutable branch refs (e.g. @main, @master). These are insecure and should be pinned to a version tag or SHA.",
+            branch_count.to_string().yellow(),
+            if branch_count == 1 { "" } else { "s" },
         ));
     }
 
     if global.dry_run {
-        logger.info(format!(
-            "Preview: {} scanned reference{}, {} available update{}.",
-            result.reference_count.to_string().yellow(),
-            plural_suffix(result.reference_count),
-            result.updates.len().to_string().yellow(),
-            plural_suffix(result.updates.len())
+        printer.info(&format!(
+            "Preview: {} available update{}.",
+            actions.len().to_string().yellow(),
+            if actions.len() == 1 { "" } else { "s" },
         ));
-        for update in &result.updates {
-            let target = if update.is_major_update() || update.is_branch_ref() {
-                update.display_target().red().to_string()
+        for a in &actions {
+            let target = if a.is_major || a.is_branch {
+                a.new_version.red().to_string()
             } else {
-                update.display_target().green().to_string()
+                a.new_version.green().to_string()
             };
             let mut line = format!(
-                "{} [{}]: {} -> {} ({}:{})",
-                update.action.bold(),
-                update.job.bright_black(),
-                update.current.yellow(),
+                "{}: {} -> {} ({}:{})",
+                a.action_name().bold(),
+                a.current_ref.yellow(),
                 target,
-                update.file().bright_black(),
-                update.line()
+                a.file.bright_black(),
+                a.line
             );
-            if update.has_version_comment() {
-                line.push_str(&format!(" #{}", update.version_comment().bright_black()));
+            if let Some(vc) = &a.version_comment {
+                line.push_str(&format!(" #{}", vc.bright_black()));
             }
-            if update.has_sha_mismatch() {
+            if a.sha_mismatch {
                 line.push_str(&format!(" {}", "(SHA/comment mismatch)".red()));
             }
-            if update.is_branch_ref() {
+            if a.is_branch {
                 line.push_str(&format!(" {}", "(unpinned branch ref)".yellow()));
             }
-            logger.info(line);
+            printer.info(&line);
         }
         return Ok(ExitCode::SUCCESS);
     }
 
-    if result.updates.is_empty() {
-        logger.info("Everything is already up to date.");
+    if actions.is_empty() {
+        printer.info("Everything is already up to date.");
         return Ok(ExitCode::SUCCESS);
     }
 
     let selected = if args.yes {
-        (0..result.updates.len()).collect()
+        (0..actions.len()).collect()
     } else {
-        match prompt::select_updates(&result.updates) {
-            Ok(selected) => selected,
-            Err(prompt::Error::NotATerminal) => {
-                logger.error("Interactive selection is not available in this terminal.");
-                logger.info(format!(
+        match crate::prompt::select(&actions) {
+            Ok(s) => s,
+            Err(crate::prompt::Error::NotATerminal) => {
+                printer.error("Interactive selection is not available in this terminal.");
+                printer.info(&format!(
                     "Use {}, {}, or {}.",
                     "--yes".cyan(),
                     "--dry-run".cyan(),
@@ -231,131 +198,86 @@ pub fn run(global: GlobalArgs, args: UpdateArgs) -> Result<ExitCode, Error> {
                 ));
                 return Ok(ExitCode::FAILURE);
             }
-            Err(prompt::Error::Canceled) => {
-                logger.warn("Selection canceled.");
+            Err(crate::prompt::Error::Canceled) => {
+                printer.warn("Selection canceled.");
                 return Ok(ExitCode::SUCCESS);
             }
-            Err(prompt::Error::Interrupted) => {
-                logger.warn("Selection interrupted.");
+            Err(crate::prompt::Error::Interrupted) => {
+                printer.warn("Selection interrupted.");
                 return Ok(ExitCode::FAILURE);
             }
-            Err(prompt::Error::Io(err)) => return Err(Error::Io(err)),
+            Err(e) => {
+                printer.error(&format!("Prompt error: {e}"));
+                return Ok(ExitCode::FAILURE);
+            }
         }
     };
 
     if selected.is_empty() {
-        logger.info("No updates selected. No files were changed.");
+        printer.info("No updates selected. No files were changed.");
         return Ok(ExitCode::SUCCESS);
     }
 
-    logger.info(format!(
+    printer.info(&format!(
         "Applying {} selected update{}:",
         selected.len().to_string().yellow(),
-        plural_suffix(selected.len())
+        if selected.len() == 1 { "" } else { "s" },
     ));
-    for &index in &selected {
-        let update = &result.updates[index];
-        let target = if update.is_major_update() || update.is_branch_ref() {
-            update.display_target().red().to_string()
+    for &idx in &selected {
+        let a = &actions[idx];
+        let target = if a.is_major || a.is_branch {
+            a.new_version.red().to_string()
         } else {
-            update.display_target().green().to_string()
+            a.new_version.green().to_string()
         };
         let mut line = format!(
-            "{}:{} [{}] {} {} -> {}",
-            update.file().cyan(),
-            update.line(),
-            update.job.bright_black(),
-            update.action.bold(),
-            summarize_ref(&update.current).bright_black(),
+            "{}:{} {}: {} -> {}",
+            a.file.cyan(),
+            a.line,
+            a.action_name().bold(),
+            a.current_ref.bright_black(),
             target
         );
-        if update.has_version_comment() {
-            line.push_str(&format!(" #{}", update.version_comment().bright_black()));
+        if let Some(vc) = &a.version_comment {
+            line.push_str(&format!(" #{}", vc.bright_black()));
         }
-        if update.has_sha_mismatch() {
+        if a.sha_mismatch {
             line.push_str(&format!(" {}", "(SHA/comment mismatch)".red()));
         }
-        if update.is_branch_ref() {
+        if a.is_branch {
             line.push_str(&format!(" {}", "(unpinned branch ref)".yellow()));
         }
-        logger.info(line);
+        printer.info(&line);
     }
 
-    match engine::apply(&result.updates, &selected) {
-        Ok(ApplyResult {
-            applied,
-            selected_files,
-        }) => {
-            logger.info(format!(
+    match crate::rewrite::apply(&actions, &selected) {
+        Ok(applied) => {
+            let files = actions
+                .iter()
+                .enumerate()
+                .filter_map(|(i, a)| selected.contains(&i).then_some(a.file.as_str()))
+                .collect::<std::collections::BTreeSet<_>>()
+                .len();
+            printer.info(&format!(
                 "Updated {} workflow reference{} across {} file{}.",
                 applied.to_string().yellow(),
-                plural_suffix(applied),
-                selected_files.to_string().yellow(),
-                plural_suffix(selected_files)
+                if applied == 1 { "" } else { "s" },
+                files.to_string().yellow(),
+                if files == 1 { "" } else { "s" },
             ));
             Ok(ExitCode::SUCCESS)
         }
         Err(err) => {
-            logger.error(format!("Could not write selected updates: {}.", err));
-            match err {
-                RewriteError::UpdateTargetNotFound => logger.info(
-                    "Re-run actioneer so it can scan the current file contents.",
-                ),
-                _ => logger.info(
-                    "Some files may already have been written. Review your working tree before retrying.",
-                ),
+            printer.error(&format!("Could not write selected updates: {err}."));
+            match &err {
+                crate::rewrite::RewriteError::UpdateTargetNotFound => {
+                    printer.info("Re-run actioneer so it can scan the current file contents.");
+                }
+                _ => {
+                    printer.info("Some files may already have been written. Review your working tree before retrying.");
+                }
             }
             Ok(ExitCode::FAILURE)
         }
-    }
-}
-
-fn default_inputs(inputs: Vec<String>, recursive: bool) -> Vec<String> {
-    if inputs.is_empty() {
-        vec![if recursive { "." } else { ".github" }.to_string()]
-    } else {
-        inputs
-    }
-}
-
-fn update_file_count(updates: &[ResolvedUpdate]) -> usize {
-    updates
-        .iter()
-        .map(|update| update.file())
-        .collect::<BTreeSet<_>>()
-        .len()
-}
-
-fn plural_suffix(count: usize) -> &'static str {
-    if count == 1 { "" } else { "s" }
-}
-
-fn short_sha(sha: &str) -> &str {
-    &sha[..sha.len().min(12)]
-}
-
-fn summarize_ref(reference: &str) -> &str {
-    if reference.len() >= 16 && reference.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        short_sha(reference)
-    } else {
-        reference
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::default_inputs;
-
-    #[test]
-    fn defaults_to_dot_github() {
-        assert_eq!(
-            vec![String::from(".github")],
-            default_inputs(Vec::new(), false)
-        );
-    }
-
-    #[test]
-    fn defaults_to_dot_when_recursive() {
-        assert_eq!(vec![String::from(".")], default_inputs(Vec::new(), true));
     }
 }

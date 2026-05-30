@@ -121,4 +121,3 @@ fn find_comment_start(contents: &str, offset: usize) -> Option<usize> {
     }
     None
 }
-

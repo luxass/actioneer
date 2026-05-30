@@ -292,7 +292,8 @@ mod tests {
 
     #[test]
     fn parse_action_ref_sha() {
-        let p = parse_action_ref("actions/checkout@abcdef0123456789abcdef0123456789abcdef01").unwrap();
+        let p =
+            parse_action_ref("actions/checkout@abcdef0123456789abcdef0123456789abcdef01").unwrap();
         assert_eq!("abcdef0123456789abcdef0123456789abcdef01", p.r#ref);
     }
 
@@ -404,7 +405,8 @@ mod tests {
 
     #[test]
     fn collect_composite_finds_steps() {
-        let source = "runs:\n  using: composite\n  steps:\n    - uses: actions/setup-node@v4 # v4.0.0\n";
+        let source =
+            "runs:\n  using: composite\n  steps:\n    - uses: actions/setup-node@v4 # v4.0.0\n";
         let doc = Document::new(source.to_string()).unwrap();
         let root: Value = serde_yaml::from_str(source).unwrap();
         let mut actions = Vec::new();
@@ -417,7 +419,10 @@ mod tests {
     fn extract_comment_finds_version() {
         let source = "uses: actions/checkout@abc123 # v4.1.0\n";
         let doc = Document::new(source.to_string()).unwrap();
-        let feature = doc.query_exact(&Route::default().with_key("uses")).unwrap().unwrap();
+        let feature = doc
+            .query_exact(&Route::default().with_key("uses"))
+            .unwrap()
+            .unwrap();
         assert_eq!(Some("v4.1.0".to_string()), extract_comment(&doc, &feature));
     }
 
@@ -425,8 +430,10 @@ mod tests {
     fn extract_comment_none_when_missing() {
         let source = "uses: actions/checkout@v4\n";
         let doc = Document::new(source.to_string()).unwrap();
-        let feature = doc.query_exact(&Route::default().with_key("uses")).unwrap().unwrap();
+        let feature = doc
+            .query_exact(&Route::default().with_key("uses"))
+            .unwrap()
+            .unwrap();
         assert_eq!(None, extract_comment(&doc, &feature));
     }
 }
-

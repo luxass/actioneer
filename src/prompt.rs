@@ -543,7 +543,10 @@ mod tests {
 
     #[test]
     fn visible_rows_single_file_two_actions() {
-        let actions = vec![mk_action("a.yml", "checkout"), mk_action("a.yml", "setup-node")];
+        let actions = vec![
+            mk_action("a.yml", "checkout"),
+            mk_action("a.yml", "setup-node"),
+        ];
         let rows = visible_rows(&actions, &HashSet::new());
         assert_eq!(3, rows.len());
         assert!(matches!(&rows[0], VisibleRow::FileHeader { file } if file == "a.yml"));
@@ -595,4 +598,3 @@ mod tests {
         assert_eq!("", cursor_file(&visible, 99, &[]));
     }
 }
-

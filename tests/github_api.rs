@@ -164,11 +164,7 @@ async fn cache_returns_stored_data() {
     if let Some(p) = path.parent() {
         fs::create_dir_all(p).unwrap();
     }
-    fs::write(
-        &path,
-        r#"[{"name":"v1.0.0","sha":"abc"}]"#,
-    )
-    .unwrap();
+    fs::write(&path, r#"[{"name":"v1.0.0","sha":"abc"}]"#).unwrap();
 
     let server = MockServer::start().await;
 

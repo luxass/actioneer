@@ -137,31 +137,66 @@ mod tests {
     #[test]
     fn parse_version_v_prefix() {
         let v = parse_version("v1.2.3").unwrap();
-        assert_eq!(Version { major: 1, minor: 2, patch: 3 }, v);
+        assert_eq!(
+            Version {
+                major: 1,
+                minor: 2,
+                patch: 3
+            },
+            v
+        );
     }
 
     #[test]
     fn parse_version_capital_v() {
         let v = parse_version("V4.5.6").unwrap();
-        assert_eq!(Version { major: 4, minor: 5, patch: 6 }, v);
+        assert_eq!(
+            Version {
+                major: 4,
+                minor: 5,
+                patch: 6
+            },
+            v
+        );
     }
 
     #[test]
     fn parse_version_no_prefix() {
         let v = parse_version("7.8.9").unwrap();
-        assert_eq!(Version { major: 7, minor: 8, patch: 9 }, v);
+        assert_eq!(
+            Version {
+                major: 7,
+                minor: 8,
+                patch: 9
+            },
+            v
+        );
     }
 
     #[test]
     fn parse_version_major_only() {
         let v = parse_version("v1").unwrap();
-        assert_eq!(Version { major: 1, minor: 0, patch: 0 }, v);
+        assert_eq!(
+            Version {
+                major: 1,
+                minor: 0,
+                patch: 0
+            },
+            v
+        );
     }
 
     #[test]
     fn parse_version_major_minor() {
         let v = parse_version("v1.2").unwrap();
-        assert_eq!(Version { major: 1, minor: 2, patch: 0 }, v);
+        assert_eq!(
+            Version {
+                major: 1,
+                minor: 2,
+                patch: 0
+            },
+            v
+        );
     }
 
     #[test]
@@ -182,13 +217,27 @@ mod tests {
     #[test]
     fn parse_version_trailing_text_parses_leading_digits() {
         let v = parse_version("v1.2.3-beta").unwrap();
-        assert_eq!(Version { major: 1, minor: 2, patch: 3 }, v);
+        assert_eq!(
+            Version {
+                major: 1,
+                minor: 2,
+                patch: 3
+            },
+            v
+        );
     }
 
     #[test]
     fn parse_version_leading_zero() {
         let v = parse_version("v0.1.0").unwrap();
-        assert_eq!(Version { major: 0, minor: 1, patch: 0 }, v);
+        assert_eq!(
+            Version {
+                major: 0,
+                minor: 1,
+                patch: 0
+            },
+            v
+        );
     }
 
     #[test]
@@ -238,33 +287,94 @@ mod tests {
 
     #[test]
     fn action_name_no_path() {
-        let a = Action::from_scan("own".into(), "repo".into(), String::new(), "v1".into(), None, "f".into(), 1, 0, 2);
+        let a = Action::from_scan(
+            "own".into(),
+            "repo".into(),
+            String::new(),
+            "v1".into(),
+            None,
+            "f".into(),
+            1,
+            0,
+            2,
+        );
         assert_eq!("own/repo", a.action_name());
     }
 
     #[test]
     fn action_name_with_path() {
-        let a = Action::from_scan("own".into(), "repo".into(), "/.github/workflows/ci.yml".into(), "v1".into(), None, "f".into(), 1, 0, 2);
+        let a = Action::from_scan(
+            "own".into(),
+            "repo".into(),
+            "/.github/workflows/ci.yml".into(),
+            "v1".into(),
+            None,
+            "f".into(),
+            1,
+            0,
+            2,
+        );
         assert_eq!("own/repo/.github/workflows/ci.yml", a.action_name());
     }
 
     #[test]
     fn version_ordering_major() {
-        assert!(Version { major: 2, minor: 0, patch: 0 } > Version { major: 1, minor: 9, patch: 9 });
+        assert!(
+            Version {
+                major: 2,
+                minor: 0,
+                patch: 0
+            } > Version {
+                major: 1,
+                minor: 9,
+                patch: 9
+            }
+        );
     }
 
     #[test]
     fn version_ordering_minor() {
-        assert!(Version { major: 1, minor: 3, patch: 0 } > Version { major: 1, minor: 2, patch: 9 });
+        assert!(
+            Version {
+                major: 1,
+                minor: 3,
+                patch: 0
+            } > Version {
+                major: 1,
+                minor: 2,
+                patch: 9
+            }
+        );
     }
 
     #[test]
     fn version_ordering_patch() {
-        assert!(Version { major: 1, minor: 2, patch: 5 } > Version { major: 1, minor: 2, patch: 4 });
+        assert!(
+            Version {
+                major: 1,
+                minor: 2,
+                patch: 5
+            } > Version {
+                major: 1,
+                minor: 2,
+                patch: 4
+            }
+        );
     }
 
     #[test]
     fn version_ordering_equal() {
-        assert_eq!(Version { major: 1, minor: 2, patch: 3 }, Version { major: 1, minor: 2, patch: 3 });
+        assert_eq!(
+            Version {
+                major: 1,
+                minor: 2,
+                patch: 3
+            },
+            Version {
+                major: 1,
+                minor: 2,
+                patch: 3
+            }
+        );
     }
 }

@@ -103,7 +103,16 @@ mod tests {
 
     #[test]
     fn root_with_flags() {
-        let app = App::parse_from(["actioneer", "-r", "--skip-branches", "--update", "patch", "--pin", "tag", "--yes"]);
+        let app = App::parse_from([
+            "actioneer",
+            "-r",
+            "--skip-branches",
+            "--update",
+            "patch",
+            "--pin",
+            "tag",
+            "--yes",
+        ]);
         assert!(app.update.recursive);
         assert!(app.update.skip_branches);
         assert_eq!(UpdateMode::Patch, app.update.update);
@@ -113,7 +122,16 @@ mod tests {
 
     #[test]
     fn update_subcommand() {
-        let app = App::parse_from(["actioneer", "update", "-r", "--update", "minor", "--pin", "sha", "."]);
+        let app = App::parse_from([
+            "actioneer",
+            "update",
+            "-r",
+            "--update",
+            "minor",
+            "--pin",
+            "sha",
+            ".",
+        ]);
         match app.command {
             Some(Command::Update(args)) => {
                 assert!(args.recursive);
@@ -193,4 +211,3 @@ mod tests {
         assert!(!Mode::Beautiful.is_json());
     }
 }
-

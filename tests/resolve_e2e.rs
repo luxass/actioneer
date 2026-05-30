@@ -60,7 +60,10 @@ async fn sha_pin_version_upgrade() {
     });
 
     assert!(result[0].needs_update);
-    assert_eq!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", result[0].new_ref);
+    assert_eq!(
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        result[0].new_ref
+    );
     assert_eq!("v4.2.0", result[0].new_version);
     let _ = fs::remove_dir_all(&tmp);
 }

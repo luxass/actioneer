@@ -210,4 +210,3 @@ fn resolve_token() -> Option<String> {
 pub fn no_cache_from_env() -> bool {
     matches!(std::env::var("ACTIONEER_NO_CACHE"), Ok(v) if matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
 }
-

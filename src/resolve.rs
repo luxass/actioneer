@@ -145,26 +145,48 @@ mod tests {
     }
 
     fn tag(name: &str, sha: &str, major: u32, minor: u32, patch: u32) -> Tag {
-        Tag { name: name.to_string(), sha: sha.to_string(), version: Version { major, minor, patch } }
+        Tag {
+            name: name.to_string(),
+            sha: sha.to_string(),
+            version: Version {
+                major,
+                minor,
+                patch,
+            },
+        }
     }
 
     fn config() -> ResolveConfig {
-        ResolveConfig { excludes: vec![], skip_branches: false, mode: UpdateMode::Major, style: PinStyle::Sha }
+        ResolveConfig {
+            excludes: vec![],
+            skip_branches: false,
+            mode: UpdateMode::Major,
+            style: PinStyle::Sha,
+        }
     }
 
     #[test]
     fn classify_version_ref() {
-        assert!(matches!(classify(&action("a", "b", "v1.2.3", None), false), Some(CurrentRefKind::Version)));
+        assert!(matches!(
+            classify(&action("a", "b", "v1.2.3", None), false),
+            Some(CurrentRefKind::Version)
+        ));
     }
 
     #[test]
     fn classify_sha_ref() {
-        assert!(matches!(classify(&action("a", "b", "abcdef0123456789", None), false), Some(CurrentRefKind::Sha)));
+        assert!(matches!(
+            classify(&action("a", "b", "abcdef0123456789", None), false),
+            Some(CurrentRefKind::Sha)
+        ));
     }
 
     #[test]
     fn classify_branch_ref() {
-        assert!(matches!(classify(&action("a", "b", "main", None), false), Some(CurrentRefKind::Branch)));
+        assert!(matches!(
+            classify(&action("a", "b", "main", None), false),
+            Some(CurrentRefKind::Branch)
+        ));
     }
 
     #[test]
@@ -175,33 +197,78 @@ mod tests {
     #[test]
     fn best_target_major_mode() {
         let tags = vec![tag("v1.2.3", "a", 1, 2, 3), tag("v2.0.0", "b", 2, 0, 0)];
-        let cur = Version { major: 1, minor: 2, patch: 0 };
-        assert_eq!("v2.0.0", best_target(&tags, Some(cur), UpdateMode::Major).unwrap().name);
+        let cur = Version {
+            major: 1,
+            minor: 2,
+            patch: 0,
+        };
+        assert_eq!(
+            "v2.0.0",
+            best_target(&tags, Some(cur), UpdateMode::Major)
+                .unwrap()
+                .name
+        );
     }
 
     #[test]
     fn best_target_minor_mode() {
-        let tags = vec![tag("v1.2.3", "a", 1, 2, 3), tag("v1.3.0", "b", 1, 3, 0), tag("v2.0.0", "c", 2, 0, 0)];
-        let cur = Version { major: 1, minor: 2, patch: 0 };
-        assert_eq!("v1.3.0", best_target(&tags, Some(cur), UpdateMode::Minor).unwrap().name);
+        let tags = vec![
+            tag("v1.2.3", "a", 1, 2, 3),
+            tag("v1.3.0", "b", 1, 3, 0),
+            tag("v2.0.0", "c", 2, 0, 0),
+        ];
+        let cur = Version {
+            major: 1,
+            minor: 2,
+            patch: 0,
+        };
+        assert_eq!(
+            "v1.3.0",
+            best_target(&tags, Some(cur), UpdateMode::Minor)
+                .unwrap()
+                .name
+        );
     }
 
     #[test]
     fn best_target_patch_mode() {
         let tags = vec![tag("v1.2.3", "a", 1, 2, 3), tag("v1.2.5", "b", 1, 2, 5)];
-        let cur = Version { major: 1, minor: 2, patch: 0 };
-        assert_eq!("v1.2.5", best_target(&tags, Some(cur), UpdateMode::Patch).unwrap().name);
+        let cur = Version {
+            major: 1,
+            minor: 2,
+            patch: 0,
+        };
+        assert_eq!(
+            "v1.2.5",
+            best_target(&tags, Some(cur), UpdateMode::Patch)
+                .unwrap()
+                .name
+        );
     }
 
     #[test]
     fn best_target_no_current_version() {
         let tags = vec![tag("v2.0.0", "a", 2, 0, 0), tag("v1.0.0", "b", 1, 0, 0)];
-        assert_eq!("v2.0.0", best_target(&tags, None, UpdateMode::Major).unwrap().name);
+        assert_eq!(
+            "v2.0.0",
+            best_target(&tags, None, UpdateMode::Major).unwrap().name
+        );
     }
 
     #[test]
     fn best_target_empty_tags() {
-        assert!(best_target(&[], Some(Version { major: 1, minor: 0, patch: 0 }), UpdateMode::Major).is_none());
+        assert!(
+            best_target(
+                &[],
+                Some(Version {
+                    major: 1,
+                    minor: 0,
+                    patch: 0
+                }),
+                UpdateMode::Major
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -230,7 +297,10 @@ mod tests {
 
     #[test]
     fn resolve_detects_version_upgrade() {
-        let tags = HashMap::from([(("actions".into(), "checkout".into()), vec![tag("v4.2.0", "sha42", 4, 2, 0)])]);
+        let tags = HashMap::from([(
+            ("actions".into(), "checkout".into()),
+            vec![tag("v4.2.0", "sha42", 4, 2, 0)],
+        )]);
         let mut actions = vec![action("actions", "checkout", "v4.1.0", None)];
         resolve(&mut actions, &tags, &config());
         assert!(actions[0].needs_update);
@@ -239,7 +309,10 @@ mod tests {
 
     #[test]
     fn resolve_detects_branch() {
-        let tags = HashMap::from([(("a".into(), "b".into()), vec![tag("v1.0.0", "sha1", 1, 0, 0)])]);
+        let tags = HashMap::from([(
+            ("a".into(), "b".into()),
+            vec![tag("v1.0.0", "sha1", 1, 0, 0)],
+        )]);
         let mut actions = vec![action("a", "b", "main", None)];
         resolve(&mut actions, &tags, &config());
         assert!(actions[0].is_branch);
@@ -248,16 +321,25 @@ mod tests {
 
     #[test]
     fn resolve_skip_branches_ignores() {
-        let tags = HashMap::from([(("a".into(), "b".into()), vec![tag("v1.0.0", "sha1", 1, 0, 0)])]);
+        let tags = HashMap::from([(
+            ("a".into(), "b".into()),
+            vec![tag("v1.0.0", "sha1", 1, 0, 0)],
+        )]);
         let mut actions = vec![action("a", "b", "main", None)];
-        let cfg = ResolveConfig { skip_branches: true, ..config() };
+        let cfg = ResolveConfig {
+            skip_branches: true,
+            ..config()
+        };
         resolve(&mut actions, &tags, &cfg);
         assert!(!actions[0].needs_update);
     }
 
     #[test]
     fn resolve_sha_mismatch() {
-        let tags = HashMap::from([(("a".into(), "b".into()), vec![tag("v4.2.0", "goodsha", 4, 2, 0)])]);
+        let tags = HashMap::from([(
+            ("a".into(), "b".into()),
+            vec![tag("v4.2.0", "goodsha", 4, 2, 0)],
+        )]);
         let mut actions = vec![action("a", "b", "badcafe0", Some("v4.2.0"))];
         resolve(&mut actions, &tags, &config());
         assert!(actions[0].sha_mismatch);
@@ -266,9 +348,15 @@ mod tests {
 
     #[test]
     fn resolve_excluded_action() {
-        let tags = HashMap::from([(("actions".into(), "checkout".into()), vec![tag("v4.2.0", "sha42", 4, 2, 0)])]);
+        let tags = HashMap::from([(
+            ("actions".into(), "checkout".into()),
+            vec![tag("v4.2.0", "sha42", 4, 2, 0)],
+        )]);
         let mut actions = vec![action("actions", "checkout", "v4.1.0", None)];
-        let cfg = ResolveConfig { excludes: vec!["actions/checkout".into()], ..config() };
+        let cfg = ResolveConfig {
+            excludes: vec!["actions/checkout".into()],
+            ..config()
+        };
         resolve(&mut actions, &tags, &cfg);
         assert!(!actions[0].needs_update);
     }
@@ -283,7 +371,10 @@ mod tests {
 
     #[test]
     fn resolve_already_current_sha() {
-        let tags = HashMap::from([(("a".into(), "b".into()), vec![tag("v4.2.0", "abcdef0123456789", 4, 2, 0)])]);
+        let tags = HashMap::from([(
+            ("a".into(), "b".into()),
+            vec![tag("v4.2.0", "abcdef0123456789", 4, 2, 0)],
+        )]);
         let mut actions = vec![action("a", "b", "abcdef0123456789", Some("v4.2.0"))];
         resolve(&mut actions, &tags, &config());
         assert!(!actions[0].needs_update);
@@ -291,19 +382,27 @@ mod tests {
 
     #[test]
     fn resolve_pin_style_tag() {
-        let tags = HashMap::from([(("a".into(), "b".into()), vec![tag("v4.2.0", "sha42", 4, 2, 0)])]);
+        let tags = HashMap::from([(
+            ("a".into(), "b".into()),
+            vec![tag("v4.2.0", "sha42", 4, 2, 0)],
+        )]);
         let mut actions = vec![action("a", "b", "v4.1.0", None)];
-        let cfg = ResolveConfig { style: PinStyle::Tag, ..config() };
+        let cfg = ResolveConfig {
+            style: PinStyle::Tag,
+            ..config()
+        };
         resolve(&mut actions, &tags, &cfg);
         assert_eq!("v4.2.0", actions[0].new_ref);
     }
 
     #[test]
     fn resolve_detects_major_bump() {
-        let tags = HashMap::from([(("a".into(), "b".into()), vec![tag("v3.0.0", "s1", 3, 0, 0), tag("v4.0.0", "s2", 4, 0, 0)])]);
+        let tags = HashMap::from([(
+            ("a".into(), "b".into()),
+            vec![tag("v3.0.0", "s1", 3, 0, 0), tag("v4.0.0", "s2", 4, 0, 0)],
+        )]);
         let mut actions = vec![action("a", "b", "v3.0.0", None)];
         resolve(&mut actions, &tags, &config());
         assert!(actions[0].is_major);
     }
 }
-

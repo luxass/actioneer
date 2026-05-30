@@ -145,7 +145,8 @@ fn multiple_files() {
 fn preserves_quoted_ref() {
     let tmp = tmp_dir();
     let file = tmp.join("ci.yml");
-    let input = "jobs:\n  build:\n    steps:\n      - uses: \"actions/setup-node@oldsha\" # v6.2.0\n";
+    let input =
+        "jobs:\n  build:\n    steps:\n      - uses: \"actions/setup-node@oldsha\" # v6.2.0\n";
     fs::write(&file, input).unwrap();
 
     let a = mk_action(

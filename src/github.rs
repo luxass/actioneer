@@ -42,7 +42,7 @@ impl GitHubClient {
         }
     }
 
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub fn new_for_test(cache_enabled: bool, base_url: String, token: Option<String>) -> Self {
         Self {
             http: HttpClient::builder().build().expect("reqwest client"),
@@ -154,7 +154,7 @@ fn next_link(header: Option<&reqwest::header::HeaderValue>) -> Option<String> {
     None
 }
 
-fn cache_path(owner: &str, name: &str) -> PathBuf {
+pub fn cache_path(owner: &str, name: &str) -> PathBuf {
     std::env::temp_dir()
         .join("actioneer-cache")
         .join("tags")
@@ -207,110 +207,7 @@ fn resolve_token() -> Option<String> {
         })
 }
 
-fn no_cache_from_env() -> bool {
+pub fn no_cache_from_env() -> bool {
     matches!(std::env::var("ACTIONEER_NO_CACHE"), Ok(v) if matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
 }
 
-#[cfg(test)]
-mod tests {
-    use wiremock::matchers::{header, method, path, query_param};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    use super::*;
-
-    #[test]
-    fn no_cache_env_true() {
-        unsafe {
-            std::env::set_var("ACTIONEER_NO_CACHE", "true");
-        }
-        assert!(no_cache_from_env());
-        unsafe {
-            std::env::remove_var("ACTIONEER_NO_CACHE");
-        }
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn fetches_tags_from_api() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/repos/t/t/tags"))
-            .and(query_param("per_page", "100"))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(
-                r#"[{"name":"v2.0.0","commit":{"sha":"newsha"}}]"#,
-                "application/json",
-            ))
-            .mount(&server)
-            .await;
-
-        let tags = tokio::task::block_in_place(|| {
-            let gh = GitHubClient::new_for_test(false, server.uri(), None);
-            gh.fetch_tags("t", "t").unwrap()
-        });
-        assert_eq!(1, tags.len());
-        assert_eq!("v2.0.0", tags[0].name);
-        assert_eq!("newsha", tags[0].sha);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn auth_applied_to_all_pages() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/repos/t/auth/tags"))
-            .and(query_param("per_page", "100"))
-            .and(header("authorization", "Bearer token-1"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .append_header(
-                        "Link",
-                        format!("<{}/repos/t/auth/tags?page=2>; rel=\"next\"", server.uri()),
-                    )
-                    .set_body_raw(
-                        r#"[{"name":"v1.0.0","commit":{"sha":"a"}}]"#,
-                        "application/json",
-                    ),
-            )
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/repos/t/auth/tags"))
-            .and(query_param("page", "2"))
-            .and(header("authorization", "Bearer token-1"))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(
-                r#"[{"name":"v2.0.0","commit":{"sha":"b"}}]"#,
-                "application/json",
-            ))
-            .mount(&server)
-            .await;
-
-        let tags = tokio::task::block_in_place(|| {
-            let gh = GitHubClient::new_for_test(false, server.uri(), Some("token-1".into()));
-            gh.fetch_tags("t", "auth").unwrap()
-        });
-        assert_eq!(2, tags.len());
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn cache_returns_fresh_data_without_api_call() {
-        let path = cache_path("t", "cached");
-        let _ = fs::remove_file(&path);
-        if let Some(p) = path.parent() {
-            fs::create_dir_all(p).unwrap();
-        }
-        let cached = vec![CachedTag {
-            name: "v1.0.0".into(),
-            sha: "abc".into(),
-        }];
-        fs::write(&path, serde_json::to_string(&cached).unwrap()).unwrap();
-
-        let server = MockServer::start().await;
-        // No mock mounts — if we hit the API, it'll fail
-
-        let tags = tokio::task::block_in_place(|| {
-            let gh = GitHubClient::new_for_test(true, server.uri(), None);
-            gh.fetch_tags("t", "cached").unwrap()
-        });
-        assert_eq!(1, tags.len());
-        assert_eq!("v1.0.0", tags[0].name);
-        let _ = fs::remove_file(&path);
-    }
-}

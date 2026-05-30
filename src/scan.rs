@@ -244,103 +244,149 @@ fn push_action(doc: &Document, route: &Route<'_>, file: &str, actions: &mut Vec<
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-    use std::sync::{Mutex, OnceLock};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     use super::*;
 
     #[test]
-    fn github_dir_recursive_by_default() {
-        let _guard = cwd_lock().lock().unwrap();
-        let root = temp_dir("scan-recursive");
-        let nested = root.join(".github").join("workflows");
-        fs::create_dir_all(&nested).unwrap();
-        fs::write(
-            nested.join("ci.yml"),
-            "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
-        )
-        .unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&root).unwrap();
-        let found = scan(&[".github".into()], false).unwrap();
-        std::env::set_current_dir(prev).unwrap();
-        assert_eq!(1, found.len());
-        assert_eq!("v4", found[0].current_ref);
-        fs::remove_dir_all(root).unwrap();
+    fn parse_action_ref_standard() {
+        let p = parse_action_ref("actions/checkout@v4").unwrap();
+        assert_eq!("actions", p.owner);
+        assert_eq!("checkout", p.name);
+        assert_eq!("", p.path);
+        assert_eq!("v4", p.r#ref);
     }
 
     #[test]
-    fn non_recursive_skips_nested() {
-        let root = temp_dir("scan-flat");
-        let nested = root.join("wf").join("nested");
-        fs::create_dir_all(&nested).unwrap();
-        fs::write(
-            nested.join("ci.yml"),
-            "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
-        )
-        .unwrap();
-        let found = scan(&[root.join("wf").display().to_string()], false).unwrap();
-        assert!(found.is_empty());
-        fs::remove_dir_all(root).unwrap();
+    fn parse_action_ref_with_path() {
+        let p = parse_action_ref("myorg/repo/.github/workflows/ci.yml@main").unwrap();
+        assert_eq!("myorg", p.owner);
+        assert_eq!("repo", p.name);
+        assert_eq!("/.github/workflows/ci.yml", p.path);
+        assert_eq!("main", p.r#ref);
     }
 
     #[test]
-    fn extracts_step_and_reusable_workflow() {
-        let source = concat!(
-            "jobs:\n",
-            "  build:\n",
-            "    uses: myorg/repo/.github/workflows/ci.yml@v1\n",
-            "    steps:\n",
-            "      - uses: actions/checkout@v4 # v4.1.0\n",
-            "      - uses: ./local-action\n",
-        );
-        let doc = Document::new(source.to_string()).unwrap();
-        let root: Value = serde_yaml::from_str(source).unwrap();
-        let mut actions = Vec::new();
-        collect_workflow(&root, &doc, "ci.yml", &mut actions);
-        assert_eq!(2, actions.len());
-        assert_eq!("v1", actions[0].current_ref);
+    fn parse_action_ref_missing_at() {
+        assert!(parse_action_ref("actions/checkout").is_none());
     }
 
     #[test]
-    fn parses_quoted_ref_byte_positions() {
-        let source = "uses: \"actions/setup-node@v4\"\n";
-        let doc = Document::new(source.to_string()).unwrap();
-        let feature = doc
-            .query_exact(&Route::default().with_key("uses"))
-            .unwrap()
-            .unwrap();
-        let raw = doc.extract(&feature);
-        let text = clean_scalar(raw);
-        let leading = raw.find(text).unwrap_or(0);
-        let at = text.rfind('@').unwrap();
-        let ref_start = feature.location.byte_span.0 + leading + at + 1;
-        let ref_len = text[at + 1..].len();
-        assert_eq!("v4", &source[ref_start..ref_start + ref_len]);
-    }
-
-    #[test]
-    fn extracts_version_comment() {
-        let source = "uses: actions/checkout@abc123 # v4.1.0\n";
-        let doc = Document::new(source.to_string()).unwrap();
-        let feature = doc
-            .query_exact(&Route::default().with_key("uses"))
-            .unwrap()
-            .unwrap();
-        let comment = extract_comment(&doc, &feature);
-        assert_eq!(Some("v4.1.0".to_string()), comment);
-    }
-
-    #[test]
-    fn ignores_local_and_docker() {
+    fn parse_action_ref_local_dot_slash() {
         assert!(parse_action_ref("./local-action").is_none());
+    }
+
+    #[test]
+    fn parse_action_ref_local_dot_dot() {
         assert!(parse_action_ref("../shared-action").is_none());
+    }
+
+    #[test]
+    fn parse_action_ref_docker() {
         assert!(parse_action_ref("docker://alpine:3.20").is_none());
     }
 
     #[test]
-    fn ignores_uses_in_string_values() {
+    fn parse_action_ref_empty_parts() {
+        assert!(parse_action_ref("/name@v1").is_none());
+        assert!(parse_action_ref("owner/@v1").is_none());
+    }
+
+    #[test]
+    fn parse_action_ref_sha() {
+        let p = parse_action_ref("actions/checkout@abcdef0123456789abcdef0123456789abcdef01").unwrap();
+        assert_eq!("abcdef0123456789abcdef0123456789abcdef01", p.r#ref);
+    }
+
+    #[test]
+    fn clean_scalar_plain() {
+        assert_eq!("hello", clean_scalar("hello"));
+    }
+
+    #[test]
+    fn clean_scalar_double_quoted() {
+        assert_eq!("hello@v1", clean_scalar("\"hello@v1\""));
+    }
+
+    #[test]
+    fn clean_scalar_single_quoted() {
+        assert_eq!("hello", clean_scalar("'hello'"));
+    }
+
+    #[test]
+    fn clean_scalar_whitespace() {
+        assert_eq!("hello", clean_scalar("  hello  "));
+    }
+
+    #[test]
+    fn extract_version_v_prefix() {
+        assert_eq!(Some("v4.1.0"), extract_version("# v4.1.0 trail"));
+    }
+
+    #[test]
+    fn extract_version_no_prefix() {
+        assert_eq!(Some("1.2.3"), extract_version(" 1.2.3 "));
+    }
+
+    #[test]
+    fn extract_version_non_version_text() {
+        assert!(extract_version("just a comment").is_none());
+    }
+
+    #[test]
+    fn extract_version_empty() {
+        assert!(extract_version("").is_none());
+    }
+
+    #[test]
+    fn is_yaml_yml() {
+        assert!(is_yaml(Path::new("ci.yml")));
+    }
+
+    #[test]
+    fn is_yaml_yaml() {
+        assert!(is_yaml(Path::new("ci.yaml")));
+    }
+
+    #[test]
+    fn is_yaml_other() {
+        assert!(!is_yaml(Path::new("ci.json")));
+        assert!(!is_yaml(Path::new("ci.txt")));
+    }
+
+    #[test]
+    fn is_action_yml_true() {
+        assert!(is_action_yml("action.yml"));
+        assert!(is_action_yml("action.yaml"));
+    }
+
+    #[test]
+    fn is_action_yml_false() {
+        assert!(!is_action_yml("workflow.yml"));
+    }
+
+    #[test]
+    fn collect_workflow_finds_step_uses() {
+        let source = "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4 # v4.1.0\n";
+        let doc = Document::new(source.to_string()).unwrap();
+        let root: Value = serde_yaml::from_str(source).unwrap();
+        let mut actions = Vec::new();
+        collect_workflow(&root, &doc, "ci.yml", &mut actions);
+        assert_eq!(1, actions.len());
+        assert_eq!("v4", actions[0].current_ref);
+    }
+
+    #[test]
+    fn collect_workflow_finds_job_uses() {
+        let source = "jobs:\n  build:\n    uses: myorg/repo/.github/workflows/ci.yml@v1\n";
+        let doc = Document::new(source.to_string()).unwrap();
+        let root: Value = serde_yaml::from_str(source).unwrap();
+        let mut actions = Vec::new();
+        collect_workflow(&root, &doc, "ci.yml", &mut actions);
+        assert_eq!(1, actions.len());
+        assert_eq!("v1", actions[0].current_ref);
+    }
+
+    #[test]
+    fn collect_workflow_skips_name_string() {
         let source = concat!(
             "jobs:\n",
             "  build:\n",
@@ -357,35 +403,30 @@ mod tests {
     }
 
     #[test]
-    fn composite_action_steps() {
-        let source = concat!(
-            "name: Example\n",
-            "runs:\n",
-            "  using: composite\n",
-            "  steps:\n",
-            "    - uses: actions/setup-node@v4 # v4.0.0\n",
-        );
+    fn collect_composite_finds_steps() {
+        let source = "runs:\n  using: composite\n  steps:\n    - uses: actions/setup-node@v4 # v4.0.0\n";
         let doc = Document::new(source.to_string()).unwrap();
         let root: Value = serde_yaml::from_str(source).unwrap();
         let mut actions = Vec::new();
         collect_composite(&root, &doc, "action.yml", &mut actions);
         assert_eq!(1, actions.len());
         assert_eq!("actions/setup-node", actions[0].action_name());
-        assert_eq!(Some("v4.0.0".to_string()), actions[0].version_comment);
     }
 
-    fn temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("actioneer-{label}-{unique}"));
-        fs::create_dir_all(&path).unwrap();
-        path
+    #[test]
+    fn extract_comment_finds_version() {
+        let source = "uses: actions/checkout@abc123 # v4.1.0\n";
+        let doc = Document::new(source.to_string()).unwrap();
+        let feature = doc.query_exact(&Route::default().with_key("uses")).unwrap().unwrap();
+        assert_eq!(Some("v4.1.0".to_string()), extract_comment(&doc, &feature));
     }
 
-    fn cwd_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
+    #[test]
+    fn extract_comment_none_when_missing() {
+        let source = "uses: actions/checkout@v4\n";
+        let doc = Document::new(source.to_string()).unwrap();
+        let feature = doc.query_exact(&Route::default().with_key("uses")).unwrap().unwrap();
+        assert_eq!(None, extract_comment(&doc, &feature));
     }
 }
+

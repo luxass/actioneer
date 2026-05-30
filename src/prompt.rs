@@ -493,14 +493,14 @@ fn scroll_spans(spans: Vec<Span<'static>>, scroll: usize) -> Vec<Span<'static>> 
 mod tests {
     use super::*;
 
-    fn a(file: &str, name: &str) -> Action {
+    fn mk_action(file: &str, name: &str) -> Action {
         Action::from_scan(
             "actions".into(),
-            name.to_string(),
+            name.into(),
             String::new(),
             "v1.0.0".into(),
             Some("1.0.0".into()),
-            file.to_string(),
+            file.into(),
             10,
             20,
             26,
@@ -508,38 +508,91 @@ mod tests {
     }
 
     #[test]
-    fn visible_rows_single_file() {
-        let actions = vec![a("a.yml", "c1"), a("a.yml", "c2")];
+    fn state_new_defaults() {
+        let s = State::new(3);
+        assert_eq!(vec![false, false, false], s.selected);
+        assert_eq!(0, s.cursor);
+        assert_eq!(0, s.h_scroll);
+    }
+
+    #[test]
+    fn state_new_zero() {
+        let s = State::new(0);
+        assert!(s.selected.is_empty());
+    }
+
+    #[test]
+    fn selected_indices_none() {
+        let s = State::new(4);
+        assert_eq!(Vec::<usize>::new(), s.selected_indices());
+    }
+
+    #[test]
+    fn selected_indices_some() {
+        let mut s = State::new(4);
+        s.selected = vec![false, true, false, true];
+        assert_eq!(vec![1, 3], s.selected_indices());
+    }
+
+    #[test]
+    fn selected_indices_all() {
+        let mut s = State::new(3);
+        s.selected = vec![true, true, true];
+        assert_eq!(vec![0, 1, 2], s.selected_indices());
+    }
+
+    #[test]
+    fn visible_rows_single_file_two_actions() {
+        let actions = vec![mk_action("a.yml", "checkout"), mk_action("a.yml", "setup-node")];
         let rows = visible_rows(&actions, &HashSet::new());
-        assert_eq!(rows.len(), 3);
+        assert_eq!(3, rows.len());
+        assert!(matches!(&rows[0], VisibleRow::FileHeader { file } if file == "a.yml"));
+        assert!(matches!(&rows[1], VisibleRow::Update { .. }));
+        assert!(matches!(&rows[2], VisibleRow::Update { .. }));
+    }
+
+    #[test]
+    fn visible_rows_two_files() {
+        let actions = vec![mk_action("a.yml", "c1"), mk_action("b.yml", "c2")];
+        let rows = visible_rows(&actions, &HashSet::new());
+        assert_eq!(4, rows.len());
+    }
+
+    #[test]
+    fn visible_rows_collapsed_hides_updates() {
+        let actions = vec![mk_action("a.yml", "c1"), mk_action("a.yml", "c2")];
+        let collapsed = HashSet::from(["a.yml".into()]);
+        let rows = visible_rows(&actions, &collapsed);
+        assert_eq!(1, rows.len());
         assert!(matches!(&rows[0], VisibleRow::FileHeader { file } if file == "a.yml"));
     }
 
     #[test]
-    fn visible_rows_collapsed() {
-        let actions = vec![a("a.yml", "c1"), a("a.yml", "c2")];
-        let rows = visible_rows(&actions, &HashSet::from(["a.yml".into()]));
-        assert_eq!(rows.len(), 1);
+    fn visible_rows_all_collapsed_only_headers() {
+        let actions = vec![mk_action("a.yml", "c1"), mk_action("b.yml", "c2")];
+        let collapsed = HashSet::from(["a.yml".into(), "b.yml".into()]);
+        let rows = visible_rows(&actions, &collapsed);
+        assert_eq!(2, rows.len());
     }
 
     #[test]
-    fn selected_indices_returns_selected() {
-        let mut s = State::new(4);
-        s.selected = vec![false, true, false, true];
-        assert_eq!(s.selected_indices(), vec![1, 3]);
+    fn cursor_file_on_header() {
+        let actions = vec![mk_action("a.yml", "c1")];
+        let visible = visible_rows(&actions, &HashSet::new());
+        assert_eq!("a.yml", cursor_file(&visible, 0, &actions));
     }
 
     #[test]
-    fn toggle_all_reference() {
-        let mut s = State::new(3);
-        // toggle_all via key simulation: test the logic inline
-        s.selected = vec![false, false, false];
-        let all = s.selected.iter().all(|x| *x);
-        s.selected.fill(!all);
-        assert_eq!(s.selected, vec![true, true, true]);
+    fn cursor_file_on_update() {
+        let actions = vec![mk_action("f.yml", "c1")];
+        let visible = visible_rows(&actions, &HashSet::new());
+        assert_eq!("f.yml", cursor_file(&visible, 1, &actions));
+    }
 
-        let all = s.selected.iter().all(|x| *x);
-        s.selected.fill(!all);
-        assert_eq!(s.selected, vec![false, false, false]);
+    #[test]
+    fn cursor_file_out_of_bounds() {
+        let visible: Vec<VisibleRow> = vec![];
+        assert_eq!("", cursor_file(&visible, 99, &[]));
     }
 }
+

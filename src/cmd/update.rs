@@ -10,7 +10,7 @@ use crate::github::{Error as GitHubError, GitHubClient};
 use crate::model::ResolveConfig;
 use crate::{resolve, scan};
 
-pub fn run(global: GlobalArgs, args: ScanArgs) -> anyhow::Result<ExitCode> {
+pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Result<ExitCode> {
     let printer = Printer::new(global.mode);
     let inputs = default_inputs(args.inputs, args.recursive);
 
@@ -49,8 +49,6 @@ pub fn run(global: GlobalArgs, args: ScanArgs) -> anyhow::Result<ExitCode> {
         .map(|a| (a.owner.clone(), a.name.clone()))
         .collect();
     let mut tags: HashMap<(String, String), Vec<crate::model::Tag>> = HashMap::new();
-    let gh = GitHubClient::new(!global.no_cache);
-
     for (owner, name) in &repos {
         match gh.fetch_tags(owner, name) {
             Ok(repo_tags) => {

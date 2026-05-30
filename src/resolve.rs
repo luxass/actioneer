@@ -117,11 +117,13 @@ fn current_ref_matches_style(current_ref: &str, target: &Tag, style: PinStyle) -
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use crate::model::Version;
 
     use super::*;
 
-    fn make_action(owner: &str, name: &str, current_ref: &str, vc: Option<&str>) -> Action {
+    fn action(owner: &str, name: &str, current_ref: &str, vc: Option<&str>) -> Action {
         Action {
             owner: owner.to_string(),
             name: name.to_string(),
@@ -142,280 +144,166 @@ mod tests {
         }
     }
 
-    fn t(name: &str, sha: &str, major: u32, minor: u32, patch: u32) -> Tag {
-        Tag {
-            name: name.to_string(),
-            sha: sha.to_string(),
-            version: Version {
-                major,
-                minor,
-                patch,
-            },
-        }
+    fn tag(name: &str, sha: &str, major: u32, minor: u32, patch: u32) -> Tag {
+        Tag { name: name.to_string(), sha: sha.to_string(), version: Version { major, minor, patch } }
+    }
+
+    fn config() -> ResolveConfig {
+        ResolveConfig { excludes: vec![], skip_branches: false, mode: UpdateMode::Major, style: PinStyle::Sha }
     }
 
     #[test]
-    fn best_tag_respects_mode() {
-        let tags = vec![
-            t("v1.2.3", "a", 1, 2, 3),
-            t("v1.3.0", "b", 1, 3, 0),
-            t("v2.0.0", "c", 2, 0, 0),
-        ];
-        let cur = Version {
-            major: 1,
-            minor: 2,
-            patch: 0,
-        };
-        assert_eq!(
-            "v1.2.3",
-            best_target(&tags, Some(cur), UpdateMode::Patch)
-                .unwrap()
-                .name
-        );
-        assert_eq!(
-            "v1.3.0",
-            best_target(&tags, Some(cur), UpdateMode::Minor)
-                .unwrap()
-                .name
-        );
-        assert_eq!(
-            "v2.0.0",
-            best_target(&tags, Some(cur), UpdateMode::Major)
-                .unwrap()
-                .name
-        );
+    fn classify_version_ref() {
+        assert!(matches!(classify(&action("a", "b", "v1.2.3", None), false), Some(CurrentRefKind::Version)));
     }
 
     #[test]
-    fn detects_sha_mismatch() {
-        let tags = HashMap::from([(
-            ("actions".into(), "checkout".into()),
-            vec![t("v4.2.0", "abcdef0123456789", 4, 2, 0)],
-        )]);
-        let mut actions = vec![make_action(
-            "actions",
-            "checkout",
-            "badcafe",
-            Some("v4.2.0"),
-        )];
-        resolve(
-            &mut actions,
-            &tags,
-            &ResolveConfig {
-                excludes: vec![],
-                skip_branches: false,
-                mode: UpdateMode::Major,
-                style: PinStyle::Sha,
-            },
-        );
+    fn classify_sha_ref() {
+        assert!(matches!(classify(&action("a", "b", "abcdef0123456789", None), false), Some(CurrentRefKind::Sha)));
+    }
 
-        assert_eq!(1, actions.len());
-        assert!(actions[0].sha_mismatch);
+    #[test]
+    fn classify_branch_ref() {
+        assert!(matches!(classify(&action("a", "b", "main", None), false), Some(CurrentRefKind::Branch)));
+    }
+
+    #[test]
+    fn classify_skip_branches() {
+        assert!(classify(&action("a", "b", "main", None), true).is_none());
+    }
+
+    #[test]
+    fn best_target_major_mode() {
+        let tags = vec![tag("v1.2.3", "a", 1, 2, 3), tag("v2.0.0", "b", 2, 0, 0)];
+        let cur = Version { major: 1, minor: 2, patch: 0 };
+        assert_eq!("v2.0.0", best_target(&tags, Some(cur), UpdateMode::Major).unwrap().name);
+    }
+
+    #[test]
+    fn best_target_minor_mode() {
+        let tags = vec![tag("v1.2.3", "a", 1, 2, 3), tag("v1.3.0", "b", 1, 3, 0), tag("v2.0.0", "c", 2, 0, 0)];
+        let cur = Version { major: 1, minor: 2, patch: 0 };
+        assert_eq!("v1.3.0", best_target(&tags, Some(cur), UpdateMode::Minor).unwrap().name);
+    }
+
+    #[test]
+    fn best_target_patch_mode() {
+        let tags = vec![tag("v1.2.3", "a", 1, 2, 3), tag("v1.2.5", "b", 1, 2, 5)];
+        let cur = Version { major: 1, minor: 2, patch: 0 };
+        assert_eq!("v1.2.5", best_target(&tags, Some(cur), UpdateMode::Patch).unwrap().name);
+    }
+
+    #[test]
+    fn best_target_no_current_version() {
+        let tags = vec![tag("v2.0.0", "a", 2, 0, 0), tag("v1.0.0", "b", 1, 0, 0)];
+        assert_eq!("v2.0.0", best_target(&tags, None, UpdateMode::Major).unwrap().name);
+    }
+
+    #[test]
+    fn best_target_empty_tags() {
+        assert!(best_target(&[], Some(Version { major: 1, minor: 0, patch: 0 }), UpdateMode::Major).is_none());
+    }
+
+    #[test]
+    fn current_ref_matches_style_tag_exact() {
+        let t = tag("v4.2.0", "sha", 4, 2, 0);
+        assert!(current_ref_matches_style("v4.2.0", &t, PinStyle::Tag));
+    }
+
+    #[test]
+    fn current_ref_matches_style_tag_mismatch() {
+        let t = tag("v4.2.0", "sha", 4, 2, 0);
+        assert!(!current_ref_matches_style("v4.1.0", &t, PinStyle::Tag));
+    }
+
+    #[test]
+    fn current_ref_matches_style_sha_exact() {
+        let t = tag("v4.2.0", "abc123", 4, 2, 0);
+        assert!(current_ref_matches_style("abc123", &t, PinStyle::Sha));
+    }
+
+    #[test]
+    fn current_ref_matches_style_sha_prefix() {
+        let t = tag("v4.2.0", "abc123456789", 4, 2, 0);
+        assert!(current_ref_matches_style("abc", &t, PinStyle::Sha));
+    }
+
+    #[test]
+    fn resolve_detects_version_upgrade() {
+        let tags = HashMap::from([(("actions".into(), "checkout".into()), vec![tag("v4.2.0", "sha42", 4, 2, 0)])]);
+        let mut actions = vec![action("actions", "checkout", "v4.1.0", None)];
+        resolve(&mut actions, &tags, &config());
         assert!(actions[0].needs_update);
+        assert_eq!("sha42", actions[0].new_ref);
     }
 
     #[test]
-    fn pin_style_tag_uses_tag_name() {
-        let tags = HashMap::from([(
-            ("actions".into(), "checkout".into()),
-            vec![t("v4.2.0", "abcdef0123456789", 4, 2, 0)],
-        )]);
-        let mut actions = vec![make_action("actions", "checkout", "v4.1.0", None)];
-        resolve(
-            &mut actions,
-            &tags,
-            &ResolveConfig {
-                excludes: vec![],
-                skip_branches: false,
-                mode: UpdateMode::Major,
-                style: PinStyle::Tag,
-            },
-        );
-
-        assert_eq!(1, actions.len());
-        assert_eq!("v4.2.0", actions[0].new_ref);
-    }
-
-    #[test]
-    fn includes_branch_references_by_default() {
-        let tags = HashMap::from([(
-            ("actions".into(), "checkout".into()),
-            vec![t("v4.2.0", "abcdef0123456789", 4, 2, 0)],
-        )]);
-        let mut actions = vec![make_action("actions", "checkout", "main", None)];
-        resolve(
-            &mut actions,
-            &tags,
-            &ResolveConfig {
-                excludes: vec![],
-                skip_branches: false,
-                mode: UpdateMode::Major,
-                style: PinStyle::Sha,
-            },
-        );
-
+    fn resolve_detects_branch() {
+        let tags = HashMap::from([(("a".into(), "b".into()), vec![tag("v1.0.0", "sha1", 1, 0, 0)])]);
+        let mut actions = vec![action("a", "b", "main", None)];
+        resolve(&mut actions, &tags, &config());
         assert!(actions[0].is_branch);
         assert!(actions[0].needs_update);
     }
 
     #[test]
-    fn skip_branches_excludes_branch_refs() {
-        let tags = HashMap::from([(
-            ("actions".into(), "checkout".into()),
-            vec![t("v4.2.0", "abcdef0123456789", 4, 2, 0)],
-        )]);
-        let mut actions = vec![make_action("actions", "checkout", "main", None)];
-        resolve(
-            &mut actions,
-            &tags,
-            &ResolveConfig {
-                excludes: vec![],
-                skip_branches: true,
-                mode: UpdateMode::Major,
-                style: PinStyle::Sha,
-            },
-        );
-
+    fn resolve_skip_branches_ignores() {
+        let tags = HashMap::from([(("a".into(), "b".into()), vec![tag("v1.0.0", "sha1", 1, 0, 0)])]);
+        let mut actions = vec![action("a", "b", "main", None)];
+        let cfg = ResolveConfig { skip_branches: true, ..config() };
+        resolve(&mut actions, &tags, &cfg);
         assert!(!actions[0].needs_update);
     }
 
     #[test]
-    fn excludes_matching_actions() {
-        let tags = HashMap::from([(
-            ("actions".into(), "checkout".into()),
-            vec![t("v4.2.0", "abcdef0123456789", 4, 2, 0)],
-        )]);
-        let mut actions = vec![make_action("actions", "checkout", "v4.1.0", None)];
-        resolve(
-            &mut actions,
-            &tags,
-            &ResolveConfig {
-                excludes: vec!["actions/checkout".into()],
-                skip_branches: false,
-                mode: UpdateMode::Major,
-                style: PinStyle::Sha,
-            },
-        );
+    fn resolve_sha_mismatch() {
+        let tags = HashMap::from([(("a".into(), "b".into()), vec![tag("v4.2.0", "goodsha", 4, 2, 0)])]);
+        let mut actions = vec![action("a", "b", "badcafe0", Some("v4.2.0"))];
+        resolve(&mut actions, &tags, &config());
+        assert!(actions[0].sha_mismatch);
+        assert!(actions[0].needs_update);
+    }
 
+    #[test]
+    fn resolve_excluded_action() {
+        let tags = HashMap::from([(("actions".into(), "checkout".into()), vec![tag("v4.2.0", "sha42", 4, 2, 0)])]);
+        let mut actions = vec![action("actions", "checkout", "v4.1.0", None)];
+        let cfg = ResolveConfig { excludes: vec!["actions/checkout".into()], ..config() };
+        resolve(&mut actions, &tags, &cfg);
         assert!(!actions[0].needs_update);
     }
 
     #[test]
-    fn no_tags_for_repository_skips_action() {
+    fn resolve_no_tags_skips() {
         let tags: HashMap<(String, String), Vec<Tag>> = HashMap::new();
-        let mut actions = vec![make_action("actions", "checkout", "v4", None)];
-        resolve(
-            &mut actions,
-            &tags,
-            &ResolveConfig {
-                excludes: vec![],
-                skip_branches: false,
-                mode: UpdateMode::Major,
-                style: PinStyle::Sha,
-            },
-        );
-
+        let mut actions = vec![action("a", "b", "v4", None)];
+        resolve(&mut actions, &tags, &config());
         assert!(!actions[0].needs_update);
     }
 
     #[test]
-    fn already_up_to_date_skips_update() {
-        let tags = HashMap::from([(
-            ("actions".into(), "checkout".into()),
-            vec![t("v4.2.0", "abcdef0123456789", 4, 2, 0)],
-        )]);
-        let mut actions = vec![make_action(
-            "actions",
-            "checkout",
-            "abcdef0123456789",
-            Some("v4.2.0"),
-        )];
-        resolve(
-            &mut actions,
-            &tags,
-            &ResolveConfig {
-                excludes: vec![],
-                skip_branches: false,
-                mode: UpdateMode::Major,
-                style: PinStyle::Sha,
-            },
-        );
-
+    fn resolve_already_current_sha() {
+        let tags = HashMap::from([(("a".into(), "b".into()), vec![tag("v4.2.0", "abcdef0123456789", 4, 2, 0)])]);
+        let mut actions = vec![action("a", "b", "abcdef0123456789", Some("v4.2.0"))];
+        resolve(&mut actions, &tags, &config());
         assert!(!actions[0].needs_update);
     }
 
-    mod integration {
-        use std::collections::HashMap;
-        use std::fs;
+    #[test]
+    fn resolve_pin_style_tag() {
+        let tags = HashMap::from([(("a".into(), "b".into()), vec![tag("v4.2.0", "sha42", 4, 2, 0)])]);
+        let mut actions = vec![action("a", "b", "v4.1.0", None)];
+        let cfg = ResolveConfig { style: PinStyle::Tag, ..config() };
+        resolve(&mut actions, &tags, &cfg);
+        assert_eq!("v4.2.0", actions[0].new_ref);
+    }
 
-        use wiremock::matchers::{method, path, query_param};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
-        use crate::github::GitHubClient;
-        use crate::model::{PinStyle, ResolveConfig, UpdateMode};
-        use crate::{resolve, scan};
-
-        #[tokio::test(flavor = "multi_thread")]
-        async fn scan_and_resolve_end_to_end() {
-            let tmp = std::env::temp_dir().join(format!("actioneer-e2e-{}", std::process::id()));
-            fs::create_dir_all(&tmp).unwrap();
-
-            fs::write(
-                tmp.join("ci.yml"),
-                concat!(
-                    "jobs:\n",
-                    "  build:\n",
-                    "    steps:\n",
-                    "      - uses: actions/checkout@v4 # v4.1.0\n",
-                ),
-            )
-            .unwrap();
-
-            let server = MockServer::start().await;
-
-            Mock::given(method("GET"))
-                .and(path("/repos/actions/checkout/tags"))
-                .and(query_param("per_page", "100"))
-                .respond_with(ResponseTemplate::new(200).set_body_raw(
-                    r#"[{"name":"v4.2.0","commit":{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},{"name":"v4.1.0","commit":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}]"#,
-                    "application/json",
-                ))
-                .mount(&server)
-                .await;
-
-            let result = tokio::task::block_in_place(|| {
-                let mut actions = scan::scan(&[tmp.display().to_string()], false).unwrap();
-                assert_eq!(1, actions.len());
-                assert_eq!("v4", actions[0].current_ref);
-                assert_eq!(Some("v4.1.0".to_string()), actions[0].version_comment);
-
-                let gh = GitHubClient::new_for_test(false, server.uri(), None);
-
-                let mut tags: HashMap<(String, String), Vec<crate::model::Tag>> = HashMap::new();
-                let fetched = gh.fetch_tags("actions", "checkout").unwrap();
-                assert_eq!(2, fetched.len());
-                assert_eq!("v4.2.0", fetched[0].name);
-                tags.insert(("actions".into(), "checkout".into()), fetched);
-
-                resolve::resolve(
-                    &mut actions,
-                    &tags,
-                    &ResolveConfig {
-                        excludes: vec![],
-                        skip_branches: false,
-                        mode: UpdateMode::Major,
-                        style: PinStyle::Sha,
-                    },
-                );
-
-                actions
-            });
-
-            assert!(result[0].needs_update, "action should need update");
-            assert_eq!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", result[0].new_ref);
-            assert_eq!("v4.2.0", result[0].new_version);
-
-            fs::remove_dir_all(tmp).unwrap();
-        }
+    #[test]
+    fn resolve_detects_major_bump() {
+        let tags = HashMap::from([(("a".into(), "b".into()), vec![tag("v3.0.0", "s1", 3, 0, 0), tag("v4.0.0", "s2", 4, 0, 0)])]);
+        let mut actions = vec![action("a", "b", "v3.0.0", None)];
+        resolve(&mut actions, &tags, &config());
+        assert!(actions[0].is_major);
     }
 }
+

@@ -7,6 +7,10 @@ description = "CLI that detects outdated GitHub Actions and updates them to the 
 repository = "https://github.com/luxass/actioneer"
 readme = "README.md"
 
+[lib]
+name = "actioneer"
+path = "src/lib.rs"
+
 [[bin]]
 name = "actioneer"
 path = "src/main.rs"

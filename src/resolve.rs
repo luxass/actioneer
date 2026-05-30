@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::model::{Action, PinStyle, ResolveConfig, Tag, UpdateMode, Version, is_likely_sha, parse_version, sha_matches};
+use crate::model::{
+    Action, PinStyle, ResolveConfig, Tag, UpdateMode, Version, is_likely_sha, parse_version,
+    sha_matches,
+};
 
 #[derive(Clone, Copy, Debug)]
 enum CurrentRefKind {
@@ -97,9 +100,7 @@ fn best_target(tags: &[Tag], current: Option<Version>, mode: UpdateMode) -> Opti
         .filter(|t| match current {
             Some(v) => match mode {
                 UpdateMode::Minor => t.version.major == v.major,
-                UpdateMode::Patch => {
-                    t.version.major == v.major && t.version.minor == v.minor
-                }
+                UpdateMode::Patch => t.version.major == v.major && t.version.minor == v.minor,
                 UpdateMode::Major => true,
             },
             None => true,
@@ -165,9 +166,24 @@ mod tests {
             minor: 2,
             patch: 0,
         };
-        assert_eq!("v1.2.3", best_target(&tags, Some(cur), UpdateMode::Patch).unwrap().name);
-        assert_eq!("v1.3.0", best_target(&tags, Some(cur), UpdateMode::Minor).unwrap().name);
-        assert_eq!("v2.0.0", best_target(&tags, Some(cur), UpdateMode::Major).unwrap().name);
+        assert_eq!(
+            "v1.2.3",
+            best_target(&tags, Some(cur), UpdateMode::Patch)
+                .unwrap()
+                .name
+        );
+        assert_eq!(
+            "v1.3.0",
+            best_target(&tags, Some(cur), UpdateMode::Minor)
+                .unwrap()
+                .name
+        );
+        assert_eq!(
+            "v2.0.0",
+            best_target(&tags, Some(cur), UpdateMode::Major)
+                .unwrap()
+                .name
+        );
     }
 
     #[test]
@@ -176,7 +192,12 @@ mod tests {
             ("actions".into(), "checkout".into()),
             vec![t("v4.2.0", "abcdef0123456789", 4, 2, 0)],
         )]);
-        let mut actions = vec![make_action("actions", "checkout", "badcafe", Some("v4.2.0"))];
+        let mut actions = vec![make_action(
+            "actions",
+            "checkout",
+            "badcafe",
+            Some("v4.2.0"),
+        )];
         resolve(
             &mut actions,
             &tags,
@@ -303,7 +324,12 @@ mod tests {
             ("actions".into(), "checkout".into()),
             vec![t("v4.2.0", "abcdef0123456789", 4, 2, 0)],
         )]);
-        let mut actions = vec![make_action("actions", "checkout", "abcdef0123456789", Some("v4.2.0"))];
+        let mut actions = vec![make_action(
+            "actions",
+            "checkout",
+            "abcdef0123456789",
+            Some("v4.2.0"),
+        )];
         resolve(
             &mut actions,
             &tags,

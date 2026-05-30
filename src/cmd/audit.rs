@@ -53,18 +53,26 @@ pub fn run(global: GlobalArgs, args: ScanArgs) -> anyhow::Result<ExitCode> {
 
     for (owner, name) in &repos {
         match gh.fetch_tags(owner, name) {
-            Ok(repo_tags) => { tags.insert((owner.clone(), name.clone()), repo_tags); }
+            Ok(repo_tags) => {
+                tags.insert((owner.clone(), name.clone()), repo_tags);
+            }
             Err(e) => {
                 printer.error(&format!(
                     "GitHub lookup failed for {}/{}.",
-                    owner.bold(), name.bold()
+                    owner.bold(),
+                    name.bold()
                 ));
                 match &e {
                     GitHubError::HttpStatus(status) => {
-                        printer.error(&format!("GitHub returned HTTP {}.", status.to_string().yellow()));
+                        printer.error(&format!(
+                            "GitHub returned HTTP {}.",
+                            status.to_string().yellow()
+                        ));
                         let hint = match status {
                             401 => "Set GITHUB_TOKEN or run `gh auth login`.",
-                            403 => "Rate limit or access restriction. Set GITHUB_TOKEN or run `gh auth login`.",
+                            403 => {
+                                "Rate limit or access restriction. Set GITHUB_TOKEN or run `gh auth login`."
+                            }
                             404 => "Repository not found or not publicly accessible.",
                             429 => "GitHub is rate limiting these requests.",
                             502..=504 => "GitHub appears temporarily unavailable.",
@@ -143,12 +151,17 @@ pub fn run(global: GlobalArgs, args: ScanArgs) -> anyhow::Result<ExitCode> {
                 line.push_str(&format!(" but says {}", vc.yellow()));
             }
             if !a.expected_sha.is_empty() {
-                line.push_str(&format!("; expected {}", short_sha(&a.expected_sha).green()));
+                line.push_str(&format!(
+                    "; expected {}",
+                    short_sha(&a.expected_sha).green()
+                ));
             }
             printer.error(&format!("{line}."));
         }
     }
 
-    printer.info("Run `actioneer update` to pin branch refs to version tags, or fix SHA/comment mismatches.");
+    printer.info(
+        "Run `actioneer update` to pin branch refs to version tags, or fix SHA/comment mismatches.",
+    );
     Ok(ExitCode::FAILURE)
 }

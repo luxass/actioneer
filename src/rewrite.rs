@@ -11,10 +11,7 @@ pub enum RewriteError {
 }
 
 pub fn apply(actions: &[Action], selected: &[usize]) -> Result<usize, RewriteError> {
-    let selected_actions: Vec<&Action> = selected
-        .iter()
-        .filter_map(|&i| actions.get(i))
-        .collect();
+    let selected_actions: Vec<&Action> = selected.iter().filter_map(|&i| actions.get(i)).collect();
 
     let mut remaining: &[&Action] = &selected_actions;
     let mut total_applied = 0;
@@ -41,7 +38,7 @@ fn rewrite_text(contents: &str, actions: &[&Action]) -> Result<String, RewriteEr
     for action in &actions {
         if action.ref_start > action.ref_end
             || action.ref_end > contents.len()
-            || &contents[action.ref_start..action.ref_end] != action.current_ref
+            || contents[action.ref_start..action.ref_end] != action.current_ref
         {
             return Err(RewriteError::UpdateTargetNotFound);
         }
@@ -99,10 +96,7 @@ fn should_write_comment(action: &Action) -> bool {
 }
 
 fn find_comment_start(contents: &str, offset: usize) -> Option<usize> {
-    let line_start = contents[..offset]
-        .rfind('\n')
-        .map(|i| i + 1)
-        .unwrap_or(0);
+    let line_start = contents[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
     let line_end = contents[offset..]
         .find('\n')
         .map(|rel| offset + rel)
@@ -134,9 +128,19 @@ mod tests {
 
     use super::*;
 
-    fn a(file: &str, current: &str, new_ref: &str, new_version: &str, vc: Option<&str>, mismatch: bool, ref_start: usize) -> Action {
+    fn a(
+        file: &str,
+        current: &str,
+        new_ref: &str,
+        new_version: &str,
+        vc: Option<&str>,
+        mismatch: bool,
+        ref_start: usize,
+    ) -> Action {
         Action {
-            owner: "a".into(), name: "b".into(), path: String::new(),
+            owner: "a".into(),
+            name: "b".into(),
+            path: String::new(),
             current_ref: current.to_string(),
             version_comment: vc.map(|s| s.to_string()),
             file: file.to_string(),
@@ -162,7 +166,15 @@ mod tests {
             "      - uses: actions/checkout@oldsha # v4.1.0\n",
             "      - uses: actions/setup-node@v3\n",
         );
-        let a = a("ci.yml", "oldsha", "newsha", "v4.2.0", Some("v4.1.0"), false, input.find("oldsha").unwrap());
+        let a = a(
+            "ci.yml",
+            "oldsha",
+            "newsha",
+            "v4.2.0",
+            Some("v4.1.0"),
+            false,
+            input.find("oldsha").unwrap(),
+        );
         let result = rewrite_text(input, &[&a]).unwrap();
         assert!(result.contains("actions/checkout@newsha # v4.2.0"));
         assert!(result.contains("actions/setup-node@v3"));
@@ -176,7 +188,15 @@ mod tests {
             "    steps:\n",
             "      - uses: \"actions/setup-node@oldsha\" # v6.2.0\n",
         );
-        let a = a("ci.yml", "oldsha", "newsha", "v6.4.0", Some("v6.2.0"), false, input.find("oldsha").unwrap());
+        let a = a(
+            "ci.yml",
+            "oldsha",
+            "newsha",
+            "v6.4.0",
+            Some("v6.2.0"),
+            false,
+            input.find("oldsha").unwrap(),
+        );
         let result = rewrite_text(input, &[&a]).unwrap();
         assert!(result.contains("\"actions/setup-node@newsha\" # v6.4.0"));
     }
@@ -190,8 +210,24 @@ mod tests {
             "      - uses: actions/checkout@old1 # v4.1.0\n",
             "      - uses: actions/setup-node@old2 # v6.2.0\n",
         );
-        let a1 = a("ci.yml", "old1", "new1", "v4.2.0", Some("v4.1.0"), false, input.find("old1").unwrap());
-        let a2 = a("ci.yml", "old2", "new2", "v6.4.0", Some("v6.2.0"), false, input.find("old2").unwrap());
+        let a1 = a(
+            "ci.yml",
+            "old1",
+            "new1",
+            "v4.2.0",
+            Some("v4.1.0"),
+            false,
+            input.find("old1").unwrap(),
+        );
+        let a2 = a(
+            "ci.yml",
+            "old2",
+            "new2",
+            "v6.4.0",
+            Some("v6.2.0"),
+            false,
+            input.find("old2").unwrap(),
+        );
         let result = rewrite_text(input, &[&a1, &a2]).unwrap();
         assert!(result.contains("actions/checkout@new1 # v4.2.0"));
         assert!(result.contains("actions/setup-node@new2 # v6.4.0"));
@@ -200,7 +236,15 @@ mod tests {
     #[test]
     fn preserves_crlf() {
         let input = "jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@oldsha # v4.1.0\r\n      - uses: actions/setup-node@v3\r\n";
-        let a = a("ci.yml", "oldsha", "newsha", "v4.2.0", Some("v4.1.0"), false, input.find("oldsha").unwrap());
+        let a = a(
+            "ci.yml",
+            "oldsha",
+            "newsha",
+            "v4.2.0",
+            Some("v4.1.0"),
+            false,
+            input.find("oldsha").unwrap(),
+        );
         let result = rewrite_text(input, &[&a]).unwrap();
         assert!(result.contains("actions/checkout@newsha # v4.2.0\r\n"));
     }
@@ -208,7 +252,15 @@ mod tests {
     #[test]
     fn preserves_crlf_no_comment() {
         let input = "jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@oldsha\r\n";
-        let a = a("ci.yml", "oldsha", "newsha", "v4.2.0", None, false, input.find("oldsha").unwrap());
+        let a = a(
+            "ci.yml",
+            "oldsha",
+            "newsha",
+            "v4.2.0",
+            None,
+            false,
+            input.find("oldsha").unwrap(),
+        );
         let result = rewrite_text(input, &[&a]).unwrap();
         assert!(result.contains("actions/checkout@newsha # v4.2.0\r\n"));
     }
@@ -216,7 +268,15 @@ mod tests {
     #[test]
     fn no_comment_when_new_ref_equals_version() {
         let input = "jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@oldsha\r\n";
-        let a = a("ci.yml", "oldsha", "v4.2.0", "v4.2.0", None, false, input.find("oldsha").unwrap());
+        let a = a(
+            "ci.yml",
+            "oldsha",
+            "v4.2.0",
+            "v4.2.0",
+            None,
+            false,
+            input.find("oldsha").unwrap(),
+        );
         let result = rewrite_text(input, &[&a]).unwrap();
         assert!(result.contains("actions/checkout@v4.2.0\r\n"));
     }
@@ -224,7 +284,15 @@ mod tests {
     #[test]
     fn writes_comment_on_sha_mismatch() {
         let input = "jobs:\r\n  build:\r\n    steps:\r\n      - uses: actions/checkout@oldsha\r\n";
-        let a = a("ci.yml", "oldsha", "newsha", "v4.2.0", Some("v4.1.0"), true, input.find("oldsha").unwrap());
+        let a = a(
+            "ci.yml",
+            "oldsha",
+            "newsha",
+            "v4.2.0",
+            Some("v4.1.0"),
+            true,
+            input.find("oldsha").unwrap(),
+        );
         let result = rewrite_text(input, &[&a]).unwrap();
         assert!(result.contains("actions/checkout@newsha # v4.2.0\r\n"));
     }

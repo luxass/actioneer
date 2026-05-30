@@ -1,4 +1,7 @@
-use clap::{Args, Parser, Subcommand, ValueEnum, builder::styling::{AnsiColor, Effects, Styles}};
+use clap::{
+    Args, Parser, Subcommand, ValueEnum,
+    builder::styling::{AnsiColor, Effects, Styles},
+};
 
 use crate::model::{PinStyle, UpdateMode};
 
@@ -95,7 +98,13 @@ mod tests {
     #[test]
     fn explicit_update_command() {
         let app = App::parse_from([
-            "actioneer", "update", "--update", "patch", "--pin", "tag", ".github",
+            "actioneer",
+            "update",
+            "--update",
+            "patch",
+            "--pin",
+            "tag",
+            ".github",
         ]);
         match app.command {
             Some(Command::Update(args)) => {
@@ -110,7 +119,12 @@ mod tests {
     #[test]
     fn audit_command() {
         let app = App::parse_from([
-            "actioneer", "audit", "--recursive", "--update", "minor", ".",
+            "actioneer",
+            "audit",
+            "--recursive",
+            "--update",
+            "minor",
+            ".",
         ]);
         match app.command {
             Some(Command::Audit(args)) => {
@@ -124,7 +138,13 @@ mod tests {
     #[test]
     fn global_args_work_after_subcommand() {
         let app = App::parse_from([
-            "actioneer", "audit", "--dry-run", "--no-cache", "--mode", "plain", ".",
+            "actioneer",
+            "audit",
+            "--dry-run",
+            "--no-cache",
+            "--mode",
+            "plain",
+            ".",
         ]);
         assert!(app.global.dry_run);
         assert!(app.global.no_cache);

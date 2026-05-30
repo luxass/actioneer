@@ -26,7 +26,9 @@ pub struct GitHubClient {
 }
 
 impl Default for GitHubClient {
-    fn default() -> Self { Self::new(true) }
+    fn default() -> Self {
+        Self::new(true)
+    }
 }
 
 impl GitHubClient {
@@ -53,19 +55,29 @@ impl GitHubClient {
     pub fn fetch_tags(&self, owner: &str, name: &str) -> Result<Vec<Tag>, Error> {
         let cache_path = cache_path(owner, name);
 
-        if self.cache_enabled {
-            if let Some(tags) = read_cache(&cache_path) {
-                return Ok(tags);
-            }
+        if self.cache_enabled
+            && let Some(tags) = read_cache(&cache_path)
+        {
+            return Ok(tags);
         }
 
         let url = format!("{}/repos/{owner}/{name}/tags?per_page=100", self.base_url);
         let tags = self.fetch_all_pages(&url)?;
 
         if self.cache_enabled {
-            if let Some(parent) = cache_path.parent() { let _ = fs::create_dir_all(parent); }
-            let cached: Vec<CachedTag> = tags.iter().map(|t| CachedTag { name: t.name.clone(), sha: t.sha.clone() }).collect();
-            if let Ok(json) = serde_json::to_string(&cached) { let _ = fs::write(&cache_path, json); }
+            if let Some(parent) = cache_path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let cached: Vec<CachedTag> = tags
+                .iter()
+                .map(|t| CachedTag {
+                    name: t.name.clone(),
+                    sha: t.sha.clone(),
+                })
+                .collect();
+            if let Ok(json) = serde_json::to_string(&cached) {
+                let _ = fs::write(&cache_path, json);
+            }
         }
 
         Ok(tags)
@@ -77,14 +89,20 @@ impl GitHubClient {
         let mut pages = 0;
 
         while let Some(page_url) = url {
-            if pages >= MAX_PAGES { break; }
+            if pages >= MAX_PAGES {
+                break;
+            }
             pages += 1;
 
-            let mut req = self.http.get(&page_url)
+            let mut req = self
+                .http
+                .get(&page_url)
                 .header("Accept", "application/vnd.github+json")
                 .header("User-Agent", "actioneer")
                 .header("X-GitHub-Api-Version", "2022-11-28");
-            if let Some(token) = &self.token { req = req.bearer_auth(token); }
+            if let Some(token) = &self.token {
+                req = req.bearer_auth(token);
+            }
 
             let response = req.send()?;
             if !response.status().is_success() {
@@ -94,7 +112,11 @@ impl GitHubClient {
             let next = next_link(response.headers().get("link"));
             let body: Vec<ApiTag> = response.json()?;
             tags.extend(body.into_iter().filter_map(|t| {
-                Some(Tag { name: t.name.clone(), sha: t.commit.sha, version: parse_version(&t.name)? })
+                Some(Tag {
+                    name: t.name.clone(),
+                    sha: t.commit.sha,
+                    version: parse_version(&t.name)?,
+                })
             }));
 
             url = next;
@@ -105,11 +127,19 @@ impl GitHubClient {
 }
 
 #[derive(Deserialize)]
-struct ApiTag { name: String, commit: ApiCommit }
+struct ApiTag {
+    name: String,
+    commit: ApiCommit,
+}
 #[derive(Deserialize)]
-struct ApiCommit { sha: String }
+struct ApiCommit {
+    sha: String,
+}
 #[derive(serde::Serialize, serde::Deserialize)]
-struct CachedTag { name: String, sha: String }
+struct CachedTag {
+    name: String,
+    sha: String,
+}
 
 fn next_link(header: Option<&reqwest::header::HeaderValue>) -> Option<String> {
     let value = header?.to_str().ok()?;
@@ -125,29 +155,55 @@ fn next_link(header: Option<&reqwest::header::HeaderValue>) -> Option<String> {
 }
 
 fn cache_path(owner: &str, name: &str) -> PathBuf {
-    std::env::temp_dir().join("actioneer-cache").join("tags").join(format!("{owner}__{name}.json"))
+    std::env::temp_dir()
+        .join("actioneer-cache")
+        .join("tags")
+        .join(format!("{owner}__{name}.json"))
 }
 
 fn read_cache(path: &PathBuf) -> Option<Vec<Tag>> {
     let meta = fs::metadata(path).ok()?;
-    let age = SystemTime::now().duration_since(meta.modified().ok()?).ok()?;
-    if age > CACHE_TTL { return None; }
+    let age = SystemTime::now()
+        .duration_since(meta.modified().ok()?)
+        .ok()?;
+    if age > CACHE_TTL {
+        return None;
+    }
     let contents = fs::read_to_string(path).ok()?;
     let cached: Vec<CachedTag> = serde_json::from_str(&contents).ok()?;
-    Some(cached.into_iter().filter_map(|t| {
-        Some(Tag { name: t.name.clone(), sha: t.sha, version: parse_version(&t.name)? })
-    }).collect())
+    Some(
+        cached
+            .into_iter()
+            .filter_map(|t| {
+                Some(Tag {
+                    name: t.name.clone(),
+                    sha: t.sha,
+                    version: parse_version(&t.name)?,
+                })
+            })
+            .collect(),
+    )
 }
 
 fn resolve_token() -> Option<String> {
-    std::env::var("GITHUB_TOKEN").ok()
-        .and_then(|t| { let t = t.trim(); (!t.is_empty()).then(|| t.to_string()) })
+    std::env::var("GITHUB_TOKEN")
+        .ok()
+        .and_then(|t| {
+            let t = t.trim();
+            (!t.is_empty()).then(|| t.to_string())
+        })
         .or_else(|| {
-            let out = std::process::Command::new("gh").args(["auth", "token"])
-                .stdin(std::process::Stdio::null()).output().ok()?;
-            if !out.status.success() { return None; }
+            let out = std::process::Command::new("gh")
+                .args(["auth", "token"])
+                .stdin(std::process::Stdio::null())
+                .output()
+                .ok()?;
+            if !out.status.success() {
+                return None;
+            }
             let token = String::from_utf8(out.stdout).ok()?;
-            let t = token.trim(); (!t.is_empty()).then(|| t.to_string())
+            let t = token.trim();
+            (!t.is_empty()).then(|| t.to_string())
         })
 }
 
@@ -164,9 +220,13 @@ mod tests {
 
     #[test]
     fn no_cache_env_true() {
-        unsafe { std::env::set_var("ACTIONEER_NO_CACHE", "true"); }
+        unsafe {
+            std::env::set_var("ACTIONEER_NO_CACHE", "true");
+        }
         assert!(no_cache_from_env());
-        unsafe { std::env::remove_var("ACTIONEER_NO_CACHE"); }
+        unsafe {
+            std::env::remove_var("ACTIONEER_NO_CACHE");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -176,9 +236,11 @@ mod tests {
             .and(path("/repos/t/t/tags"))
             .and(query_param("per_page", "100"))
             .respond_with(ResponseTemplate::new(200).set_body_raw(
-                r#"[{"name":"v2.0.0","commit":{"sha":"newsha"}}]"#, "application/json",
+                r#"[{"name":"v2.0.0","commit":{"sha":"newsha"}}]"#,
+                "application/json",
             ))
-            .mount(&server).await;
+            .mount(&server)
+            .await;
 
         let tags = tokio::task::block_in_place(|| {
             let gh = GitHubClient::new_for_test(false, server.uri(), None);
@@ -196,18 +258,29 @@ mod tests {
             .and(path("/repos/t/auth/tags"))
             .and(query_param("per_page", "100"))
             .and(header("authorization", "Bearer token-1"))
-            .respond_with(ResponseTemplate::new(200)
-                .append_header("Link", format!("<{}/repos/t/auth/tags?page=2>; rel=\"next\"", server.uri()))
-                .set_body_raw(r#"[{"name":"v1.0.0","commit":{"sha":"a"}}]"#, "application/json"))
-            .mount(&server).await;
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header(
+                        "Link",
+                        format!("<{}/repos/t/auth/tags?page=2>; rel=\"next\"", server.uri()),
+                    )
+                    .set_body_raw(
+                        r#"[{"name":"v1.0.0","commit":{"sha":"a"}}]"#,
+                        "application/json",
+                    ),
+            )
+            .mount(&server)
+            .await;
         Mock::given(method("GET"))
             .and(path("/repos/t/auth/tags"))
             .and(query_param("page", "2"))
             .and(header("authorization", "Bearer token-1"))
             .respond_with(ResponseTemplate::new(200).set_body_raw(
-                r#"[{"name":"v2.0.0","commit":{"sha":"b"}}]"#, "application/json",
+                r#"[{"name":"v2.0.0","commit":{"sha":"b"}}]"#,
+                "application/json",
             ))
-            .mount(&server).await;
+            .mount(&server)
+            .await;
 
         let tags = tokio::task::block_in_place(|| {
             let gh = GitHubClient::new_for_test(false, server.uri(), Some("token-1".into()));
@@ -220,8 +293,13 @@ mod tests {
     async fn cache_returns_fresh_data_without_api_call() {
         let path = cache_path("t", "cached");
         let _ = fs::remove_file(&path);
-        if let Some(p) = path.parent() { fs::create_dir_all(p).unwrap(); }
-        let cached = vec![CachedTag { name: "v1.0.0".into(), sha: "abc".into() }];
+        if let Some(p) = path.parent() {
+            fs::create_dir_all(p).unwrap();
+        }
+        let cached = vec![CachedTag {
+            name: "v1.0.0".into(),
+            sha: "abc".into(),
+        }];
         fs::write(&path, serde_json::to_string(&cached).unwrap()).unwrap();
 
         let server = MockServer::start().await;

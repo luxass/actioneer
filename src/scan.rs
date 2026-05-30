@@ -19,12 +19,14 @@ pub fn scan(paths: &[String], recursive: bool) -> Result<Vec<Action>, ScanError>
     let mut actions = Vec::new();
     for path in paths {
         let input = Path::new(path);
-        if !input.exists() { continue; }
+        if !input.exists() {
+            continue;
+        }
         if input.is_dir() {
             let recurse = recursive || path == ".github";
             if recurse {
                 for entry in WalkDir::new(input) {
-                    let entry = entry.map_err(|e| std::io::Error::other(e))?;
+                    let entry = entry.map_err(std::io::Error::other)?;
                     if entry.file_type().is_file() && is_yaml(entry.path()) {
                         scan_file(entry.path(), &mut actions)?;
                     }
@@ -32,7 +34,9 @@ pub fn scan(paths: &[String], recursive: bool) -> Result<Vec<Action>, ScanError>
             } else {
                 for entry in fs::read_dir(input)? {
                     let p = entry?.path();
-                    if p.is_file() && is_yaml(&p) { scan_file(&p, &mut actions)?; }
+                    if p.is_file() && is_yaml(&p) {
+                        scan_file(&p, &mut actions)?;
+                    }
                 }
             }
         } else {
@@ -56,8 +60,7 @@ fn scan_file(path: &Path, actions: &mut Vec<Action>) -> Result<(), ScanError> {
     let root: Value = serde_yaml::from_str(&content)
         .map_err(|_| ScanError::InvalidYaml { file: file.clone() })?;
 
-    let doc = Document::new(content)
-        .map_err(|_| ScanError::InvalidYaml { file: file.clone() })?;
+    let doc = Document::new(content).map_err(|_| ScanError::InvalidYaml { file: file.clone() })?;
 
     if is_action_yml(&file) {
         collect_composite(&root, &doc, &file, actions);
@@ -82,21 +85,39 @@ fn clean_scalar(value: &str) -> &str {
 fn extract_comment(doc: &Document, feature: &Feature<'_>) -> Option<String> {
     doc.feature_comments(feature)
         .into_iter()
-        .filter(|c| c.location.point_span.0 .0 == feature.location.point_span.0 .0)
+        .filter(|c| c.location.point_span.0.0 == feature.location.point_span.0.0)
         .filter(|c| c.location.byte_span.0 >= feature.location.byte_span.1)
         .min_by_key(|c| c.location.byte_span.0)
         .and_then(|c| {
-            let c = doc.extract(&c).trim_start_matches('#').trim_matches([' ', '\t']).to_string();
-            if c.is_empty() { None } else { extract_version(&c).map(|s| s.to_string()) }
+            let c = doc
+                .extract(&c)
+                .trim_start_matches('#')
+                .trim_matches([' ', '\t'])
+                .to_string();
+            if c.is_empty() {
+                None
+            } else {
+                extract_version(&c).map(|s| s.to_string())
+            }
         })
 }
 
 fn extract_version(comment: &str) -> Option<&str> {
-    comment.split(|c: char| matches!(c, ' ' | '\t' | ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}'))
+    comment
+        .split(|c: char| {
+            matches!(
+                c,
+                ' ' | '\t' | ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}'
+            )
+        })
         .map(|t| t.trim_matches(['.', ':']))
         .find(|t| {
-            let rest = t.strip_prefix('v').or_else(|| t.strip_prefix('V')).unwrap_or(t);
-            !rest.is_empty() && rest.as_bytes()[0].is_ascii_digit()
+            let rest = t
+                .strip_prefix('v')
+                .or_else(|| t.strip_prefix('V'))
+                .unwrap_or(t);
+            !rest.is_empty()
+                && rest.as_bytes()[0].is_ascii_digit()
                 && rest.chars().all(|c| c == '.' || c.is_ascii_digit())
         })
 }
@@ -113,33 +134,59 @@ struct ParsedAction<'a> {
 }
 
 fn parse_action_ref(value: &str) -> Option<ParsedAction<'_>> {
-    if value.starts_with("./") || value.starts_with("../") || value.starts_with("docker://") { return None; }
+    if value.starts_with("./") || value.starts_with("../") || value.starts_with("docker://") {
+        return None;
+    }
     let at = value.rfind('@')?;
     let action = &value[..at];
     let r#ref = &value[at + 1..];
     let mut parts = action.split('/');
     let owner = parts.next()?;
     let name = parts.next()?;
-    if owner.is_empty() || name.is_empty() || r#ref.is_empty() { return None; }
+    if owner.is_empty() || name.is_empty() || r#ref.is_empty() {
+        return None;
+    }
     let path = action.get(owner.len() + 1 + name.len()..).unwrap_or("");
-    Some(ParsedAction { owner, name, path, r#ref })
+    Some(ParsedAction {
+        owner,
+        name,
+        path,
+        r#ref,
+    })
 }
 
 // --- tree walking with immediate Document queries ---
 
 fn collect_workflow(root: &Value, doc: &Document, file: &str, actions: &mut Vec<Action>) {
-    let Some(jobs) = root.get("jobs").and_then(Value::as_mapping) else { return; };
+    let Some(jobs) = root.get("jobs").and_then(Value::as_mapping) else {
+        return;
+    };
     let base = Route::default().with_key("jobs");
-    for (k, v) in jobs.iter().filter_map(|(k, v)| k.as_str().map(|n| (n.to_string(), v))) {
-        if !v.is_mapping() { continue; }
+    for (k, v) in jobs
+        .iter()
+        .filter_map(|(k, v)| k.as_str().map(|n| (n.to_string(), v)))
+    {
+        if !v.is_mapping() {
+            continue;
+        }
         if v.get("uses").is_some() {
-            push_action(doc, &base.with_key(k.clone()).with_key("uses"), file, actions);
+            push_action(
+                doc,
+                &base.with_key(k.clone()).with_key("uses"),
+                file,
+                actions,
+            );
         }
         if let Some(steps) = v.get("steps").and_then(Value::as_sequence) {
             let steps_route = base.with_key(k.clone()).with_key("steps");
             for (i, step) in steps.iter().enumerate() {
                 if step.get("uses").is_some() {
-                    push_action(doc, &steps_route.with_key(i).with_key("uses"), file, actions);
+                    push_action(
+                        doc,
+                        &steps_route.with_key(i).with_key("uses"),
+                        file,
+                        actions,
+                    );
                 }
             }
         }
@@ -147,9 +194,15 @@ fn collect_workflow(root: &Value, doc: &Document, file: &str, actions: &mut Vec<
 }
 
 fn collect_composite(root: &Value, doc: &Document, file: &str, actions: &mut Vec<Action>) {
-    let Some(runs) = root.get("runs") else { return; };
-    if runs.get("using").and_then(Value::as_str) != Some("composite") { return; }
-    let Some(steps) = runs.get("steps").and_then(Value::as_sequence) else { return; };
+    let Some(runs) = root.get("runs") else {
+        return;
+    };
+    if runs.get("using").and_then(Value::as_str) != Some("composite") {
+        return;
+    }
+    let Some(steps) = runs.get("steps").and_then(Value::as_sequence) else {
+        return;
+    };
     let base = Route::default().with_key("runs").with_key("steps");
     for (i, step) in steps.iter().enumerate() {
         if step.get("uses").is_some() {
@@ -159,24 +212,33 @@ fn collect_composite(root: &Value, doc: &Document, file: &str, actions: &mut Vec
 }
 
 fn push_action(doc: &Document, route: &Route<'_>, file: &str, actions: &mut Vec<Action>) {
-    let Some(feature) = doc.query_exact(route).ok().flatten() else { return; };
+    let Some(feature) = doc.query_exact(route).ok().flatten() else {
+        return;
+    };
     let raw = doc.extract(&feature);
     let text = clean_scalar(raw);
     let leading = raw.find(text).unwrap_or(0);
     let value_start = feature.location.byte_span.0 + leading;
     let value_end = value_start + text.len();
 
-    let Some(action) = parse_action_ref(text) else { return; };
+    let Some(action) = parse_action_ref(text) else {
+        return;
+    };
     let comment = extract_comment(doc, &feature);
 
     let at = text.rfind('@').unwrap();
     let ref_start = value_start + at + 1;
 
     actions.push(Action::from_scan(
-        action.owner.into(), action.name.into(), action.path.into(),
-        action.r#ref.into(), comment,
-        file.to_string(), feature.location.point_span.0.0 + 1,
-        ref_start, value_end,
+        action.owner.into(),
+        action.name.into(),
+        action.path.into(),
+        action.r#ref.into(),
+        comment,
+        file.to_string(),
+        feature.location.point_span.0.0 + 1,
+        ref_start,
+        value_end,
     ));
 }
 
@@ -194,7 +256,11 @@ mod tests {
         let root = temp_dir("scan-recursive");
         let nested = root.join(".github").join("workflows");
         fs::create_dir_all(&nested).unwrap();
-        fs::write(nested.join("ci.yml"), "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n").unwrap();
+        fs::write(
+            nested.join("ci.yml"),
+            "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
+        )
+        .unwrap();
         let prev = std::env::current_dir().unwrap();
         std::env::set_current_dir(&root).unwrap();
         let found = scan(&[".github".into()], false).unwrap();
@@ -209,7 +275,11 @@ mod tests {
         let root = temp_dir("scan-flat");
         let nested = root.join("wf").join("nested");
         fs::create_dir_all(&nested).unwrap();
-        fs::write(nested.join("ci.yml"), "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n").unwrap();
+        fs::write(
+            nested.join("ci.yml"),
+            "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
+        )
+        .unwrap();
         let found = scan(&[root.join("wf").display().to_string()], false).unwrap();
         assert!(found.is_empty());
         fs::remove_dir_all(root).unwrap();
@@ -237,7 +307,10 @@ mod tests {
     fn parses_quoted_ref_byte_positions() {
         let source = "uses: \"actions/setup-node@v4\"\n";
         let doc = Document::new(source.to_string()).unwrap();
-        let feature = doc.query_exact(&Route::default().with_key("uses")).unwrap().unwrap();
+        let feature = doc
+            .query_exact(&Route::default().with_key("uses"))
+            .unwrap()
+            .unwrap();
         let raw = doc.extract(&feature);
         let text = clean_scalar(raw);
         let leading = raw.find(text).unwrap_or(0);
@@ -251,7 +324,10 @@ mod tests {
     fn extracts_version_comment() {
         let source = "uses: actions/checkout@abc123 # v4.1.0\n";
         let doc = Document::new(source.to_string()).unwrap();
-        let feature = doc.query_exact(&Route::default().with_key("uses")).unwrap().unwrap();
+        let feature = doc
+            .query_exact(&Route::default().with_key("uses"))
+            .unwrap()
+            .unwrap();
         let comment = extract_comment(&doc, &feature);
         assert_eq!(Some("v4.1.0".to_string()), comment);
     }
@@ -299,7 +375,10 @@ mod tests {
     }
 
     fn temp_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let path = std::env::temp_dir().join(format!("actioneer-{label}-{unique}"));
         fs::create_dir_all(&path).unwrap();
         path

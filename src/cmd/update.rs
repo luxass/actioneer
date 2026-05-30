@@ -69,12 +69,18 @@ pub fn run(global: GlobalArgs, args: ScanArgs) -> anyhow::Result<ExitCode> {
                             status.to_string().yellow()
                         ));
                         let hint = match status {
-                            401 => "Set GITHUB_TOKEN or run `gh auth login` so actioneer can authenticate GitHub requests.",
-                            403 => "This is usually a rate limit or access restriction. Set GITHUB_TOKEN or run `gh auth login` before retrying.",
+                            401 => {
+                                "Set GITHUB_TOKEN or run `gh auth login` so actioneer can authenticate GitHub requests."
+                            }
+                            403 => {
+                                "This is usually a rate limit or access restriction. Set GITHUB_TOKEN or run `gh auth login` before retrying."
+                            }
                             404 => "The repository was not found or is not publicly accessible.",
                             429 => "GitHub is rate limiting these requests.",
                             502..=504 => "GitHub appears temporarily unavailable.",
-                            _ => "Retry later, or run with --dry-run/--mode json to inspect scanned references.",
+                            _ => {
+                                "Retry later, or run with --dry-run/--mode json to inspect scanned references."
+                            }
                         };
                         printer.info(hint);
                     }
@@ -107,7 +113,11 @@ pub fn run(global: GlobalArgs, args: ScanArgs) -> anyhow::Result<ExitCode> {
         actions.len().to_string().yellow(),
         if actions.len() == 1 { "" } else { "s" },
         update_file_count(&actions).to_string().yellow(),
-        if update_file_count(&actions) == 1 { "" } else { "s" },
+        if update_file_count(&actions) == 1 {
+            ""
+        } else {
+            "s"
+        },
     ));
 
     let mismatch_count = actions.iter().filter(|a| a.sha_mismatch).count();
@@ -129,7 +139,10 @@ pub fn run(global: GlobalArgs, args: ScanArgs) -> anyhow::Result<ExitCode> {
                 line.push_str(&format!(" but says {}", vc.yellow()));
             }
             if !a.expected_sha.is_empty() {
-                line.push_str(&format!("; expected {}", short_sha(&a.expected_sha).green()));
+                line.push_str(&format!(
+                    "; expected {}",
+                    short_sha(&a.expected_sha).green()
+                ));
             }
             printer.warn(&format!("{line}."));
         }

@@ -21,16 +21,35 @@ pub struct Action {
 }
 
 impl Action {
+    #[allow(clippy::too_many_arguments)]
     pub fn from_scan(
-        owner: String, name: String, path: String,
-        current_ref: String, version_comment: Option<String>,
-        file: String, line: usize, ref_start: usize, ref_end: usize,
+        owner: String,
+        name: String,
+        path: String,
+        current_ref: String,
+        version_comment: Option<String>,
+        file: String,
+        line: usize,
+        ref_start: usize,
+        ref_end: usize,
     ) -> Self {
         Self {
-            owner, name, path, current_ref, version_comment, file, line, ref_start, ref_end,
-            new_ref: String::new(), new_version: String::new(),
-            expected_sha: String::new(), sha_mismatch: false,
-            is_branch: false, is_major: false, needs_update: false,
+            owner,
+            name,
+            path,
+            current_ref,
+            version_comment,
+            file,
+            line,
+            ref_start,
+            ref_end,
+            new_ref: String::new(),
+            new_version: String::new(),
+            expected_sha: String::new(),
+            sha_mismatch: false,
+            is_branch: false,
+            is_major: false,
+            needs_update: false,
         }
     }
 
@@ -77,18 +96,29 @@ pub struct ResolveConfig {
 }
 
 pub fn parse_version(raw: &str) -> Option<Version> {
-    let value = raw.strip_prefix('v').or_else(|| raw.strip_prefix('V')).unwrap_or(raw);
-    if value.is_empty() || !value.as_bytes()[0].is_ascii_digit() { return None; }
+    let value = raw
+        .strip_prefix('v')
+        .or_else(|| raw.strip_prefix('V'))
+        .unwrap_or(raw);
+    if value.is_empty() || !value.as_bytes()[0].is_ascii_digit() {
+        return None;
+    }
     let mut parts = value.split('.');
     let major = parse_leading_int(parts.next()?)?;
     let minor = parse_leading_int(parts.next().unwrap_or("0"))?;
     let patch = parse_leading_int(parts.next().unwrap_or("0"))?;
-    Some(Version { major, minor, patch })
+    Some(Version {
+        major,
+        minor,
+        patch,
+    })
 }
 
 fn parse_leading_int(value: &str) -> Option<u32> {
     let end = value.bytes().take_while(|b| b.is_ascii_digit()).count();
-    if end == 0 { return None; }
+    if end == 0 {
+        return None;
+    }
     value[..end].parse().ok()
 }
 

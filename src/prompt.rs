@@ -304,9 +304,9 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRo
             if a.new_ref != a.new_version {
                 w += 3 + a.new_ref.len().min(7) + 1;
             }
-        if let Some(vc) = &a.version_comment {
-            w += 1 + vc.chars().count() + 1;
-        }
+            if let Some(vc) = &a.version_comment {
+                w += 1 + vc.chars().count() + 1;
+            }
             if a.sha_mismatch {
                 w += 5 + a.expected_sha.len().min(7) + 1;
             }

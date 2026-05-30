@@ -343,4 +343,79 @@ mod tests {
 
         assert!(!actions[0].needs_update);
     }
+
+    mod integration {
+        use std::collections::HashMap;
+        use std::fs;
+
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use crate::github::GitHubClient;
+        use crate::model::{PinStyle, ResolveConfig, UpdateMode};
+        use crate::{resolve, scan};
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn scan_and_resolve_end_to_end() {
+            let tmp = std::env::temp_dir().join(format!("actioneer-e2e-{}", std::process::id()));
+            fs::create_dir_all(&tmp).unwrap();
+
+            fs::write(
+                tmp.join("ci.yml"),
+                concat!(
+                    "jobs:\n",
+                    "  build:\n",
+                    "    steps:\n",
+                    "      - uses: actions/checkout@v4 # v4.1.0\n",
+                ),
+            )
+            .unwrap();
+
+            let server = MockServer::start().await;
+
+            Mock::given(method("GET"))
+                .and(path("/repos/actions/checkout/tags"))
+                .and(query_param("per_page", "100"))
+                .respond_with(ResponseTemplate::new(200).set_body_raw(
+                    r#"[{"name":"v4.2.0","commit":{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},{"name":"v4.1.0","commit":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}]"#,
+                    "application/json",
+                ))
+                .mount(&server)
+                .await;
+
+            let result = tokio::task::block_in_place(|| {
+                let mut actions = scan::scan(&[tmp.display().to_string()], false).unwrap();
+                assert_eq!(1, actions.len());
+                assert_eq!("v4", actions[0].current_ref);
+                assert_eq!(Some("v4.1.0".to_string()), actions[0].version_comment);
+
+                let gh = GitHubClient::new_for_test(false, server.uri(), None);
+
+                let mut tags: HashMap<(String, String), Vec<crate::model::Tag>> = HashMap::new();
+                let fetched = gh.fetch_tags("actions", "checkout").unwrap();
+                assert_eq!(2, fetched.len());
+                assert_eq!("v4.2.0", fetched[0].name);
+                tags.insert(("actions".into(), "checkout".into()), fetched);
+
+                resolve::resolve(
+                    &mut actions,
+                    &tags,
+                    &ResolveConfig {
+                        excludes: vec![],
+                        skip_branches: false,
+                        mode: UpdateMode::Major,
+                        style: PinStyle::Sha,
+                    },
+                );
+
+                actions
+            });
+
+            assert!(result[0].needs_update, "action should need update");
+            assert_eq!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", result[0].new_ref);
+            assert_eq!("v4.2.0", result[0].new_version);
+
+            fs::remove_dir_all(tmp).unwrap();
+        }
+    }
 }

@@ -1,8 +1,9 @@
-use crate::model::{PinStyle, UpdateMode};
 use clap::{
     Args, Parser, Subcommand, ValueEnum,
     builder::styling::{AnsiColor, Effects, Styles},
 };
+
+use crate::model::{PinStyle, UpdateMode};
 
 const STYLES: Styles = Styles::styled()
     .header(AnsiColor::Green.on_default().effects(Effects::BOLD))
@@ -20,13 +21,13 @@ pub struct App {
     pub global: GlobalArgs,
 
     #[command(flatten)]
-    pub update: UpdateArgs,
+    pub update: ScanArgs,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    Update(UpdateArgs),
-    Audit(AuditArgs),
+    Update(ScanArgs),
+    Audit(ScanArgs),
     Version,
 }
 
@@ -46,7 +47,7 @@ pub struct GlobalArgs {
 }
 
 #[derive(Clone, Debug, Args)]
-pub struct UpdateArgs {
+pub struct ScanArgs {
     #[arg(long, short = 'r', default_value_t = false)]
     pub recursive: bool,
 
@@ -58,48 +59,12 @@ pub struct UpdateArgs {
 
     #[arg(long = "pin", value_enum, default_value = "sha")]
     pub pin: PinStyle,
-
-    #[arg(long, hide = true, default_value_t = false)]
-    pub tag: bool,
 
     #[arg(long, short = 'y', default_value_t = false)]
     pub yes: bool,
 
     #[arg(value_name = "INPUT")]
     pub inputs: Vec<String>,
-}
-
-impl UpdateArgs {
-    pub fn pin_style(&self) -> PinStyle {
-        if self.tag { PinStyle::Tag } else { self.pin }
-    }
-}
-
-#[derive(Clone, Debug, Args)]
-pub struct AuditArgs {
-    #[arg(long, short = 'r', default_value_t = false)]
-    pub recursive: bool,
-
-    #[arg(long = "skip-branches", default_value_t = false)]
-    pub skip_branches: bool,
-
-    #[arg(long = "update", value_enum, default_value_t = UpdateMode::Major)]
-    pub update: UpdateMode,
-
-    #[arg(long = "pin", value_enum, default_value = "sha")]
-    pub pin: PinStyle,
-
-    #[arg(long, hide = true, default_value_t = false)]
-    pub tag: bool,
-
-    #[arg(value_name = "INPUT")]
-    pub inputs: Vec<String>,
-}
-
-impl AuditArgs {
-    pub fn pin_style(&self) -> PinStyle {
-        if self.tag { PinStyle::Tag } else { self.pin }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -109,133 +74,123 @@ pub enum Mode {
     Beautiful,
 }
 
+impl Mode {
+    pub fn is_json(self) -> bool {
+        self == Mode::Json
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;
 
-    use crate::model::{PinStyle, UpdateMode};
-
-    use super::{App, Command, Mode};
+    use super::*;
 
     #[test]
-    fn root_command_uses_update_args() {
-        let app = App::parse_from(["actioneer", ".github/workflows"]);
-
+    fn root_no_args() {
+        let app = App::parse_from(["actioneer"]);
         assert!(app.command.is_none());
-        assert_eq!(vec![String::from(".github/workflows")], app.update.inputs);
+        assert!(app.update.inputs.is_empty());
         assert!(!app.global.dry_run);
-        assert!(!app.global.no_cache);
         assert_eq!(Mode::Beautiful, app.global.mode);
     }
 
     #[test]
-    fn explicit_update_command_uses_update_args() {
-        let app = App::parse_from([
-            "actioneer",
-            "update",
-            "--update",
-            "patch",
-            "--pin",
-            "tag",
-            ".github",
-        ]);
+    fn root_with_inputs() {
+        let app = App::parse_from(["actioneer", ".github", "ci.yml"]);
+        assert_eq!(2, app.update.inputs.len());
+    }
 
+    #[test]
+    fn root_with_flags() {
+        let app = App::parse_from(["actioneer", "-r", "--skip-branches", "--update", "patch", "--pin", "tag", "--yes"]);
+        assert!(app.update.recursive);
+        assert!(app.update.skip_branches);
+        assert_eq!(UpdateMode::Patch, app.update.update);
+        assert_eq!(PinStyle::Tag, app.update.pin);
+        assert!(app.update.yes);
+    }
+
+    #[test]
+    fn update_subcommand() {
+        let app = App::parse_from(["actioneer", "update", "-r", "--update", "minor", "--pin", "sha", "."]);
         match app.command {
             Some(Command::Update(args)) => {
-                assert_eq!(vec![String::from(".github")], args.inputs);
-                assert_eq!(UpdateMode::Patch, args.update);
-                assert_eq!(PinStyle::Tag, args.pin_style());
+                assert!(args.recursive);
+                assert_eq!(UpdateMode::Minor, args.update);
+                assert_eq!(PinStyle::Sha, args.pin);
+                assert_eq!(vec!["."], args.inputs);
             }
-            other => panic!("expected update command, got {other:?}"),
+            other => panic!("expected update, got {other:?}"),
         }
     }
 
     #[test]
-    fn audit_command_uses_audit_args() {
-        let app = App::parse_from([
-            "actioneer",
-            "audit",
-            "--recursive",
-            "--update",
-            "minor",
-            ".",
-        ]);
-
+    fn audit_subcommand() {
+        let app = App::parse_from(["actioneer", "audit", "--recursive", "--skip-branches", "."]);
         match app.command {
             Some(Command::Audit(args)) => {
                 assert!(args.recursive);
-                assert_eq!(UpdateMode::Minor, args.update);
-                assert_eq!(PinStyle::Sha, args.pin_style());
-                assert_eq!(vec![String::from(".")], args.inputs);
+                assert!(args.skip_branches);
             }
-            other => panic!("expected audit command, got {other:?}"),
+            other => panic!("expected audit, got {other:?}"),
         }
     }
 
     #[test]
-    fn root_command_defaults_update_mode_to_major() {
-        let app = App::parse_from(["actioneer", ".github/workflows"]);
-
-        assert_eq!(UpdateMode::Major, app.update.update);
-        assert_eq!(PinStyle::Sha, app.update.pin_style());
+    fn version_subcommand() {
+        let app = App::parse_from(["actioneer", "version"]);
+        assert!(matches!(app.command, Some(Command::Version)));
     }
 
     #[test]
-    fn legacy_tag_flag_still_uses_tag_pinning() {
-        let app = App::parse_from(["actioneer", "update", "--tag", ".github"]);
-
-        match app.command {
-            Some(Command::Update(args)) => {
-                assert_eq!(PinStyle::Tag, args.pin_style());
-            }
-            other => panic!("expected update command, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn global_args_work_for_root_update() {
-        let app = App::parse_from([
-            "actioneer",
-            "--dry-run",
-            "--exclude",
-            "actions/cache",
-            "--no-cache",
-            "--mode",
-            "json",
-            ".github",
-        ]);
-
-        assert!(app.command.is_none());
+    fn global_dry_run() {
+        let app = App::parse_from(["actioneer", "audit", "--dry-run", "."]);
         assert!(app.global.dry_run);
+    }
+
+    #[test]
+    fn global_no_cache() {
+        let app = App::parse_from(["actioneer", "--no-cache"]);
         assert!(app.global.no_cache);
-        assert_eq!(vec![String::from("actions/cache")], app.global.excludes);
+    }
+
+    #[test]
+    fn global_mode_json() {
+        let app = App::parse_from(["actioneer", "--mode", "json"]);
         assert_eq!(Mode::Json, app.global.mode);
-        assert_eq!(vec![String::from(".github")], app.update.inputs);
     }
 
     #[test]
-    fn global_args_work_after_subcommand() {
-        let app = App::parse_from([
-            "actioneer",
-            "audit",
-            "--dry-run",
-            "--no-cache",
-            "--exclude",
-            "actions/cache",
-            "--mode",
-            "plain",
-            ".",
-        ]);
+    fn global_mode_plain() {
+        let app = App::parse_from(["actioneer", "--mode", "plain"]);
+        assert_eq!(Mode::Plain, app.global.mode);
+    }
 
+    #[test]
+    fn global_exclude_single() {
+        let app = App::parse_from(["actioneer", "--exclude", "actions/checkout"]);
+        assert_eq!(vec!["actions/checkout"], app.global.excludes);
+    }
+
+    #[test]
+    fn global_exclude_multiple() {
+        let app = App::parse_from(["actioneer", "--exclude", "a", "--exclude", "b"]);
+        assert_eq!(vec!["a", "b"], app.global.excludes);
+    }
+
+    #[test]
+    fn global_after_subcommand() {
+        let app = App::parse_from(["actioneer", "audit", "--dry-run", "--no-cache", "."]);
         assert!(app.global.dry_run);
         assert!(app.global.no_cache);
-        assert_eq!(vec![String::from("actions/cache")], app.global.excludes);
-        assert_eq!(Mode::Plain, app.global.mode);
-        match app.command {
-            Some(Command::Audit(args)) => {
-                assert_eq!(vec![String::from(".")], args.inputs);
-            }
-            other => panic!("expected audit command, got {other:?}"),
-        }
+    }
+
+    #[test]
+    fn mode_is_json() {
+        assert!(Mode::Json.is_json());
+        assert!(!Mode::Plain.is_json());
+        assert!(!Mode::Beautiful.is_json());
     }
 }
+

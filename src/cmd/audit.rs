@@ -95,7 +95,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         style: args.pin,
     };
     resolve::resolve(&mut actions, &tags, &resolve_config);
-    actions.retain(|a| a.needs_update);
+    actions.retain(|a| a.is_branch || a.sha_mismatch);
 
     if global.mode.is_json() {
         print_json(&actions);

@@ -1,6 +1,7 @@
 use std::fs;
 
 use crate::model::Action;
+use crate::model::parse_version;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RewriteError {
@@ -11,7 +12,9 @@ pub enum RewriteError {
 }
 
 pub fn apply(actions: &[Action], selected: &[usize]) -> Result<usize, RewriteError> {
-    let selected_actions: Vec<&Action> = selected.iter().filter_map(|&i| actions.get(i)).collect();
+    let mut selected_actions: Vec<&Action> =
+        selected.iter().filter_map(|&i| actions.get(i)).collect();
+    selected_actions.sort_by(|a, b| (&a.file, a.ref_start).cmp(&(&b.file, b.ref_start)));
 
     let mut remaining: &[&Action] = &selected_actions;
     let mut total_applied = 0;
@@ -69,19 +72,32 @@ fn rewrite_text(contents: &str, actions: &[&Action]) -> Result<String, RewriteEr
             .unwrap_or(contents.len());
 
         let comment_start = find_comment_start(contents, cursor);
-        let comment_pos = comment_start
-            .map(|cs| {
-                let mut s = cs;
-                while s > cursor && matches!(contents.as_bytes()[s - 1], b' ' | b'\t') {
-                    s -= 1;
-                }
-                s
-            })
-            .unwrap_or(line_end);
 
-        output.push_str(&contents[cursor..comment_pos]);
-        output.push_str(&format!(" # {}", action.new_version));
-        cursor = line_end;
+        let is_version_comment = comment_start
+            .map(|cs| {
+                let body = contents[cs..line_end].trim_start_matches('#').trim();
+                parse_version(body).is_some()
+            })
+            .unwrap_or(false);
+
+        if is_version_comment {
+            let comment_pos = comment_start
+                .map(|cs| {
+                    let mut s = cs;
+                    while s > cursor && matches!(contents.as_bytes()[s - 1], b' ' | b'\t') {
+                        s -= 1;
+                    }
+                    s
+                })
+                .unwrap();
+            output.push_str(&contents[cursor..comment_pos]);
+            output.push_str(&format!(" # {}", action.new_version));
+            cursor = line_end;
+        } else {
+            output.push_str(&contents[cursor..line_end]);
+            output.push_str(&format!(" # {}", action.new_version));
+            cursor = line_end;
+        }
     }
 
     output.push_str(&contents[cursor..]);

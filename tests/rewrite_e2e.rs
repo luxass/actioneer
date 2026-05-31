@@ -258,3 +258,73 @@ fn target_not_found_errors() {
     ));
     let _ = fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn preserves_user_comment() {
+    let tmp = tmp_dir();
+    let file = tmp.join("ci.yml");
+    let input = "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@oldsha  # do not remove this\n";
+    fs::write(&file, input).unwrap();
+
+    let a = mk_action(
+        &file.to_string_lossy(),
+        "oldsha",
+        "newsha",
+        "v4.2.0",
+        None,
+        false,
+        input.find("oldsha").unwrap(),
+    );
+    rewrite::apply(&[a], &[0]).unwrap();
+
+    let result = fs::read_to_string(&file).unwrap();
+    assert!(result.contains("actions/checkout@newsha  # do not remove this # v4.2.0"));
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn sorts_interleaved_files() {
+    let tmp = tmp_dir();
+    let f1 = tmp.join("a.yml");
+    let f2 = tmp.join("b.yml");
+    let input1 = "jobs:\n  build:\n    steps:\n      - uses: x/y@old1\n      - uses: x/y@old1b\n";
+    let input2 = "jobs:\n  build:\n    steps:\n      - uses: x/z@old2\n";
+    fs::write(&f1, input1).unwrap();
+    fs::write(&f2, input2).unwrap();
+
+    let a1 = mk_action(
+        &f1.to_string_lossy(),
+        "old1",
+        "new1",
+        "v1.0.0",
+        None,
+        false,
+        input1.find("old1").unwrap(),
+    );
+    let a2 = mk_action(
+        &f2.to_string_lossy(),
+        "old2",
+        "new2",
+        "v2.0.0",
+        None,
+        false,
+        input2.find("old2").unwrap(),
+    );
+    let a3 = mk_action(
+        &f1.to_string_lossy(),
+        "old1b",
+        "new1b",
+        "v1.1.0",
+        None,
+        false,
+        input1.rfind("old1b").unwrap(),
+    );
+    let count = rewrite::apply(&[a1, a2, a3], &[0, 1, 2]).unwrap();
+    assert_eq!(3, count);
+
+    let out1 = fs::read_to_string(&f1).unwrap();
+    assert!(out1.contains("@new1"));
+    assert!(out1.contains("@new1b"));
+    assert!(fs::read_to_string(&f2).unwrap().contains("@new2"));
+    let _ = fs::remove_dir_all(&tmp);
+}

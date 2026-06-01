@@ -163,9 +163,9 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         ));
         for a in &actions {
             let target = if a.is_major || a.is_branch {
-                a.new_version.red().to_string()
+                a.new_ref.red().to_string()
             } else {
-                a.new_version.green().to_string()
+                a.new_ref.green().to_string()
             };
             let mut line = format!(
                 "{}: {} -> {} ({}:{})",
@@ -175,6 +175,9 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
                 a.file.bright_black(),
                 a.line
             );
+            if a.new_ref != a.new_version {
+                line.push_str(&format!(" [{}]", a.new_version.bright_black()));
+            }
             if let Some(vc) = &a.version_comment {
                 line.push_str(&format!(" #{}", vc.bright_black()));
             }
@@ -237,9 +240,9 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
     for &idx in &selected {
         let a = &actions[idx];
         let target = if a.is_major || a.is_branch {
-            a.new_version.red().to_string()
+            a.new_ref.red().to_string()
         } else {
-            a.new_version.green().to_string()
+            a.new_ref.green().to_string()
         };
         let mut line = format!(
             "{}:{} {}: {} -> {}",
@@ -249,6 +252,9 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
             a.current_ref.bright_black(),
             target
         );
+        if a.new_ref != a.new_version {
+            line.push_str(&format!(" [{}]", a.new_version.bright_black()));
+        }
         if let Some(vc) = &a.version_comment {
             line.push_str(&format!(" #{}", vc.bright_black()));
         }

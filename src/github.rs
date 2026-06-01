@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use reqwest::blocking::Client as HttpClient;
@@ -12,7 +12,7 @@ const CACHE_TTL: Duration = Duration::from_secs(60 * 60 * 6);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("github request failed")]
+    #[error("github request failed with status {0}")]
     HttpStatus(u16),
     #[error(transparent)]
     Request(#[from] reqwest::Error),
@@ -161,7 +161,7 @@ pub fn cache_path(owner: &str, name: &str) -> PathBuf {
         .join(format!("{owner}__{name}.json"))
 }
 
-fn read_cache(path: &PathBuf) -> Option<Vec<Tag>> {
+fn read_cache(path: &Path) -> Option<Vec<Tag>> {
     let meta = fs::metadata(path).ok()?;
     let age = SystemTime::now()
         .duration_since(meta.modified().ok()?)

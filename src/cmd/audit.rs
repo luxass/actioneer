@@ -116,9 +116,11 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
 
     if branch_count > 0 {
         printer.error(&format!(
-            "{} action reference{} use mutable branch refs and are insecure.",
+            "{} action reference{} {} mutable branch refs and {} insecure.",
             branch_count.to_string().yellow(),
-            if branch_count == 1 { "s" } else { "" },
+            if branch_count == 1 { "" } else { "s" },
+            if branch_count == 1 { "uses" } else { "use" },
+            if branch_count == 1 { "is" } else { "are" },
         ));
         for a in actions.iter().filter(|a| a.is_branch) {
             printer.error(&format!(

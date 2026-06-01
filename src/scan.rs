@@ -155,8 +155,6 @@ fn parse_action_ref(value: &str) -> Option<ParsedAction<'_>> {
     })
 }
 
-// --- tree walking with immediate Document queries ---
-
 fn collect_workflow(root: &Value, doc: &Document, file: &str, actions: &mut Vec<Action>) {
     let Some(jobs) = root.get("jobs").and_then(Value::as_mapping) else {
         return;

@@ -58,7 +58,8 @@ pub fn resolve(
                 .map(|t| !sha_matches(&action.current_ref, &t.sha))
                 .unwrap_or(false);
 
-        let current_version = parse_version(&action.current_ref);
+        let current_version = parse_version(&action.current_ref)
+            .or_else(|| action.version_comment.as_deref().and_then(parse_version));
         let Some(target) = best_target(repo_tags, current_version, config.mode) else {
             continue;
         };

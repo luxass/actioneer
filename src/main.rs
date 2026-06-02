@@ -28,11 +28,19 @@ fn main() -> ExitCode {
 
 fn run(app: App) -> anyhow::Result<ExitCode> {
     let global = app.global.clone();
-    let gh = GitHubClient::new(!global.no_cache);
     match app.command {
-        Some(Command::Update(args)) => cmd::update::run(global, args, gh),
-        Some(Command::Audit(args)) => cmd::audit::run(global, args, gh),
+        Some(Command::Update(args)) => {
+            let gh = GitHubClient::new(!global.no_cache);
+            cmd::update::run(global, args, gh)
+        }
+        Some(Command::Audit(args)) => {
+            let gh = GitHubClient::new(!global.no_cache);
+            cmd::audit::run(global, args, gh)
+        }
         Some(Command::Version) => Ok(cmd::version::run()),
-        None => cmd::update::run(global, app.update, gh),
+        None => {
+            let gh = GitHubClient::new(!global.no_cache);
+            cmd::update::run(global, app.update, gh)
+        }
     }
 }

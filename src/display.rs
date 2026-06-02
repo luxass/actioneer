@@ -32,10 +32,11 @@ impl Printer {
     }
 
     fn write(&self, msg: &str, prefix: String) {
-        let formatted = match self.effective_mode() {
-            Mode::Plain => msg.to_string(),
-            Mode::Beautiful => format!("{prefix} {msg}"),
-            Mode::Json => msg.to_string(),
+        let plain = self.effective_mode() == Mode::Plain;
+        let formatted = if plain {
+            strip_ansi(msg)
+        } else {
+            format!("{prefix} {msg}")
         };
 
         if self.mode.is_json() {
@@ -89,6 +90,24 @@ pub fn update_file_count(actions: &[Action]) -> usize {
 
 pub fn short_sha(sha: &str) -> &str {
     &sha[..sha.len().min(12)]
+}
+
+fn strip_ansi(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' && chars.peek() == Some(&'[') {
+            chars.next();
+            while let Some(c) = chars.next() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 #[cfg(test)]

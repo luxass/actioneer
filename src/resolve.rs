@@ -93,13 +93,19 @@ fn classify(action: &Action, skip_branches: bool) -> Option<CurrentRefKind> {
     if parse_version(&action.current_ref).is_some() {
         return Some(CurrentRefKind::Version);
     }
-    if is_likely_sha(&action.current_ref) {
+    if is_likely_sha(&action.current_ref)
+        || (action.version_comment.is_some() && is_sha_like_ref(&action.current_ref))
+    {
         return Some(CurrentRefKind::Sha);
     }
     if skip_branches {
         return None;
     }
     Some(CurrentRefKind::Branch)
+}
+
+fn is_sha_like_ref(value: &str) -> bool {
+    value.len() >= 7 && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 fn best_target(tags: &[Tag], current: Option<Version>, mode: UpdateMode) -> Option<&Tag> {
@@ -350,6 +356,39 @@ mod tests {
         let mut actions = vec![action("a", "b", "badcafe0", Some("v4.2.0"))];
         resolve(&mut actions, &tags, &config());
         assert!(actions[0].sha_mismatch);
+        assert!(actions[0].needs_update);
+    }
+
+    #[test]
+    fn resolve_long_sha_typo_as_mismatch_not_branch() {
+        let tags = HashMap::from([(
+            ("actions".into(), "checkout".into()),
+            vec![
+                tag(
+                    "v6.0.2",
+                    "de0fac2e4500dabe0009e67214ff5f5447ce83dd",
+                    6,
+                    0,
+                    2,
+                ),
+                tag(
+                    "v6.0.3",
+                    "df4cb1c069e1874edd31b4311f1884172cec0e10",
+                    6,
+                    0,
+                    3,
+                ),
+            ],
+        )]);
+        let mut actions = vec![action(
+            "actions",
+            "checkout",
+            "de0fac2ea4500dabe0009e67214ff5f5447ce83dd",
+            Some("v6.0.2"),
+        )];
+        resolve(&mut actions, &tags, &config());
+        assert!(actions[0].sha_mismatch);
+        assert!(!actions[0].is_branch);
         assert!(actions[0].needs_update);
     }
 

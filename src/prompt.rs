@@ -287,34 +287,57 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRo
         layout::Layout::vertical([layout::Constraint::Min(6), layout::Constraint::Length(3)])
             .split(area);
 
-    let (act_w, chg_w, loc_w) = actions.iter().fold((0usize, 0, 0), |(a, c, l), x| {
-        let change = format!("{} -> {}", x.current_ref, x.new_version);
-        let loc = format!("{}:{}", x.file, x.line);
-        (
-            a.max(x.action_name().chars().count()),
-            c.max(change.chars().count()),
-            l.max(loc.chars().count()),
-        )
-    });
+    let short_ref = |value: &str| {
+        if value.chars().count() > 12 {
+            value.chars().take(7).collect::<String>()
+        } else {
+            value.to_string()
+        }
+    };
+    let version_change = |a: &Action| {
+        let current = a.version_comment.as_deref().unwrap_or(&a.current_ref);
+        if current == a.new_version {
+            a.new_version.clone()
+        } else {
+            format!("{} -> {}", current, a.new_version)
+        }
+    };
+    let notes = |a: &Action| {
+        let mut notes = Vec::new();
+        if a.sha_mismatch {
+            notes.push("SHA mismatch");
+        }
+        if a.is_branch {
+            notes.push("mutable branch");
+        }
+        if a.is_major {
+            notes.push("major update");
+        }
+        notes
+    };
+
+    let (act_w, ref_w, ver_w, loc_w) =
+        actions
+            .iter()
+            .fold((0usize, 0usize, 0usize, 0usize), |(a, r, v, l), x| {
+                let refs = format!("{} -> {}", short_ref(&x.current_ref), short_ref(&x.new_ref));
+                let version = version_change(x);
+                let loc = format!("{}:{}", x.file, x.line);
+                (
+                    a.max(x.action_name().chars().count()),
+                    r.max(refs.chars().count()),
+                    v.max(version.chars().count()),
+                    l.max(loc.chars().count()),
+                )
+            });
 
     let content_width = actions
         .iter()
         .map(|a| {
-            let mut w = 6 + act_w + 2 + chg_w + 2 + loc_w;
-            if a.new_ref != a.new_version {
-                w += 3 + a.new_ref.len().min(7) + 1;
-            }
-            if let Some(vc) = &a.version_comment {
-                w += 1 + vc.chars().count() + 1;
-            }
-            if a.sha_mismatch {
-                w += 5 + a.expected_sha.len().min(7) + 1;
-            }
-            if a.is_branch {
-                w += 7;
-            }
-            if a.is_major {
-                w += 6;
+            let mut w = 6 + act_w + 2 + ref_w + 2 + ver_w + 2 + loc_w;
+            let notes = notes(a).join(", ");
+            if !notes.is_empty() {
+                w += 2 + notes.chars().count();
             }
             w
         })
@@ -332,11 +355,13 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRo
             Span::raw("      "),
             Span::styled(format!("{:1$}", "Action", act_w), header_style),
             Span::raw("  "),
-            Span::styled(format!("{:1$}", "Current -> Target", chg_w), header_style),
+            Span::styled(format!("{:1$}", "Ref", ref_w), header_style),
+            Span::raw("  "),
+            Span::styled(format!("{:1$}", "Version", ver_w), header_style),
             Span::raw("  "),
             Span::styled(format!("{:1$}", "Location", loc_w), header_style),
             Span::raw("  "),
-            Span::styled("Pinned ref / comment", header_style),
+            Span::styled("Notes", header_style),
         ],
         scroll,
     )))];
@@ -404,10 +429,15 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRo
                 Span::styled(
                     format!(
                         "{:1$}",
-                        format!("{} -> {}", a.current_ref, a.new_version),
-                        chg_w
+                        format!("{} -> {}", short_ref(&a.current_ref), short_ref(&a.new_ref)),
+                        ref_w
                     ),
                     Style::default().fg(target_s),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    format!("{:1$}", version_change(a), ver_w),
+                    Style::default().fg(Color::Blue),
                 ),
                 Span::raw("  "),
                 Span::styled(
@@ -415,29 +445,15 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRo
                     Style::default().fg(Color::DarkGray),
                 ),
             ];
-            if a.new_ref != a.new_version {
+            let notes = notes(a);
+            if !notes.is_empty() {
                 spans.push(Span::raw("  "));
-                spans.push(Span::styled(
-                    format!("@{}", &a.new_ref[..a.new_ref.len().min(7)]),
-                    Style::default().fg(Color::Blue),
-                ));
-                spans.push(Span::raw(" "));
-            }
-            if let Some(vc) = &a.version_comment {
-                spans.push(Span::styled("#", Style::default().fg(Color::DarkGray)));
-                spans.push(Span::styled(vc.clone(), Style::default().fg(Color::Blue)));
-                spans.push(Span::raw(" "));
-            }
-            if a.sha_mismatch {
-                spans.push(Span::styled("sha!", Style::default().fg(Color::Yellow)));
-                spans.push(Span::raw(" "));
-            }
-            if a.is_branch {
-                spans.push(Span::styled("branch", Style::default().fg(Color::Yellow)));
-                spans.push(Span::raw(" "));
-            }
-            if a.is_major {
-                spans.push(Span::styled("major", Style::default().fg(Color::Red)));
+                for (i, note) in notes.iter().enumerate() {
+                    if i > 0 {
+                        spans.push(Span::styled(", ", Style::default().fg(Color::DarkGray)));
+                    }
+                    spans.push(Span::styled(*note, Style::default().fg(target_s)));
+                }
             }
             ListItem::new(Line::from(scroll_spans(spans, scroll)))
         }

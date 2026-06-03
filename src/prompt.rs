@@ -283,12 +283,9 @@ fn visible_rows(actions: &[Action], collapsed: &HashSet<String>) -> Vec<VisibleR
 
 fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRow], state: &State) {
     let area = frame.area();
-    let sections = layout::Layout::vertical([
-        layout::Constraint::Length(1),
-        layout::Constraint::Min(6),
-        layout::Constraint::Length(3),
-    ])
-    .split(area);
+    let sections =
+        layout::Layout::vertical([layout::Constraint::Min(6), layout::Constraint::Length(3)])
+            .split(area);
 
     let (act_w, chg_w, loc_w) = actions.iter().fold((0usize, 0, 0), |(a, c, l), x| {
         let change = format!("{} -> {}", x.current_ref, x.new_version);
@@ -327,138 +324,127 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRo
     let viewport = usize::from(area.width.saturating_sub(2));
     let scroll = state.h_scroll.min(content_width.saturating_sub(viewport));
 
-    let header = Paragraph::new(Line::from(scroll_spans(
+    let header_style = Style::default()
+        .fg(Color::DarkGray)
+        .add_modifier(Modifier::BOLD);
+    let mut items = vec![ListItem::new(Line::from(scroll_spans(
         vec![
-            Span::styled(
-                format!("  Action{:1$}", "", act_w.saturating_sub(6)),
-                Style::default()
-                    .add_modifier(Modifier::BOLD)
-                    .add_modifier(Modifier::UNDERLINED),
-            ),
-            Span::styled(
-                format!("  Update{:1$}", "", chg_w.saturating_sub(6)),
-                Style::default()
-                    .add_modifier(Modifier::BOLD)
-                    .add_modifier(Modifier::UNDERLINED),
-            ),
-            Span::styled(
-                format!("  Location{:1$}", "", loc_w.saturating_sub(8)),
-                Style::default()
-                    .add_modifier(Modifier::BOLD)
-                    .add_modifier(Modifier::UNDERLINED),
-            ),
+            Span::raw("      "),
+            Span::styled(format!("{:1$}", "Action", act_w), header_style),
+            Span::raw("  "),
+            Span::styled(format!("{:1$}", "Current -> Target", chg_w), header_style),
+            Span::raw("  "),
+            Span::styled(format!("{:1$}", "Location", loc_w), header_style),
+            Span::raw("  "),
+            Span::styled("Pinned ref / comment", header_style),
         ],
         scroll,
-    )));
-    frame.render_widget(header, sections[0]);
+    )))];
 
-    let items: Vec<ListItem<'_>> = visible
-        .iter()
-        .map(|row| match row {
-            VisibleRow::FileHeader { file } => {
-                let (sel, total) = actions
-                    .iter()
-                    .zip(state.selected.iter())
-                    .filter(|(a, _)| a.file == *file)
-                    .fold((0, 0), |(s, t), (_, x)| (s + usize::from(*x), t + 1));
-                let marker = if state.collapsed.contains(file) {
-                    "▸"
-                } else {
-                    "▾"
-                };
-                let label = if sel == total {
-                    "all".to_string()
-                } else {
-                    format!("{sel}/{total}")
-                };
-                let style = |c| Style::default().fg(c).add_modifier(Modifier::BOLD);
-                ListItem::new(Line::from(scroll_spans(
-                    vec![
-                        Span::styled(format!("{marker} "), Style::default().fg(Color::Cyan)),
-                        Span::styled(
-                            format!("[{label}] "),
-                            style(if sel > 0 {
-                                Color::Green
-                            } else {
-                                Color::DarkGray
-                            }),
-                        ),
-                        Span::styled(file.clone(), style(Color::Cyan)),
-                    ],
-                    scroll,
-                )))
-            }
-            VisibleRow::Update { original_index } => {
-                let a = &actions[*original_index];
-                let sel = state.selected[*original_index];
-                let marker = if sel { "[x]" } else { "[ ]" };
-                let marker_s = if sel {
-                    Style::default().fg(Color::Green)
-                } else {
-                    Style::default().fg(Color::DarkGray)
-                };
-                let target_s = if a.sha_mismatch || a.is_branch {
-                    Color::Yellow
-                } else if a.is_major {
-                    Color::Red
-                } else {
-                    Color::Green
-                };
+    items.extend(visible.iter().map(|row| match row {
+        VisibleRow::FileHeader { file } => {
+            let (sel, total) = actions
+                .iter()
+                .zip(state.selected.iter())
+                .filter(|(a, _)| a.file == *file)
+                .fold((0, 0), |(s, t), (_, x)| (s + usize::from(*x), t + 1));
+            let marker = if state.collapsed.contains(file) {
+                "▸"
+            } else {
+                "▾"
+            };
+            let label = if sel == total {
+                "all".to_string()
+            } else {
+                format!("{sel}/{total}")
+            };
+            let style = |c| Style::default().fg(c).add_modifier(Modifier::BOLD);
+            ListItem::new(Line::from(scroll_spans(
+                vec![
+                    Span::styled(format!("{marker} "), Style::default().fg(Color::Cyan)),
+                    Span::styled(
+                        format!("[{label}] "),
+                        style(if sel > 0 {
+                            Color::Green
+                        } else {
+                            Color::DarkGray
+                        }),
+                    ),
+                    Span::styled(file.clone(), style(Color::Cyan)),
+                ],
+                scroll,
+            )))
+        }
+        VisibleRow::Update { original_index } => {
+            let a = &actions[*original_index];
+            let sel = state.selected[*original_index];
+            let marker = if sel { "[x]" } else { "[ ]" };
+            let marker_s = if sel {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            let target_s = if a.sha_mismatch || a.is_branch {
+                Color::Yellow
+            } else if a.is_major {
+                Color::Red
+            } else {
+                Color::Green
+            };
 
-                let mut spans = vec![
-                    Span::raw("  "),
-                    Span::styled(marker, marker_s),
-                    Span::raw(" "),
-                    Span::styled(
-                        format!("{:1$}", a.action_name(), act_w),
-                        Style::default().add_modifier(Modifier::BOLD),
+            let mut spans = vec![
+                Span::raw("  "),
+                Span::styled(marker, marker_s),
+                Span::raw(" "),
+                Span::styled(
+                    format!("{:1$}", a.action_name(), act_w),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    format!(
+                        "{:1$}",
+                        format!("{} -> {}", a.current_ref, a.new_version),
+                        chg_w
                     ),
-                    Span::raw("  "),
-                    Span::styled(
-                        format!(
-                            "{:1$}",
-                            format!("{} -> {}", a.current_ref, a.new_version),
-                            chg_w
-                        ),
-                        Style::default().fg(target_s),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(
-                        format!("{:1$}", format!("{}:{}", a.file, a.line), loc_w),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                ];
-                if a.new_ref != a.new_version {
-                    spans.push(Span::raw("  "));
-                    spans.push(Span::styled(
-                        format!("@{}", &a.new_ref[..a.new_ref.len().min(7)]),
-                        Style::default().fg(Color::Blue),
-                    ));
-                    spans.push(Span::raw(" "));
-                }
-                if let Some(vc) = &a.version_comment {
-                    spans.push(Span::styled("#", Style::default().fg(Color::DarkGray)));
-                    spans.push(Span::styled(vc.clone(), Style::default().fg(Color::Blue)));
-                    spans.push(Span::raw(" "));
-                }
-                if a.sha_mismatch {
-                    spans.push(Span::styled("sha!", Style::default().fg(Color::Yellow)));
-                    spans.push(Span::raw(" "));
-                }
-                if a.is_branch {
-                    spans.push(Span::styled("branch", Style::default().fg(Color::Yellow)));
-                    spans.push(Span::raw(" "));
-                }
-                if a.is_major {
-                    spans.push(Span::styled("major", Style::default().fg(Color::Red)));
-                }
-                ListItem::new(Line::from(scroll_spans(spans, scroll)))
+                    Style::default().fg(target_s),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    format!("{:1$}", format!("{}:{}", a.file, a.line), loc_w),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ];
+            if a.new_ref != a.new_version {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    format!("@{}", &a.new_ref[..a.new_ref.len().min(7)]),
+                    Style::default().fg(Color::Blue),
+                ));
+                spans.push(Span::raw(" "));
             }
-        })
-        .collect();
+            if let Some(vc) = &a.version_comment {
+                spans.push(Span::styled("#", Style::default().fg(Color::DarkGray)));
+                spans.push(Span::styled(vc.clone(), Style::default().fg(Color::Blue)));
+                spans.push(Span::raw(" "));
+            }
+            if a.sha_mismatch {
+                spans.push(Span::styled("sha!", Style::default().fg(Color::Yellow)));
+                spans.push(Span::raw(" "));
+            }
+            if a.is_branch {
+                spans.push(Span::styled("branch", Style::default().fg(Color::Yellow)));
+                spans.push(Span::raw(" "));
+            }
+            if a.is_major {
+                spans.push(Span::styled("major", Style::default().fg(Color::Red)));
+            }
+            ListItem::new(Line::from(scroll_spans(spans, scroll)))
+        }
+    }));
 
     let mut list_state = ListState::default();
-    list_state.select(Some(state.cursor));
+    list_state.select(Some(state.cursor + 1));
     let selected_count = state.selected.iter().filter(|s| **s).count();
     let list = List::new(items)
         .block(
@@ -476,7 +462,7 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRo
                 .add_modifier(Modifier::BOLD),
         )
         .repeat_highlight_symbol(false);
-    frame.render_stateful_widget(list, sections[1], &mut list_state);
+    frame.render_stateful_widget(list, sections[0], &mut list_state);
 
     let footer = Paragraph::new(FOOTER)
         .block(
@@ -487,7 +473,7 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRo
         )
         .wrap(Wrap { trim: true })
         .style(Style::default().fg(Color::Cyan));
-    frame.render_widget(footer, sections[2]);
+    frame.render_widget(footer, sections[1]);
 }
 
 fn scroll_spans(spans: Vec<Span<'static>>, scroll: usize) -> Vec<Span<'static>> {

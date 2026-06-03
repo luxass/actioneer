@@ -283,9 +283,12 @@ fn visible_rows(actions: &[Action], collapsed: &HashSet<String>) -> Vec<VisibleR
 
 fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRow], state: &State) {
     let area = frame.area();
-    let sections =
-        layout::Layout::vertical([layout::Constraint::Min(6), layout::Constraint::Length(3)])
-            .split(area);
+    let sections = layout::Layout::vertical([
+        layout::Constraint::Length(1),
+        layout::Constraint::Min(6),
+        layout::Constraint::Length(3),
+    ])
+    .split(area);
 
     let (act_w, chg_w, loc_w) = actions.iter().fold((0usize, 0, 0), |(a, c, l), x| {
         let change = format!("{} -> {}", x.current_ref, x.new_version);
@@ -323,6 +326,31 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRo
 
     let viewport = usize::from(area.width.saturating_sub(2));
     let scroll = state.h_scroll.min(content_width.saturating_sub(viewport));
+
+    let header = Paragraph::new(Line::from(scroll_spans(
+        vec![
+            Span::styled(
+                format!("  Action{:1$}", "", act_w.saturating_sub(6)),
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::UNDERLINED),
+            ),
+            Span::styled(
+                format!("  Update{:1$}", "", chg_w.saturating_sub(6)),
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::UNDERLINED),
+            ),
+            Span::styled(
+                format!("  Location{:1$}", "", loc_w.saturating_sub(8)),
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::UNDERLINED),
+            ),
+        ],
+        scroll,
+    )));
+    frame.render_widget(header, sections[0]);
 
     let items: Vec<ListItem<'_>> = visible
         .iter()
@@ -448,7 +476,7 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRo
                 .add_modifier(Modifier::BOLD),
         )
         .repeat_highlight_symbol(false);
-    frame.render_stateful_widget(list, sections[0], &mut list_state);
+    frame.render_stateful_widget(list, sections[1], &mut list_state);
 
     let footer = Paragraph::new(FOOTER)
         .block(
@@ -459,7 +487,7 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRo
         )
         .wrap(Wrap { trim: true })
         .style(Style::default().fg(Color::Cyan));
-    frame.render_widget(footer, sections[1]);
+    frame.render_widget(footer, sections[2]);
 }
 
 fn scroll_spans(spans: Vec<Span<'static>>, scroll: usize) -> Vec<Span<'static>> {

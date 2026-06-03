@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::io::{self, IsTerminal};
+use std::process::{Command, Stdio};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
@@ -15,7 +16,7 @@ use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Pa
 
 use crate::model::Action;
 
-const FOOTER: &str = "Up/Down/j/k move  ←→ scroll  PgUp/PgDn jump  space toggle  tab fold  f file  a all  i invert  n none  enter apply  q cancel";
+const FOOTER: &str = "Up/Down/j/k move  ←→ scroll  PgUp/PgDn jump  d details  o open GitHub  space toggle  tab fold  f file  a all  i invert  n none  enter apply  q cancel";
 
 #[derive(Debug)]
 pub enum Error {
@@ -54,6 +55,7 @@ struct State {
     collapsed: HashSet<String>,
     cursor: usize,
     h_scroll: usize,
+    details_visible: bool,
 }
 
 impl State {
@@ -63,6 +65,7 @@ impl State {
             collapsed: HashSet::new(),
             cursor: 0,
             h_scroll: 0,
+            details_visible: true,
         }
     }
 
@@ -165,6 +168,7 @@ fn run<B: Backend>(terminal: &mut Terminal<B>, actions: &[Action]) -> Result<Vec
                     state.collapsed.insert(file.to_string());
                 }
             }
+            Key::ToggleDetails => state.details_visible = !state.details_visible,
             Key::PageUp => {
                 let page = usize::from(terminal.size()?.height.saturating_sub(4)).max(1);
                 state.cursor = state.cursor.saturating_sub(page);
@@ -183,6 +187,11 @@ fn run<B: Backend>(terminal: &mut Terminal<B>, actions: &[Action]) -> Result<Vec
             Key::SelectNone => state.selected.fill(false),
             Key::ScrollLeft => state.h_scroll = state.h_scroll.saturating_sub(4),
             Key::ScrollRight => state.h_scroll += 4,
+            Key::OpenGitHub => {
+                if let Some(VisibleRow::Update { original_index }) = visible.get(state.cursor) {
+                    open_github(&actions[*original_index])?;
+                }
+            }
             Key::Accept => return Ok(state.selected_indices()),
             Key::Cancel => return Err(Error::Canceled),
             Key::Resize | Key::Ignore => {}
@@ -198,6 +207,39 @@ fn cursor_file<'a>(visible: &'a [VisibleRow], cursor: usize, actions: &'a [Actio
     }
 }
 
+fn open_github(action: &Action) -> Result<(), Error> {
+    let url = github_url(action);
+    let mut command = if cfg!(target_os = "macos") {
+        let mut cmd = Command::new("open");
+        cmd.arg(url);
+        cmd
+    } else if cfg!(target_os = "windows") {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", "start", "", &url]);
+        cmd
+    } else {
+        let mut cmd = Command::new("xdg-open");
+        cmd.arg(url);
+        cmd
+    };
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    Ok(())
+}
+
+fn github_url(action: &Action) -> String {
+    let repo = format!("https://github.com/{}/{}", action.owner, action.name);
+    let path = action.path.trim_start_matches('/');
+    if path.is_empty() {
+        repo
+    } else {
+        format!("{repo}/blob/{}/{}", action.current_ref, path)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Key {
     Up,
@@ -206,6 +248,7 @@ enum Key {
     ToggleAll,
     ToggleFile,
     ToggleCollapse,
+    ToggleDetails,
     PageUp,
     PageDown,
     Home,
@@ -217,6 +260,7 @@ enum Key {
     Resize,
     ScrollLeft,
     ScrollRight,
+    OpenGitHub,
     Ignore,
 }
 
@@ -233,11 +277,13 @@ fn read_key() -> Result<Key, Error> {
                     KeyCode::Char(' ') | KeyCode::Char('x') => Key::Toggle,
                     KeyCode::Char('a') => Key::ToggleAll,
                     KeyCode::Char('f') => Key::ToggleFile,
+                    KeyCode::Char('d') => Key::ToggleDetails,
                     KeyCode::Tab => Key::ToggleCollapse,
                     KeyCode::PageUp => Key::PageUp,
                     KeyCode::PageDown => Key::PageDown,
                     KeyCode::Home => Key::Home,
                     KeyCode::End => Key::End,
+                    KeyCode::Char('o') => Key::OpenGitHub,
                     KeyCode::Char('i') => Key::Invert,
                     KeyCode::Char('n') => Key::SelectNone,
                     KeyCode::Char('q') | KeyCode::Esc => Key::Cancel,
@@ -344,7 +390,19 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRo
         .max()
         .unwrap_or(0);
 
-    let viewport = usize::from(area.width.saturating_sub(2));
+    let show_details = state.details_visible && sections[0].width >= 120;
+    let body = if show_details {
+        let panes = layout::Layout::horizontal([
+            layout::Constraint::Min(60),
+            layout::Constraint::Length(42),
+        ])
+        .split(sections[0]);
+        (panes[0], Some(panes[1]))
+    } else {
+        (sections[0], None)
+    };
+
+    let viewport = usize::from(body.0.width.saturating_sub(2));
     let scroll = state.h_scroll.min(content_width.saturating_sub(viewport));
 
     let header_style = Style::default()
@@ -478,7 +536,80 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRo
                 .add_modifier(Modifier::BOLD),
         )
         .repeat_highlight_symbol(false);
-    frame.render_stateful_widget(list, sections[0], &mut list_state);
+    frame.render_stateful_widget(list, body.0, &mut list_state);
+
+    if let Some(details_area) = body.1 {
+        let detail_lines = match visible.get(state.cursor) {
+            Some(VisibleRow::FileHeader { file }) => {
+                let (sel, total) = actions
+                    .iter()
+                    .zip(state.selected.iter())
+                    .filter(|(a, _)| a.file == *file)
+                    .fold((0, 0), |(s, t), (_, x)| (s + usize::from(*x), t + 1));
+                vec![
+                    Line::from(Span::styled(
+                        file.clone(),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    )),
+                    Line::from(""),
+                    Line::from(format!("Selected: {sel}/{total}")),
+                    Line::from(format!("Collapsed: {}", state.collapsed.contains(file))),
+                ]
+            }
+            Some(VisibleRow::Update { original_index }) => {
+                let a = &actions[*original_index];
+                let note_text = notes(a).join(", ");
+                vec![
+                    Line::from(Span::styled(
+                        a.action_name(),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )),
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("Current ref: ", Style::default().fg(Color::DarkGray)),
+                        Span::raw(a.current_ref.clone()),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("Target ref:  ", Style::default().fg(Color::DarkGray)),
+                        Span::raw(a.new_ref.clone()),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("Version:     ", Style::default().fg(Color::DarkGray)),
+                        Span::raw(version_change(a)),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("Location:    ", Style::default().fg(Color::DarkGray)),
+                        Span::raw(format!("{}:{}", a.file, a.line)),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("GitHub:      ", Style::default().fg(Color::DarkGray)),
+                        Span::raw(github_url(a)),
+                    ]),
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("Notes:       ", Style::default().fg(Color::DarkGray)),
+                        Span::raw(if note_text.is_empty() {
+                            "none".to_string()
+                        } else {
+                            note_text
+                        }),
+                    ]),
+                ]
+            }
+            None => vec![Line::from("No selection")],
+        };
+        let details = Paragraph::new(detail_lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(" Details "),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(details, details_area);
+    }
 
     let footer = Paragraph::new(FOOTER)
         .block(
@@ -543,6 +674,7 @@ mod tests {
         assert_eq!(vec![false, false, false], s.selected);
         assert_eq!(0, s.cursor);
         assert_eq!(0, s.h_scroll);
+        assert!(s.details_visible);
     }
 
     #[test]
@@ -626,5 +758,30 @@ mod tests {
     fn cursor_file_out_of_bounds() {
         let visible: Vec<VisibleRow> = vec![];
         assert_eq!("", cursor_file(&visible, 99, &[]));
+    }
+
+    #[test]
+    fn github_url_repo_root() {
+        let action = mk_action("ci.yml", "checkout");
+        assert_eq!("https://github.com/actions/checkout", github_url(&action));
+    }
+
+    #[test]
+    fn github_url_action_path_at_current_ref() {
+        let action = Action::from_scan(
+            "luxass".into(),
+            "shared-workflows".into(),
+            "/.github/workflows/reusable-ci.yaml".into(),
+            "ce9e8e27".into(),
+            Some("v0.6.0".into()),
+            "ci.yml".into(),
+            10,
+            20,
+            28,
+        );
+        assert_eq!(
+            "https://github.com/luxass/shared-workflows/blob/ce9e8e27/.github/workflows/reusable-ci.yaml",
+            github_url(&action)
+        );
     }
 }

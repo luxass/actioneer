@@ -1,18 +1,19 @@
 mod cli;
 mod cmd;
-mod engine;
-mod errors;
+mod display;
 mod github;
-mod logger;
 mod model;
-mod syntax;
-mod ui;
+mod prompt;
+mod resolve;
+mod rewrite;
+mod scan;
 
 use std::process::ExitCode;
 
 use clap::Parser;
 
 use crate::cli::{App, Command};
+use crate::github::GitHubClient;
 
 fn main() -> ExitCode {
     let app = App::parse();
@@ -25,12 +26,21 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(app: App) -> Result<ExitCode, errors::Error> {
+fn run(app: App) -> anyhow::Result<ExitCode> {
     let global = app.global.clone();
     match app.command {
-        Some(Command::Update(args)) => Ok(cmd::update::run(global, args)?),
-        Some(Command::Audit(args)) => Ok(cmd::audit::run(global, args)?),
+        Some(Command::Update(args)) => {
+            let gh = GitHubClient::new(!global.no_cache);
+            cmd::update::run(global, args, gh)
+        }
+        Some(Command::Audit(args)) => {
+            let gh = GitHubClient::new(!global.no_cache);
+            cmd::audit::run(global, args, gh)
+        }
         Some(Command::Version) => Ok(cmd::version::run()),
-        None => Ok(cmd::update::run(global, app.update)?),
+        None => {
+            let gh = GitHubClient::new(!global.no_cache);
+            cmd::update::run(global, app.update, gh)
+        }
     }
 }

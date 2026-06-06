@@ -16,46 +16,32 @@ The binary name is `actioneer`.
 
 ## Architecture
 
-Single-crate Rust CLI with internal modules:
+Single-crate Rust CLI with flat module layout:
 
 ```text
-cli/command dispatch
-ui output + prompt
-engine scanner/github/rewrite/git
-model shared internal types
-syntax tree-sitter YAML parsing + GitHub Actions semantics
+cli  command dispatch and clap definitions
+cmd  update, audit, version command handlers
 ```
 
 ### Module Map
 
 | Path | Role |
 |---|---|
-| `Cargo.toml` | Root package manifest and dependency versions |
 | `src/main.rs` | CLI bootstrap and top-level dispatch |
 | `src/cli.rs` | Clap parsing, global args, subcommands |
-| `src/cmd/` | `update`, `validate`, `audit`, `version` handlers |
-| `src/ui/output.rs` | Human-readable and JSON output |
-| `src/ui/prompt.rs` | Interactive picker using `ratatui` + `crossterm` |
-| `src/engine/scanner.rs` | Filesystem traversal and YAML file discovery |
-| `src/engine/github/` | GitHub transport, resolution, tags, diagnostics |
-| `src/engine/rewrite.rs` | Text-edit application and file rewriting |
-| `src/engine/git.rs` | Version parsing and SHA helpers |
-| `src/syntax/github_actions.rs` | Reference extraction from workflows/composite actions |
-| `src/syntax/yaml_tree.rs` | tree-sitter YAML wrapper helpers |
-| `src/model/` | `Reference`, `Candidate`, resolve/config/query types |
-
-### Design Rules
-
-- Keep terminal UI concerns in `ui/`.
-- Keep scanner/resolver/rewrite logic in `engine/`.
-- Keep shared internal types in `model/`.
-- Keep the JSON output contract stable unless the change is deliberate and versioned.
-- Tree-sitter is the parser/rewrite path; do not replace it with `serde_yaml` for workflow mutation.
+| `src/model.rs` | Action, Tag, Version, PinStyle, UpdateMode, ResolveConfig |
+| `src/scan.rs` | Filesystem traversal and YAML action reference extraction |
+| `src/github.rs` | GitHub API transport, tag resolution, disk cache, auth |
+| `src/resolve.rs` | Version comparison, SHA matching, update detection |
+| `src/rewrite.rs` | Text-edit computation and file rewriting |
+| `src/display.rs` | Human-readable and JSON output |
+| `src/prompt.rs` | Interactive picker using ratatui + crossterm |
+| `src/cmd/` | `update`, `audit`, `version` handlers |
 
 ## Conventions
 
-- Prefer `rg` / `rg --files` for search.
+- Prefer `rg` for search.
 - Do not add comments to code unless asked.
-- Prefer behavior-preserving changes in parser, resolver, rewrite, output, and prompt code.
 - Add or update tests with behavior-sensitive changes.
-- Keep human output changes intentional; the CLI logs are part of the product surface.
+- Keep human output changes intentional.
+- No extracted helper functions under 10 lines used in a single place.

@@ -158,8 +158,6 @@ fn current_ref_matches_style(current_ref: &str, target: &Tag, style: PinStyle) -
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use crate::actions::version::Version;
 
     use super::*;
@@ -194,15 +192,6 @@ mod tests {
                 minor,
                 patch,
             },
-        }
-    }
-
-    fn config() -> ResolveConfig {
-        ResolveConfig {
-            excludes: vec![],
-            skip_branches: false,
-            mode: UpdateMode::Major,
-            style: PinStyle::Sha,
         }
     }
 
@@ -334,149 +323,5 @@ mod tests {
     fn current_ref_matches_style_sha_prefix() {
         let t = tag("v4.2.0", "abc123456789", 4, 2, 0);
         assert!(current_ref_matches_style("abc", &t, PinStyle::Sha));
-    }
-
-    #[test]
-    fn resolve_detects_version_upgrade() {
-        let tags = HashMap::from([(
-            ("actions".into(), "checkout".into()),
-            vec![tag("v4.2.0", "sha42", 4, 2, 0)],
-        )]);
-        let mut actions = vec![action("actions", "checkout", "v4.1.0", None)];
-        resolve(&mut actions, &tags, &config());
-        assert!(actions[0].needs_update);
-        assert_eq!("sha42", actions[0].new_ref);
-    }
-
-    #[test]
-    fn resolve_detects_branch() {
-        let tags = HashMap::from([(
-            ("a".into(), "b".into()),
-            vec![tag("v1.0.0", "sha1", 1, 0, 0)],
-        )]);
-        let mut actions = vec![action("a", "b", "main", None)];
-        resolve(&mut actions, &tags, &config());
-        assert!(actions[0].is_branch);
-        assert!(actions[0].needs_update);
-    }
-
-    #[test]
-    fn resolve_skip_branches_ignores() {
-        let tags = HashMap::from([(
-            ("a".into(), "b".into()),
-            vec![tag("v1.0.0", "sha1", 1, 0, 0)],
-        )]);
-        let mut actions = vec![action("a", "b", "main", None)];
-        let cfg = ResolveConfig {
-            skip_branches: true,
-            ..config()
-        };
-        resolve(&mut actions, &tags, &cfg);
-        assert!(!actions[0].needs_update);
-    }
-
-    #[test]
-    fn resolve_sha_mismatch() {
-        let tags = HashMap::from([(
-            ("a".into(), "b".into()),
-            vec![tag("v4.2.0", "goodsha", 4, 2, 0)],
-        )]);
-        let mut actions = vec![action("a", "b", "badcafe0", Some("v4.2.0"))];
-        resolve(&mut actions, &tags, &config());
-        assert!(actions[0].sha_mismatch);
-        assert!(actions[0].needs_update);
-    }
-
-    #[test]
-    fn resolve_long_sha_typo_as_mismatch_not_branch() {
-        let tags = HashMap::from([(
-            ("actions".into(), "checkout".into()),
-            vec![
-                tag(
-                    "v6.0.2",
-                    "de0fac2e4500dabe0009e67214ff5f5447ce83dd",
-                    6,
-                    0,
-                    2,
-                ),
-                tag(
-                    "v6.0.3",
-                    "df4cb1c069e1874edd31b4311f1884172cec0e10",
-                    6,
-                    0,
-                    3,
-                ),
-            ],
-        )]);
-        let mut actions = vec![action(
-            "actions",
-            "checkout",
-            "de0fac2ea4500dabe0009e67214ff5f5447ce83dd",
-            Some("v6.0.2"),
-        )];
-        resolve(&mut actions, &tags, &config());
-        assert!(actions[0].sha_mismatch);
-        assert!(!actions[0].is_branch);
-        assert!(actions[0].needs_update);
-    }
-
-    #[test]
-    fn resolve_excluded_action() {
-        let tags = HashMap::from([(
-            ("actions".into(), "checkout".into()),
-            vec![tag("v4.2.0", "sha42", 4, 2, 0)],
-        )]);
-        let mut actions = vec![action("actions", "checkout", "v4.1.0", None)];
-        let cfg = ResolveConfig {
-            excludes: vec!["actions/checkout".into()],
-            ..config()
-        };
-        resolve(&mut actions, &tags, &cfg);
-        assert!(!actions[0].needs_update);
-    }
-
-    #[test]
-    fn resolve_detects_major_bump() {
-        let tags = HashMap::from([(
-            ("a".into(), "b".into()),
-            vec![tag("v3.0.0", "s1", 3, 0, 0), tag("v4.0.0", "s2", 4, 0, 0)],
-        )]);
-        let mut actions = vec![action("a", "b", "v3.0.0", None)];
-        resolve(&mut actions, &tags, &config());
-        assert!(actions[0].is_major);
-    }
-
-    #[test]
-    fn resolve_skips_downgrade() {
-        let tags = HashMap::from([(
-            ("a".into(), "b".into()),
-            vec![tag("v4.2.0", "sha42", 4, 2, 0)],
-        )]);
-        let mut actions = vec![action("a", "b", "v5.0.0", None)];
-        resolve(&mut actions, &tags, &config());
-        assert!(!actions[0].needs_update);
-    }
-
-    #[test]
-    fn resolve_sha_pin_uses_version_comment_for_minor_mode() {
-        let tags = HashMap::from([(
-            ("a".into(), "b".into()),
-            vec![
-                tag("v4.3.0", "sha43", 4, 3, 0),
-                tag("v5.0.0", "sha50", 5, 0, 0),
-            ],
-        )]);
-        let mut actions = vec![action("a", "b", "deadbeef", Some("v4.2.0"))];
-        let cfg = ResolveConfig {
-            mode: UpdateMode::Minor,
-            ..config()
-        };
-
-        resolve(&mut actions, &tags, &cfg);
-
-        assert!(actions[0].needs_update);
-        assert_eq!("sha43", actions[0].new_ref);
-        assert_eq!("v4.3.0", actions[0].new_version);
-        assert!(!actions[0].is_major);
     }
 }

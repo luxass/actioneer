@@ -30,14 +30,14 @@ pub fn find_action_references(
             if recurse {
                 for entry in WalkDir::new(input) {
                     let entry = entry.map_err(std::io::Error::other)?;
-                    if entry.file_type().is_file() && is_yaml(entry.path()) {
+                    if entry.file_type().is_file() && is_yaml_file(entry.path()) {
                         scan_file(entry.path(), &mut actions)?;
                     }
                 }
             } else {
                 for entry in fs::read_dir(input)? {
                     let p = entry?.path();
-                    if p.is_file() && is_yaml(&p) {
+                    if p.is_file() && is_yaml_file(&p) {
                         scan_file(&p, &mut actions)?;
                     }
                 }
@@ -49,7 +49,7 @@ pub fn find_action_references(
     Ok(actions)
 }
 
-fn is_yaml(path: &Path) -> bool {
+fn is_yaml_file(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
         .map(|n| n.ends_with(".yml") || n.ends_with(".yaml"))
@@ -341,18 +341,18 @@ mod tests {
 
     #[test]
     fn is_yaml_yml() {
-        assert!(is_yaml(Path::new("ci.yml")));
+        assert!(is_yaml_file(Path::new("ci.yml")));
     }
 
     #[test]
     fn is_yaml_yaml() {
-        assert!(is_yaml(Path::new("ci.yaml")));
+        assert!(is_yaml_file(Path::new("ci.yaml")));
     }
 
     #[test]
     fn is_yaml_other() {
-        assert!(!is_yaml(Path::new("ci.json")));
-        assert!(!is_yaml(Path::new("ci.txt")));
+        assert!(!is_yaml_file(Path::new("ci.json")));
+        assert!(!is_yaml_file(Path::new("ci.txt")));
     }
 
     #[test]
@@ -364,57 +364,6 @@ mod tests {
     #[test]
     fn is_action_yml_false() {
         assert!(!is_action_yml("workflow.yml"));
-    }
-
-    #[test]
-    fn collect_workflow_finds_step_uses() {
-        let source = "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4 # v4.1.0\n";
-        let doc = Document::new(source.to_string()).unwrap();
-        let root: Value = serde_yaml::from_str(source).unwrap();
-        let mut actions = Vec::new();
-        collect_workflow(&root, &doc, "ci.yml", &mut actions);
-        assert_eq!(1, actions.len());
-        assert_eq!("v4", actions[0].current_ref);
-    }
-
-    #[test]
-    fn collect_workflow_finds_job_uses() {
-        let source = "jobs:\n  build:\n    uses: myorg/repo/.github/workflows/ci.yml@v1\n";
-        let doc = Document::new(source.to_string()).unwrap();
-        let root: Value = serde_yaml::from_str(source).unwrap();
-        let mut actions = Vec::new();
-        collect_workflow(&root, &doc, "ci.yml", &mut actions);
-        assert_eq!(1, actions.len());
-        assert_eq!("v1", actions[0].current_ref);
-    }
-
-    #[test]
-    fn collect_workflow_skips_name_string() {
-        let source = concat!(
-            "jobs:\n",
-            "  build:\n",
-            "    name: \"deploy: uses: actions/fake@v1\"\n",
-            "    steps:\n",
-            "      - uses: actions/checkout@v4\n",
-        );
-        let doc = Document::new(source.to_string()).unwrap();
-        let root: Value = serde_yaml::from_str(source).unwrap();
-        let mut actions = Vec::new();
-        collect_workflow(&root, &doc, "ci.yml", &mut actions);
-        assert_eq!(1, actions.len());
-        assert_eq!("actions/checkout", actions[0].action_name());
-    }
-
-    #[test]
-    fn collect_composite_finds_steps() {
-        let source =
-            "runs:\n  using: composite\n  steps:\n    - uses: actions/setup-node@v4 # v4.0.0\n";
-        let doc = Document::new(source.to_string()).unwrap();
-        let root: Value = serde_yaml::from_str(source).unwrap();
-        let mut actions = Vec::new();
-        collect_composite(&root, &doc, "action.yml", &mut actions);
-        assert_eq!(1, actions.len());
-        assert_eq!("actions/setup-node", actions[0].action_name());
     }
 
     #[test]

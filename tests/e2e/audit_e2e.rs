@@ -1,6 +1,4 @@
-use std::fs;
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use actioneer::actions::{PinStyle, UpdateMode};
 use actioneer::cli::{GlobalArgs, Mode, ScanArgs};
@@ -8,15 +6,6 @@ use actioneer::cmd::audit;
 use actioneer::github::GitHubClient;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-
-static COUNTER: AtomicU32 = AtomicU32::new(0);
-
-fn tmp_dir() -> std::path::PathBuf {
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!("actioneer-test-{}-{}", std::process::id(), n));
-    let _ = fs::create_dir_all(&path);
-    path
-}
 
 fn global_args() -> GlobalArgs {
     GlobalArgs {
@@ -40,12 +29,14 @@ fn scan_args(inputs: Vec<String>) -> ScanArgs {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn all_secure_returns_success() {
-    let tmp = tmp_dir();
-    fs::write(
-        tmp.join("ci.yml"),
-        "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@goodsha # v4.2.0\n",
-    )
-    .unwrap();
+    let workspace = test_workspace! {
+        "ci.yml" => r#"
+            jobs:
+              build:
+                steps:
+                  - uses: actions/checkout@goodsha # v4.2.0
+        "#,
+    };
 
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -59,25 +50,21 @@ async fn all_secure_returns_success() {
 
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
-        audit::run(
-            global_args(),
-            scan_args(vec![tmp.display().to_string()]),
-            gh,
-        )
-        .unwrap()
+        audit::run(global_args(), scan_args(vec![workspace.root()]), gh).unwrap()
     });
     assert_eq!(ExitCode::SUCCESS, code);
-    let _ = fs::remove_dir_all(&tmp);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn branch_ref_returns_failure() {
-    let tmp = tmp_dir();
-    fs::write(
-        tmp.join("ci.yml"),
-        "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@main\n",
-    )
-    .unwrap();
+    let workspace = test_workspace! {
+        "ci.yml" => r#"
+            jobs:
+              build:
+                steps:
+                  - uses: actions/checkout@main
+        "#,
+    };
 
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -91,25 +78,21 @@ async fn branch_ref_returns_failure() {
 
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
-        audit::run(
-            global_args(),
-            scan_args(vec![tmp.display().to_string()]),
-            gh,
-        )
-        .unwrap()
+        audit::run(global_args(), scan_args(vec![workspace.root()]), gh).unwrap()
     });
     assert_eq!(ExitCode::FAILURE, code);
-    let _ = fs::remove_dir_all(&tmp);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn sha_mismatch_returns_failure() {
-    let tmp = tmp_dir();
-    fs::write(
-        tmp.join("ci.yml"),
-        "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@badf00d # v4.2.0\n",
-    )
-    .unwrap();
+    let workspace = test_workspace! {
+        "ci.yml" => r#"
+            jobs:
+              build:
+                steps:
+                  - uses: actions/checkout@badf00d # v4.2.0
+        "#,
+    };
 
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -123,43 +106,38 @@ async fn sha_mismatch_returns_failure() {
 
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
-        audit::run(
-            global_args(),
-            scan_args(vec![tmp.display().to_string()]),
-            gh,
-        )
-        .unwrap()
+        audit::run(global_args(), scan_args(vec![workspace.root()]), gh).unwrap()
     });
     assert_eq!(ExitCode::FAILURE, code);
-    let _ = fs::remove_dir_all(&tmp);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn empty_scan_returns_success() {
-    let tmp = tmp_dir();
-    fs::write(tmp.join("ci.yml"), "jobs:\n  build:\n    steps: []\n").unwrap();
+    let workspace = test_workspace! {
+        "ci.yml" => r#"
+            jobs:
+              build:
+                steps: []
+        "#,
+    };
 
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, "http://localhost:1".into(), None);
-        audit::run(
-            global_args(),
-            scan_args(vec![tmp.display().to_string()]),
-            gh,
-        )
-        .unwrap()
+        audit::run(global_args(), scan_args(vec![workspace.root()]), gh).unwrap()
     });
     assert_eq!(ExitCode::SUCCESS, code);
-    let _ = fs::remove_dir_all(&tmp);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn json_mode_clean_returns_success() {
-    let tmp = tmp_dir();
-    fs::write(
-        tmp.join("ci.yml"),
-        "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@goodsha # v4.2.0\n",
-    )
-    .unwrap();
+    let workspace = test_workspace! {
+        "ci.yml" => r#"
+            jobs:
+              build:
+                steps:
+                  - uses: actions/checkout@goodsha # v4.2.0
+        "#,
+    };
 
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -175,20 +153,21 @@ async fn json_mode_clean_returns_success() {
     global.mode = Mode::Json;
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
-        audit::run(global, scan_args(vec![tmp.display().to_string()]), gh).unwrap()
+        audit::run(global, scan_args(vec![workspace.root()]), gh).unwrap()
     });
     assert_eq!(ExitCode::SUCCESS, code);
-    let _ = fs::remove_dir_all(&tmp);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn json_mode_with_issue_returns_failure() {
-    let tmp = tmp_dir();
-    fs::write(
-        tmp.join("ci.yml"),
-        "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@main\n",
-    )
-    .unwrap();
+    let workspace = test_workspace! {
+        "ci.yml" => r#"
+            jobs:
+              build:
+                steps:
+                  - uses: actions/checkout@main
+        "#,
+    };
 
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -204,8 +183,7 @@ async fn json_mode_with_issue_returns_failure() {
     global.mode = Mode::Json;
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
-        audit::run(global, scan_args(vec![tmp.display().to_string()]), gh).unwrap()
+        audit::run(global, scan_args(vec![workspace.root()]), gh).unwrap()
     });
     assert_eq!(ExitCode::FAILURE, code);
-    let _ = fs::remove_dir_all(&tmp);
 }

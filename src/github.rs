@@ -35,7 +35,10 @@ impl GitHubClient {
     pub fn new(cache_enabled: bool) -> Self {
         let cache_enabled = cache_enabled && !no_cache_from_env();
         Self {
-            http: HttpClient::builder().build().expect("reqwest client"),
+            http: HttpClient::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .expect("reqwest client"),
             base_url: "https://api.github.com".into(),
             token: resolve_token(),
             cache_enabled,
@@ -45,7 +48,10 @@ impl GitHubClient {
     #[allow(dead_code)]
     pub fn new_for_test(cache_enabled: bool, base_url: String, token: Option<String>) -> Self {
         Self {
-            http: HttpClient::builder().build().expect("reqwest client"),
+            http: HttpClient::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .expect("reqwest client"),
             base_url,
             token,
             cache_enabled,

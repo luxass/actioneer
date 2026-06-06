@@ -428,4 +428,27 @@ mod tests {
         resolve(&mut actions, &tags, &config());
         assert!(!actions[0].needs_update);
     }
+
+    #[test]
+    fn resolve_sha_pin_uses_version_comment_for_minor_mode() {
+        let tags = HashMap::from([(
+            ("a".into(), "b".into()),
+            vec![
+                tag("v4.3.0", "sha43", 4, 3, 0),
+                tag("v5.0.0", "sha50", 5, 0, 0),
+            ],
+        )]);
+        let mut actions = vec![action("a", "b", "deadbeef", Some("v4.2.0"))];
+        let cfg = ResolveConfig {
+            mode: UpdateMode::Minor,
+            ..config()
+        };
+
+        resolve(&mut actions, &tags, &cfg);
+
+        assert!(actions[0].needs_update);
+        assert_eq!("sha43", actions[0].new_ref);
+        assert_eq!("v4.3.0", actions[0].new_version);
+        assert!(!actions[0].is_major);
+    }
 }

@@ -2,10 +2,10 @@ use std::fs;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use actioneer::actions::{PinStyle, UpdateMode};
 use actioneer::cli::{GlobalArgs, Mode, ScanArgs};
 use actioneer::cmd::audit;
 use actioneer::github::GitHubClient;
-use actioneer::model::{PinStyle, UpdateMode};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

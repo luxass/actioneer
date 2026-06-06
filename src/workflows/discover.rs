@@ -5,17 +5,20 @@ use serde_yaml::Value;
 use walkdir::WalkDir;
 use yamlpath::{Document, Feature, Route};
 
-use crate::model::Action;
+use crate::actions::ActionReference;
 
 #[derive(Debug, thiserror::Error)]
-pub enum ScanError {
+pub enum DiscoveryError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error("invalid yaml in {file}")]
     InvalidYaml { file: String },
 }
 
-pub fn scan(paths: &[String], recursive: bool) -> Result<Vec<Action>, ScanError> {
+pub fn find_action_references(
+    paths: &[String],
+    recursive: bool,
+) -> Result<Vec<ActionReference>, DiscoveryError> {
     let mut actions = Vec::new();
     for path in paths {
         let input = Path::new(path);
@@ -53,14 +56,15 @@ fn is_yaml(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn scan_file(path: &Path, actions: &mut Vec<Action>) -> Result<(), ScanError> {
+fn scan_file(path: &Path, actions: &mut Vec<ActionReference>) -> Result<(), DiscoveryError> {
     let content = fs::read_to_string(path)?;
     let file = path.to_string_lossy().replace('\\', "/");
 
     let root: Value = serde_yaml::from_str(&content)
-        .map_err(|_| ScanError::InvalidYaml { file: file.clone() })?;
+        .map_err(|_| DiscoveryError::InvalidYaml { file: file.clone() })?;
 
-    let doc = Document::new(content).map_err(|_| ScanError::InvalidYaml { file: file.clone() })?;
+    let doc =
+        Document::new(content).map_err(|_| DiscoveryError::InvalidYaml { file: file.clone() })?;
 
     if is_action_yml(&file) {
         collect_composite(&root, &doc, &file, actions);
@@ -155,7 +159,7 @@ fn parse_action_ref(value: &str) -> Option<ParsedAction<'_>> {
     })
 }
 
-fn collect_workflow(root: &Value, doc: &Document, file: &str, actions: &mut Vec<Action>) {
+fn collect_workflow(root: &Value, doc: &Document, file: &str, actions: &mut Vec<ActionReference>) {
     let Some(jobs) = root.get("jobs").and_then(Value::as_mapping) else {
         return;
     };
@@ -191,7 +195,7 @@ fn collect_workflow(root: &Value, doc: &Document, file: &str, actions: &mut Vec<
     }
 }
 
-fn collect_composite(root: &Value, doc: &Document, file: &str, actions: &mut Vec<Action>) {
+fn collect_composite(root: &Value, doc: &Document, file: &str, actions: &mut Vec<ActionReference>) {
     let Some(runs) = root.get("runs") else {
         return;
     };
@@ -209,7 +213,7 @@ fn collect_composite(root: &Value, doc: &Document, file: &str, actions: &mut Vec
     }
 }
 
-fn push_action(doc: &Document, route: &Route<'_>, file: &str, actions: &mut Vec<Action>) {
+fn push_action(doc: &Document, route: &Route<'_>, file: &str, actions: &mut Vec<ActionReference>) {
     let Some(feature) = doc.query_exact(route).ok().flatten() else {
         return;
     };
@@ -227,7 +231,7 @@ fn push_action(doc: &Document, route: &Route<'_>, file: &str, actions: &mut Vec<
     let at = text.rfind('@').unwrap();
     let ref_start = value_start + at + 1;
 
-    actions.push(Action::from_scan(
+    actions.push(ActionReference::from_discovery(
         action.owner.into(),
         action.name.into(),
         action.path.into(),

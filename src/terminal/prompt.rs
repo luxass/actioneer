@@ -14,7 +14,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
 
-use crate::model::Action;
+use crate::actions::ActionReference;
 
 const FOOTER: &str = "Up/Down/j/k move  ←→ scroll  PgUp/PgDn jump  d details  o open GitHub  space toggle  tab fold  f file  a all  i invert  n none  enter apply  q cancel";
 
@@ -78,7 +78,7 @@ impl State {
     }
 }
 
-pub fn select(actions: &[Action]) -> Result<Vec<usize>, Error> {
+pub fn select(actions: &[ActionReference]) -> Result<Vec<usize>, Error> {
     if actions.is_empty() {
         return Ok(Vec::new());
     }
@@ -100,7 +100,10 @@ pub fn select(actions: &[Action]) -> Result<Vec<usize>, Error> {
     result
 }
 
-fn run<B: Backend>(terminal: &mut Terminal<B>, actions: &[Action]) -> Result<Vec<usize>, Error> {
+fn run<B: Backend>(
+    terminal: &mut Terminal<B>,
+    actions: &[ActionReference],
+) -> Result<Vec<usize>, Error> {
     let mut state = State::new(actions.len());
 
     loop {
@@ -199,7 +202,11 @@ fn run<B: Backend>(terminal: &mut Terminal<B>, actions: &[Action]) -> Result<Vec
     }
 }
 
-fn cursor_file<'a>(visible: &'a [VisibleRow], cursor: usize, actions: &'a [Action]) -> &'a str {
+fn cursor_file<'a>(
+    visible: &'a [VisibleRow],
+    cursor: usize,
+    actions: &'a [ActionReference],
+) -> &'a str {
     match visible.get(cursor) {
         Some(VisibleRow::FileHeader { file }) => file.as_str(),
         Some(VisibleRow::Update { original_index }) => &actions[*original_index].file,
@@ -207,7 +214,7 @@ fn cursor_file<'a>(visible: &'a [VisibleRow], cursor: usize, actions: &'a [Actio
     }
 }
 
-fn open_github(action: &Action) -> Result<(), Error> {
+fn open_github(action: &ActionReference) -> Result<(), Error> {
     let url = github_url(action);
     let mut command = if cfg!(target_os = "macos") {
         let mut cmd = Command::new("open");
@@ -230,7 +237,7 @@ fn open_github(action: &Action) -> Result<(), Error> {
     Ok(())
 }
 
-fn github_url(action: &Action) -> String {
+fn github_url(action: &ActionReference) -> String {
     let repo = format!("https://github.com/{}/{}", action.owner, action.name);
     let path = action.path.trim_start_matches('/');
     if path.is_empty() {
@@ -299,7 +306,7 @@ fn read_key() -> Result<Key, Error> {
     }
 }
 
-fn visible_rows(actions: &[Action], collapsed: &HashSet<String>) -> Vec<VisibleRow> {
+fn visible_rows(actions: &[ActionReference], collapsed: &HashSet<String>) -> Vec<VisibleRow> {
     let mut indexed: Vec<(usize, &str)> = actions
         .iter()
         .enumerate()
@@ -327,7 +334,12 @@ fn visible_rows(actions: &[Action], collapsed: &HashSet<String>) -> Vec<VisibleR
 
 // --- draw ---
 
-fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRow], state: &State) {
+fn draw(
+    frame: &mut ratatui::Frame<'_>,
+    actions: &[ActionReference],
+    visible: &[VisibleRow],
+    state: &State,
+) {
     let area = frame.area();
     let sections =
         layout::Layout::vertical([layout::Constraint::Min(6), layout::Constraint::Length(3)])
@@ -340,7 +352,7 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRo
             value.to_string()
         }
     };
-    let version_change = |a: &Action| {
+    let version_change = |a: &ActionReference| {
         let current = a.version_comment.as_deref().unwrap_or(&a.current_ref);
         if current == a.new_version {
             a.new_version.clone()
@@ -348,7 +360,7 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[Action], visible: &[VisibleRo
             format!("{} -> {}", current, a.new_version)
         }
     };
-    let notes = |a: &Action| {
+    let notes = |a: &ActionReference| {
         let mut notes = Vec::new();
         if a.sha_mismatch {
             notes.push("SHA mismatch");
@@ -654,8 +666,8 @@ fn scroll_spans(spans: Vec<Span<'static>>, scroll: usize) -> Vec<Span<'static>> 
 mod tests {
     use super::*;
 
-    fn mk_action(file: &str, name: &str) -> Action {
-        Action::from_scan(
+    fn mk_action(file: &str, name: &str) -> ActionReference {
+        ActionReference::from_discovery(
             "actions".into(),
             name.into(),
             String::new(),
@@ -768,7 +780,7 @@ mod tests {
 
     #[test]
     fn github_url_action_path_at_current_ref() {
-        let action = Action::from_scan(
+        let action = ActionReference::from_discovery(
             "luxass".into(),
             "shared-workflows".into(),
             "/.github/workflows/reusable-ci.yaml".into(),

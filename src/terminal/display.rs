@@ -3,8 +3,8 @@ use std::io::{self, IsTerminal, Write};
 
 use owo_colors::OwoColorize;
 
+use crate::actions::ActionReference;
 use crate::cli::Mode;
-use crate::model::Action;
 
 pub struct Printer {
     mode: Mode,
@@ -73,14 +73,14 @@ fn color_enabled() -> bool {
     std::env::var_os("NO_COLOR").is_none()
 }
 
-pub fn print_json(actions: &[Action]) {
+pub fn print_json(actions: &[ActionReference]) {
     let json = serde_json::to_string(&serde_json::json!({ "updates": actions }))
         .expect("serializing updates");
     let mut stdout = io::stdout().lock();
     let _ = writeln!(stdout, "{}", json);
 }
 
-pub fn update_file_count(actions: &[Action]) -> usize {
+pub fn update_file_count(actions: &[ActionReference]) -> usize {
     actions
         .iter()
         .map(|a| a.file.as_str())
@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn update_file_count_single_file() {
-        let a = Action::from_scan(
+        let a = ActionReference::from_discovery(
             "o".into(),
             "n".into(),
             String::new(),
@@ -147,7 +147,7 @@ mod tests {
             0,
             2,
         );
-        let b = Action::from_scan(
+        let b = ActionReference::from_discovery(
             "o".into(),
             "n2".into(),
             String::new(),
@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn update_file_count_multiple_files() {
-        let a = Action::from_scan(
+        let a = ActionReference::from_discovery(
             "o".into(),
             "n".into(),
             String::new(),
@@ -174,7 +174,7 @@ mod tests {
             0,
             2,
         );
-        let b = Action::from_scan(
+        let b = ActionReference::from_discovery(
             "o".into(),
             "n2".into(),
             String::new(),

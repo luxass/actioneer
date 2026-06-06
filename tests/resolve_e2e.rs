@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use actioneer::actions::{PinStyle, ResolveConfig, Tag, UpdateMode, resolve};
 use actioneer::github::GitHubClient;
-use actioneer::model::{PinStyle, ResolveConfig, Tag, UpdateMode};
-use actioneer::{resolve, scan};
+use actioneer::workflows::find_action_references;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -38,7 +38,7 @@ async fn sha_pin_version_upgrade() {
         .await;
 
     let result = tokio::task::block_in_place(|| {
-        let mut actions = scan::scan(&[tmp.display().to_string()], false).unwrap();
+        let mut actions = find_action_references(&[tmp.display().to_string()], false).unwrap();
         assert_eq!(1, actions.len());
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
         let mut tags: HashMap<(String, String), Vec<Tag>> = HashMap::new();
@@ -46,7 +46,7 @@ async fn sha_pin_version_upgrade() {
             ("actions".into(), "checkout".into()),
             gh.fetch_tags("actions", "checkout").unwrap(),
         );
-        resolve::resolve(
+        resolve(
             &mut actions,
             &tags,
             &ResolveConfig {
@@ -88,14 +88,14 @@ async fn tag_pin_version_upgrade() {
         .await;
 
     let result = tokio::task::block_in_place(|| {
-        let mut actions = scan::scan(&[tmp.display().to_string()], false).unwrap();
+        let mut actions = find_action_references(&[tmp.display().to_string()], false).unwrap();
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
         let mut tags: HashMap<(String, String), Vec<Tag>> = HashMap::new();
         tags.insert(
             ("actions".into(), "checkout".into()),
             gh.fetch_tags("actions", "checkout").unwrap(),
         );
-        resolve::resolve(
+        resolve(
             &mut actions,
             &tags,
             &ResolveConfig {
@@ -133,14 +133,14 @@ async fn patch_mode_upgrade() {
         .await;
 
     let result = tokio::task::block_in_place(|| {
-        let mut actions = scan::scan(&[tmp.display().to_string()], false).unwrap();
+        let mut actions = find_action_references(&[tmp.display().to_string()], false).unwrap();
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
         let mut tags: HashMap<(String, String), Vec<Tag>> = HashMap::new();
         tags.insert(
             ("actions".into(), "checkout".into()),
             gh.fetch_tags("actions", "checkout").unwrap(),
         );
-        resolve::resolve(
+        resolve(
             &mut actions,
             &tags,
             &ResolveConfig {
@@ -178,14 +178,14 @@ async fn branch_detected() {
         .await;
 
     let result = tokio::task::block_in_place(|| {
-        let mut actions = scan::scan(&[tmp.display().to_string()], false).unwrap();
+        let mut actions = find_action_references(&[tmp.display().to_string()], false).unwrap();
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
         let mut tags: HashMap<(String, String), Vec<Tag>> = HashMap::new();
         tags.insert(
             ("actions".into(), "checkout".into()),
             gh.fetch_tags("actions", "checkout").unwrap(),
         );
-        resolve::resolve(
+        resolve(
             &mut actions,
             &tags,
             &ResolveConfig {
@@ -223,14 +223,14 @@ async fn skip_branches_excluded() {
         .await;
 
     let result = tokio::task::block_in_place(|| {
-        let mut actions = scan::scan(&[tmp.display().to_string()], false).unwrap();
+        let mut actions = find_action_references(&[tmp.display().to_string()], false).unwrap();
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
         let mut tags: HashMap<(String, String), Vec<Tag>> = HashMap::new();
         tags.insert(
             ("actions".into(), "checkout".into()),
             gh.fetch_tags("actions", "checkout").unwrap(),
         );
-        resolve::resolve(
+        resolve(
             &mut actions,
             &tags,
             &ResolveConfig {
@@ -267,7 +267,7 @@ async fn sha_mismatch_detected() {
         .await;
 
     let result = tokio::task::block_in_place(|| {
-        let mut actions = scan::scan(&[tmp.display().to_string()], false).unwrap();
+        let mut actions = find_action_references(&[tmp.display().to_string()], false).unwrap();
         assert_eq!(1, actions.len());
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
         let mut tags: HashMap<(String, String), Vec<Tag>> = HashMap::new();
@@ -275,7 +275,7 @@ async fn sha_mismatch_detected() {
             ("actions".into(), "checkout".into()),
             gh.fetch_tags("actions", "checkout").unwrap(),
         );
-        resolve::resolve(
+        resolve(
             &mut actions,
             &tags,
             &ResolveConfig {
@@ -313,7 +313,7 @@ async fn already_current_no_update() {
         .await;
 
     let result = tokio::task::block_in_place(|| {
-        let mut actions = scan::scan(&[tmp.display().to_string()], false).unwrap();
+        let mut actions = find_action_references(&[tmp.display().to_string()], false).unwrap();
         assert_eq!(1, actions.len());
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
         let mut tags: HashMap<(String, String), Vec<Tag>> = HashMap::new();
@@ -321,7 +321,7 @@ async fn already_current_no_update() {
             ("actions".into(), "checkout".into()),
             gh.fetch_tags("actions", "checkout").unwrap(),
         );
-        resolve::resolve(
+        resolve(
             &mut actions,
             &tags,
             &ResolveConfig {
@@ -372,7 +372,7 @@ async fn multiple_repos_in_one_file() {
         .await;
 
     let result = tokio::task::block_in_place(|| {
-        let mut actions = scan::scan(&[tmp.display().to_string()], false).unwrap();
+        let mut actions = find_action_references(&[tmp.display().to_string()], false).unwrap();
         assert_eq!(2, actions.len());
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
         let mut tags: HashMap<(String, String), Vec<Tag>> = HashMap::new();
@@ -384,7 +384,7 @@ async fn multiple_repos_in_one_file() {
             ("actions".into(), "setup-node".into()),
             gh.fetch_tags("actions", "setup-node").unwrap(),
         );
-        resolve::resolve(
+        resolve(
             &mut actions,
             &tags,
             &ResolveConfig {

@@ -1,22 +1,21 @@
 use std::fs;
 
-use crate::model::Action;
-use crate::model::parse_version;
+use crate::actions::{ActionReference, parse_version};
 
 #[derive(Debug, thiserror::Error)]
-pub enum RewriteError {
+pub enum PatchError {
     #[error("update target not found in source file")]
     UpdateTargetNotFound,
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
 
-pub fn apply(actions: &[Action], selected: &[usize]) -> Result<usize, RewriteError> {
-    let mut selected_actions: Vec<&Action> =
+pub fn apply_patches(actions: &[ActionReference], selected: &[usize]) -> Result<usize, PatchError> {
+    let mut selected_actions: Vec<&ActionReference> =
         selected.iter().filter_map(|&i| actions.get(i)).collect();
     selected_actions.sort_by(|a, b| (&a.file, a.ref_start).cmp(&(&b.file, b.ref_start)));
 
-    let mut remaining: &[&Action] = &selected_actions;
+    let mut remaining: &[&ActionReference] = &selected_actions;
     let mut total_applied = 0;
 
     while let Some(first) = remaining.first() {
@@ -25,7 +24,7 @@ pub fn apply(actions: &[Action], selected: &[usize]) -> Result<usize, RewriteErr
         let (file_actions, rest) = remaining.split_at(count);
 
         let original = fs::read_to_string(file)?;
-        let rewritten = rewrite_text(&original, file_actions)?;
+        let rewritten = patch_text(&original, file_actions)?;
         fs::write(file, rewritten)?;
         total_applied += file_actions.len();
         remaining = rest;
@@ -34,7 +33,7 @@ pub fn apply(actions: &[Action], selected: &[usize]) -> Result<usize, RewriteErr
     Ok(total_applied)
 }
 
-fn rewrite_text(contents: &str, actions: &[&Action]) -> Result<String, RewriteError> {
+fn patch_text(contents: &str, actions: &[&ActionReference]) -> Result<String, PatchError> {
     let mut actions: Vec<_> = actions.to_vec();
     actions.sort_by_key(|a| a.ref_start);
 
@@ -43,7 +42,7 @@ fn rewrite_text(contents: &str, actions: &[&Action]) -> Result<String, RewriteEr
             || action.ref_end > contents.len()
             || contents[action.ref_start..action.ref_end] != action.current_ref
         {
-            return Err(RewriteError::UpdateTargetNotFound);
+            return Err(PatchError::UpdateTargetNotFound);
         }
     }
 
@@ -104,7 +103,7 @@ fn rewrite_text(contents: &str, actions: &[&Action]) -> Result<String, RewriteEr
     Ok(output)
 }
 
-fn should_write_comment(action: &Action) -> bool {
+fn should_write_comment(action: &ActionReference) -> bool {
     !action.new_version.is_empty()
         && (action.new_ref != action.new_version
             || action.version_comment.is_some()

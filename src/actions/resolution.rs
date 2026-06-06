@@ -1,9 +1,37 @@
 use std::collections::HashMap;
 
-use crate::model::{
-    Action, PinStyle, ResolveConfig, Tag, UpdateMode, Version, is_likely_sha, parse_version,
-    sha_matches,
-};
+use crate::actions::reference::ActionReference;
+use crate::actions::version::{Version, is_likely_sha, parse_version, sha_matches};
+
+#[derive(Debug, Clone)]
+pub struct Tag {
+    pub name: String,
+    pub sha: String,
+    pub version: Version,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, clap::ValueEnum)]
+pub enum PinStyle {
+    #[default]
+    Sha,
+    Tag,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, clap::ValueEnum)]
+pub enum UpdateMode {
+    #[default]
+    Major,
+    Minor,
+    Patch,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolveConfig {
+    pub excludes: Vec<String>,
+    pub skip_branches: bool,
+    pub mode: UpdateMode,
+    pub style: PinStyle,
+}
 
 #[derive(Clone, Copy, Debug)]
 enum CurrentRefKind {
@@ -13,7 +41,7 @@ enum CurrentRefKind {
 }
 
 pub fn resolve(
-    actions: &mut [Action],
+    actions: &mut [ActionReference],
     tags: &HashMap<(String, String), Vec<Tag>>,
     config: &ResolveConfig,
 ) {
@@ -89,7 +117,7 @@ pub fn resolve(
     }
 }
 
-fn classify(action: &Action, skip_branches: bool) -> Option<CurrentRefKind> {
+fn classify(action: &ActionReference, skip_branches: bool) -> Option<CurrentRefKind> {
     if parse_version(&action.current_ref).is_some() {
         return Some(CurrentRefKind::Version);
     }
@@ -132,12 +160,12 @@ fn current_ref_matches_style(current_ref: &str, target: &Tag, style: PinStyle) -
 mod tests {
     use std::collections::HashMap;
 
-    use crate::model::Version;
+    use crate::actions::version::Version;
 
     use super::*;
 
-    fn action(owner: &str, name: &str, current_ref: &str, vc: Option<&str>) -> Action {
-        Action {
+    fn action(owner: &str, name: &str, current_ref: &str, vc: Option<&str>) -> ActionReference {
+        ActionReference {
             owner: owner.to_string(),
             name: name.to_string(),
             path: String::new(),

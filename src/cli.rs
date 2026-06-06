@@ -3,7 +3,7 @@ use clap::{
     builder::styling::{AnsiColor, Effects, Styles},
 };
 
-use crate::model::{PinStyle, UpdateMode};
+use crate::actions::{PinStyle, UpdateMode};
 
 const STYLES: Styles = Styles::styled()
     .header(AnsiColor::Green.on_default().effects(Effects::BOLD))

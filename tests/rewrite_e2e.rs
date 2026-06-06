@@ -1,8 +1,8 @@
 use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use actioneer::model::Action;
-use actioneer::rewrite;
+use actioneer::actions::ActionReference;
+use actioneer::workflows::{PatchError, apply_patches};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -21,8 +21,8 @@ fn mk_action(
     vc: Option<&str>,
     mismatch: bool,
     ref_start: usize,
-) -> Action {
-    Action {
+) -> ActionReference {
+    ActionReference {
         owner: "a".into(),
         name: "b".into(),
         path: String::new(),
@@ -59,7 +59,7 @@ fn single_update_replaces_sha_and_writes_comment() {
         false,
         ref_start,
     );
-    rewrite::apply(&[a], &[0]).unwrap();
+    apply_patches(&[a], &[0]).unwrap();
 
     let result = fs::read_to_string(&file).unwrap();
     assert!(result.contains("actions/checkout@newsha # v4.2.0"));
@@ -97,7 +97,7 @@ fn multiple_updates_in_one_file() {
         false,
         input.find("old2").unwrap(),
     );
-    rewrite::apply(&[a1, a2], &[0, 1]).unwrap();
+    apply_patches(&[a1, a2], &[0, 1]).unwrap();
 
     let result = fs::read_to_string(&file).unwrap();
     assert!(result.contains("actions/checkout@new1 # v4.2.0"));
@@ -133,7 +133,7 @@ fn multiple_files() {
         false,
         input2.find("old2").unwrap(),
     );
-    let count = rewrite::apply(&[a1, a2], &[0, 1]).unwrap();
+    let count = apply_patches(&[a1, a2], &[0, 1]).unwrap();
     assert_eq!(2, count);
 
     assert!(fs::read_to_string(&f1).unwrap().contains("@new1"));
@@ -158,7 +158,7 @@ fn preserves_quoted_ref() {
         false,
         input.find("oldsha").unwrap(),
     );
-    rewrite::apply(&[a], &[0]).unwrap();
+    apply_patches(&[a], &[0]).unwrap();
 
     let result = fs::read_to_string(&file).unwrap();
     assert!(result.contains("\"actions/setup-node@newsha\" # v6.4.0"));
@@ -182,7 +182,7 @@ fn preserves_crlf() {
         false,
         input.find("oldsha").unwrap(),
     );
-    rewrite::apply(&[a], &[0]).unwrap();
+    apply_patches(&[a], &[0]).unwrap();
 
     let result = fs::read_to_string(&file).unwrap();
     assert!(result.contains("actions/checkout@newsha # v4.2.0\r\n"));
@@ -205,7 +205,7 @@ fn no_comment_when_ref_equals_version() {
         false,
         input.find("oldsha").unwrap(),
     );
-    rewrite::apply(&[a], &[0]).unwrap();
+    apply_patches(&[a], &[0]).unwrap();
 
     let result = fs::read_to_string(&file).unwrap();
     assert!(result.contains("actions/checkout@v4.2.0\n"));
@@ -229,7 +229,7 @@ fn comment_written_on_sha_mismatch() {
         true,
         input.find("oldsha").unwrap(),
     );
-    rewrite::apply(&[a], &[0]).unwrap();
+    apply_patches(&[a], &[0]).unwrap();
 
     let result = fs::read_to_string(&file).unwrap();
     assert!(result.contains("actions/checkout@newsha # v4.2.0"));
@@ -251,11 +251,8 @@ fn target_not_found_errors() {
         false,
         999,
     );
-    let err = rewrite::apply(&[a], &[0]).unwrap_err();
-    assert!(matches!(
-        err,
-        actioneer::rewrite::RewriteError::UpdateTargetNotFound
-    ));
+    let err = apply_patches(&[a], &[0]).unwrap_err();
+    assert!(matches!(err, PatchError::UpdateTargetNotFound));
     let _ = fs::remove_dir_all(&tmp);
 }
 
@@ -275,7 +272,7 @@ fn preserves_user_comment() {
         false,
         input.find("oldsha").unwrap(),
     );
-    rewrite::apply(&[a], &[0]).unwrap();
+    apply_patches(&[a], &[0]).unwrap();
 
     let result = fs::read_to_string(&file).unwrap();
     assert!(result.contains("actions/checkout@newsha  # do not remove this # v4.2.0"));
@@ -319,7 +316,7 @@ fn sorts_interleaved_files() {
         false,
         input1.rfind("old1b").unwrap(),
     );
-    let count = rewrite::apply(&[a1, a2, a3], &[0, 1, 2]).unwrap();
+    let count = apply_patches(&[a1, a2, a3], &[0, 1, 2]).unwrap();
     assert_eq!(3, count);
 
     let out1 = fs::read_to_string(&f1).unwrap();

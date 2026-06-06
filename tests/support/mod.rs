@@ -14,11 +14,15 @@ impl TestWorkspace {
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
             .collect();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let root = std::env::temp_dir().join(format!(
-            "actioneer-{namespace}-test-{}-{n}",
+            "actioneer-{namespace}-test-{}-{n}-{nonce}",
             std::process::id(),
         ));
-        fs::create_dir_all(&root).unwrap();
+        fs::create_dir(&root).unwrap();
         Self { root }
     }
 

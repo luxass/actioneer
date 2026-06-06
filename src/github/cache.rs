@@ -16,7 +16,23 @@ pub fn cache_path(owner: &str, name: &str) -> PathBuf {
     std::env::temp_dir()
         .join("actioneer-cache")
         .join("tags")
-        .join(format!("{owner}__{name}.json"))
+        .join(format!(
+            "{}__{}.json",
+            encode_cache_component(owner),
+            encode_cache_component(name)
+        ))
+}
+
+fn encode_cache_component(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.') {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
 }
 
 pub fn read_cache(path: &Path) -> Option<Vec<Tag>> {

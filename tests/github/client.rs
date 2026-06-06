@@ -204,6 +204,14 @@ async fn cache_returns_stored_data() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn cache_path_encodes_unsafe_components() {
+    let path = github::cache_path("../owner", "repo/name");
+    let file_name = path.file_name().unwrap().to_string_lossy();
+    assert_eq!("..%2Fowner__repo%2Fname.json", file_name);
+    assert!(path.starts_with(std::env::temp_dir().join("actioneer-cache").join("tags")));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn cache_disabled_hits_api() {
     let cache_file = github::cache_path("t", "nocache");
     if let Some(p) = cache_file.parent() {

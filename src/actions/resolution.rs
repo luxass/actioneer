@@ -86,8 +86,11 @@ pub fn resolve(
                 .map(|t| !sha_matches(&action.current_ref, &t.sha))
                 .unwrap_or(false);
 
-        let current_version = parse_version(&action.current_ref)
-            .or_else(|| action.version_comment.as_deref().and_then(parse_version));
+        let current_version = match ctx {
+            CurrentRefKind::Version => parse_version(&action.current_ref),
+            CurrentRefKind::Sha => action.version_comment.as_deref().and_then(parse_version),
+            CurrentRefKind::Branch => None,
+        };
         let Some(target) = best_target(repo_tags, current_version, config.mode) else {
             continue;
         };
@@ -118,13 +121,13 @@ pub fn resolve(
 }
 
 fn classify(action: &ActionReference, skip_branches: bool) -> Option<CurrentRefKind> {
-    if parse_version(&action.current_ref).is_some() {
-        return Some(CurrentRefKind::Version);
-    }
     if is_likely_sha(&action.current_ref)
         || (action.version_comment.is_some() && is_sha_like_ref(&action.current_ref))
     {
         return Some(CurrentRefKind::Sha);
+    }
+    if parse_version(&action.current_ref).is_some() {
+        return Some(CurrentRefKind::Version);
     }
     if skip_branches {
         return None;

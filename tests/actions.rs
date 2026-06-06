@@ -264,6 +264,18 @@ fn resolve_sha_mismatch() {
 }
 
 #[test]
+fn resolve_sha_mismatch_with_numeric_leading_sha() {
+    let tags = HashMap::from([(
+        ("a".into(), "b".into()),
+        vec![tag("v4.2.0", "goodsha0", 4, 2, 0)],
+    )]);
+    let mut actions = vec![action("a", "b", "1badcafe", Some("v4.2.0"))];
+    resolve(&mut actions, &tags, &config());
+    assert!(actions[0].sha_mismatch);
+    assert!(actions[0].needs_update);
+}
+
+#[test]
 fn resolve_long_sha_typo_as_mismatch_not_branch() {
     let tags = HashMap::from([(
         ("actions".into(), "checkout".into()),

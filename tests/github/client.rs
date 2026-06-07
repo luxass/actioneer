@@ -28,6 +28,30 @@ async fn fetch_tags_single_page() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn fetch_tags_ignores_non_version_tags() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/name/tags"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"[{"name":"nightly","commit":{"sha":"skip"}},{"name":"v2.0.0","commit":{"sha":"keep"}}]"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let tags = tokio::task::block_in_place(|| {
+        GitHubClient::new_for_test(false, server.uri(), None)
+            .fetch_tags("owner", "name")
+            .unwrap()
+    });
+
+    assert_eq!(1, tags.len());
+    assert_eq!("v2.0.0", tags[0].name);
+    assert_eq!("keep", tags[0].sha);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn fetch_tags_multi_page() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -180,6 +204,14 @@ async fn cache_returns_stored_data() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn cache_path_encodes_unsafe_components() {
+    let path = github::cache_path("../owner", "repo/name");
+    let file_name = path.file_name().unwrap().to_string_lossy();
+    assert_eq!("..%2Fowner__repo%2Fname.json", file_name);
+    assert!(path.starts_with(std::env::temp_dir().join("actioneer-cache").join("tags")));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn cache_disabled_hits_api() {
     let cache_file = github::cache_path("t", "nocache");
     if let Some(p) = cache_file.parent() {
@@ -205,4 +237,11 @@ async fn cache_disabled_hits_api() {
     assert_eq!(1, tags.len());
     assert_eq!("v2.0.0", tags[0].name);
     let _ = fs::remove_file(&cache_file);
+}
+
+#[test]
+fn cache_path_namespaces_owner_and_repo() {
+    let path = github::cache_path("owner", "repo");
+
+    assert!(path.ends_with("actioneer-cache/tags/owner__repo.json"));
 }

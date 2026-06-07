@@ -3,12 +3,13 @@ use std::process::ExitCode;
 
 use owo_colors::OwoColorize;
 
+use crate::actions::{ResolveConfig, Tag, resolve};
 use crate::cli::{GlobalArgs, ScanArgs};
 use crate::cmd::default_inputs;
-use crate::display::{Printer, print_json, short_sha, update_file_count};
 use crate::github::{Error as GitHubError, GitHubClient};
-use crate::model::ResolveConfig;
-use crate::{resolve, scan};
+use crate::terminal::display::{Printer, print_json, short_sha, update_file_count};
+use crate::terminal::prompt;
+use crate::workflows::{PatchError, apply_patches, find_action_references};
 
 pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Result<ExitCode> {
     let printer = Printer::new(global.mode);
@@ -26,7 +27,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         }
     }
 
-    let mut actions = match scan::scan(&inputs, args.recursive) {
+    let mut actions = match find_action_references(&inputs, args.recursive) {
         Ok(a) => a,
         Err(err) => {
             printer.error(&format!("Scan failed: {err}"));
@@ -48,7 +49,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         .iter()
         .map(|a| (a.owner.clone(), a.name.clone()))
         .collect();
-    let mut tags: HashMap<(String, String), Vec<crate::model::Tag>> = HashMap::new();
+    let mut tags: HashMap<(String, String), Vec<Tag>> = HashMap::new();
     for (owner, name) in &repos {
         match gh.fetch_tags(owner, name) {
             Ok(repo_tags) => {
@@ -98,7 +99,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         mode: args.update,
         style: args.pin,
     };
-    resolve::resolve(&mut actions, &tags, &resolve_config);
+    resolve(&mut actions, &tags, &resolve_config);
     actions.retain(|a| a.needs_update);
 
     if global.mode.is_json() {
@@ -200,9 +201,9 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
     let selected = if args.yes {
         (0..actions.len()).collect()
     } else {
-        match crate::prompt::select(&actions) {
+        match prompt::select(&actions) {
             Ok(s) => s,
-            Err(crate::prompt::Error::NotATerminal) => {
+            Err(prompt::Error::NotATerminal) => {
                 printer.error("Interactive selection is not available in this terminal.");
                 printer.info(&format!(
                     "Use {}, {}, or {}.",
@@ -212,11 +213,11 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
                 ));
                 return Ok(ExitCode::FAILURE);
             }
-            Err(crate::prompt::Error::Canceled) => {
+            Err(prompt::Error::Canceled) => {
                 printer.warn("Selection canceled.");
                 return Ok(ExitCode::SUCCESS);
             }
-            Err(crate::prompt::Error::Interrupted) => {
+            Err(prompt::Error::Interrupted) => {
                 printer.warn("Selection interrupted.");
                 return Ok(ExitCode::FAILURE);
             }
@@ -267,7 +268,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         printer.info(&line);
     }
 
-    match crate::rewrite::apply(&actions, &selected) {
+    match apply_patches(&actions, &selected) {
         Ok(applied) => {
             let files = actions
                 .iter()
@@ -287,7 +288,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         Err(err) => {
             printer.error(&format!("Could not write selected updates: {err}."));
             match &err {
-                crate::rewrite::RewriteError::UpdateTargetNotFound => {
+                PatchError::UpdateTargetNotFound => {
                     printer.info("Re-run actioneer so it can scan the current file contents.");
                 }
                 _ => {

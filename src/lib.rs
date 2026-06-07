@@ -1,9 +1,6 @@
+pub mod actions;
 pub mod cli;
 pub mod cmd;
-pub mod display;
 pub mod github;
-pub mod model;
-pub mod prompt;
-pub mod resolve;
-pub mod rewrite;
-pub mod scan;
+pub mod terminal;
+pub mod workflows;

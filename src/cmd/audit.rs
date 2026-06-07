@@ -3,12 +3,12 @@ use std::process::ExitCode;
 
 use owo_colors::OwoColorize;
 
+use crate::actions::{ResolveConfig, Tag, resolve};
 use crate::cli::{GlobalArgs, ScanArgs};
 use crate::cmd::default_inputs;
-use crate::display::{Printer, print_json, short_sha};
 use crate::github::{Error as GitHubError, GitHubClient};
-use crate::model::ResolveConfig;
-use crate::{resolve, scan};
+use crate::terminal::display::{Printer, print_json, short_sha};
+use crate::workflows::find_action_references;
 
 pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Result<ExitCode> {
     let printer = Printer::new(global.mode);
@@ -26,7 +26,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         }
     }
 
-    let mut actions = match scan::scan(&inputs, args.recursive) {
+    let mut actions = match find_action_references(&inputs, args.recursive) {
         Ok(a) => a,
         Err(err) => {
             printer.error(&format!("Scan failed: {err}"));
@@ -48,7 +48,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         .iter()
         .map(|a| (a.owner.clone(), a.name.clone()))
         .collect();
-    let mut tags: HashMap<(String, String), Vec<crate::model::Tag>> = HashMap::new();
+    let mut tags: HashMap<(String, String), Vec<Tag>> = HashMap::new();
     for (owner, name) in &repos {
         match gh.fetch_tags(owner, name) {
             Ok(repo_tags) => {
@@ -94,7 +94,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         mode: args.update,
         style: args.pin,
     };
-    resolve::resolve(&mut actions, &tags, &resolve_config);
+    resolve(&mut actions, &tags, &resolve_config);
     actions.retain(|a| a.is_branch || a.sha_mismatch);
 
     if global.mode.is_json() {

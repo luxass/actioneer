@@ -1,19 +1,9 @@
-mod cli;
-mod cmd;
-mod display;
-mod github;
-mod model;
-mod prompt;
-mod resolve;
-mod rewrite;
-mod scan;
-
 use std::process::ExitCode;
 
+use actioneer::cli::{App, Command};
+use actioneer::cmd;
+use actioneer::github::GitHubClient;
 use clap::Parser;
-
-use crate::cli::{App, Command};
-use crate::github::GitHubClient;
 
 fn main() -> ExitCode {
     let app = App::parse();

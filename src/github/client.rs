@@ -1,14 +1,12 @@
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use reqwest::blocking::Client as HttpClient;
 use serde::Deserialize;
 
-use crate::model::{Tag, parse_version};
+use crate::actions::{Tag, parse_version};
+use crate::github::cache::{cache_path, no_cache_from_env, read_cache, write_cache};
 
 const MAX_PAGES: usize = 10;
-const CACHE_TTL: Duration = Duration::from_secs(60 * 60 * 6);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -71,19 +69,7 @@ impl GitHubClient {
         let tags = self.fetch_all_pages(&url)?;
 
         if self.cache_enabled {
-            if let Some(parent) = cache_path.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            let cached: Vec<CachedTag> = tags
-                .iter()
-                .map(|t| CachedTag {
-                    name: t.name.clone(),
-                    sha: t.sha.clone(),
-                })
-                .collect();
-            if let Ok(json) = serde_json::to_string(&cached) {
-                let _ = fs::write(&cache_path, json);
-            }
+            write_cache(&cache_path, &tags);
         }
 
         Ok(tags)
@@ -141,12 +127,6 @@ struct ApiTag {
 struct ApiCommit {
     sha: String,
 }
-#[derive(serde::Serialize, serde::Deserialize)]
-struct CachedTag {
-    name: String,
-    sha: String,
-}
-
 fn next_link(header: Option<&reqwest::header::HeaderValue>) -> Option<String> {
     let value = header?.to_str().ok()?;
     for part in value.split(',') {
@@ -158,37 +138,6 @@ fn next_link(header: Option<&reqwest::header::HeaderValue>) -> Option<String> {
         }
     }
     None
-}
-
-pub fn cache_path(owner: &str, name: &str) -> PathBuf {
-    std::env::temp_dir()
-        .join("actioneer-cache")
-        .join("tags")
-        .join(format!("{owner}__{name}.json"))
-}
-
-fn read_cache(path: &Path) -> Option<Vec<Tag>> {
-    let meta = fs::metadata(path).ok()?;
-    let age = SystemTime::now()
-        .duration_since(meta.modified().ok()?)
-        .ok()?;
-    if age > CACHE_TTL {
-        return None;
-    }
-    let contents = fs::read_to_string(path).ok()?;
-    let cached: Vec<CachedTag> = serde_json::from_str(&contents).ok()?;
-    Some(
-        cached
-            .into_iter()
-            .filter_map(|t| {
-                Some(Tag {
-                    name: t.name.clone(),
-                    sha: t.sha,
-                    version: parse_version(&t.name)?,
-                })
-            })
-            .collect(),
-    )
 }
 
 fn resolve_token() -> Option<String> {
@@ -211,8 +160,4 @@ fn resolve_token() -> Option<String> {
             let t = token.trim();
             (!t.is_empty()).then(|| t.to_string())
         })
-}
-
-pub fn no_cache_from_env() -> bool {
-    matches!(std::env::var("ACTIONEER_NO_CACHE"), Ok(v) if matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
 }

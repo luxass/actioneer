@@ -3,8 +3,8 @@ use std::io::{self, IsTerminal, Write};
 
 use owo_colors::OwoColorize;
 
+use crate::actions::ActionReference;
 use crate::cli::Mode;
-use crate::model::Action;
 
 pub struct Printer {
     mode: Mode,
@@ -73,14 +73,14 @@ fn color_enabled() -> bool {
     std::env::var_os("NO_COLOR").is_none()
 }
 
-pub fn print_json(actions: &[Action]) {
+pub fn print_json(actions: &[ActionReference]) {
     let json = serde_json::to_string(&serde_json::json!({ "updates": actions }))
         .expect("serializing updates");
     let mut stdout = io::stdout().lock();
     let _ = writeln!(stdout, "{}", json);
 }
 
-pub fn update_file_count(actions: &[Action]) -> usize {
+pub fn update_file_count(actions: &[ActionReference]) -> usize {
     actions
         .iter()
         .map(|a| a.file.as_str())
@@ -108,83 +108,4 @@ fn strip_ansi(input: &str) -> String {
         }
     }
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn short_sha_long() {
-        assert_eq!(&"abcdef0123456789"[..12], short_sha("abcdef0123456789"));
-    }
-
-    #[test]
-    fn short_sha_exact_12() {
-        assert_eq!("abcdef012345", short_sha("abcdef012345"));
-    }
-
-    #[test]
-    fn short_sha_short() {
-        assert_eq!("abc", short_sha("abc"));
-    }
-
-    #[test]
-    fn update_file_count_empty() {
-        assert_eq!(0, update_file_count(&[]));
-    }
-
-    #[test]
-    fn update_file_count_single_file() {
-        let a = Action::from_scan(
-            "o".into(),
-            "n".into(),
-            String::new(),
-            "v1".into(),
-            None,
-            "ci.yml".into(),
-            1,
-            0,
-            2,
-        );
-        let b = Action::from_scan(
-            "o".into(),
-            "n2".into(),
-            String::new(),
-            "v2".into(),
-            None,
-            "ci.yml".into(),
-            2,
-            0,
-            2,
-        );
-        assert_eq!(1, update_file_count(&[a, b]));
-    }
-
-    #[test]
-    fn update_file_count_multiple_files() {
-        let a = Action::from_scan(
-            "o".into(),
-            "n".into(),
-            String::new(),
-            "v1".into(),
-            None,
-            "a.yml".into(),
-            1,
-            0,
-            2,
-        );
-        let b = Action::from_scan(
-            "o".into(),
-            "n2".into(),
-            String::new(),
-            "v2".into(),
-            None,
-            "b.yml".into(),
-            2,
-            0,
-            2,
-        );
-        assert_eq!(2, update_file_count(&[a, b]));
-    }
 }

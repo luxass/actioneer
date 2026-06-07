@@ -1,4 +1,4 @@
-use actioneer::actions::ActionReference;
+use actioneer::actions::{ActionReference, ActionUpdate};
 use actioneer::workflows::{PatchError, apply_patches};
 
 use crate::support;
@@ -11,24 +11,25 @@ fn action_reference_at(
     vc: Option<&str>,
     mismatch: bool,
     ref_start: usize,
-) -> ActionReference {
-    ActionReference {
-        owner: "a".into(),
-        name: "b".into(),
-        path: String::new(),
-        current_ref: current.to_string(),
-        version_comment: vc.map(|s| s.to_string()),
-        file: file.to_string(),
-        line: 4,
-        ref_start,
-        ref_end: ref_start + current.len(),
+) -> ActionUpdate {
+    ActionUpdate {
+        action: ActionReference::from_discovery(
+            "a".into(),
+            "b".into(),
+            String::new(),
+            current.to_string(),
+            vc.map(|s| s.to_string()),
+            file.to_string(),
+            4,
+            ref_start,
+            ref_start + current.len(),
+        ),
         new_ref: new_ref.to_string(),
         new_version: new_version.to_string(),
         expected_sha: String::new(),
         sha_mismatch: mismatch,
         is_branch: false,
         is_major: false,
-        needs_update: true,
     }
 }
 
@@ -40,7 +41,7 @@ fn patch_reference(
     new_version: &str,
     vc: Option<&str>,
     mismatch: bool,
-) -> ActionReference {
+) -> ActionUpdate {
     let input = workspace.read(path);
     action_reference_at(
         &workspace.path(path),

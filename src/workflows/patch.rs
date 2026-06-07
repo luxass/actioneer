@@ -1,6 +1,6 @@
 use std::fs;
 
-use crate::actions::{ActionReference, parse_version};
+use crate::actions::{ActionUpdate, parse_version};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PatchError {
@@ -10,17 +10,22 @@ pub enum PatchError {
     Io(#[from] std::io::Error),
 }
 
-pub fn apply_patches(actions: &[ActionReference], selected: &[usize]) -> Result<usize, PatchError> {
-    let mut selected_actions: Vec<&ActionReference> =
+pub fn apply_patches(actions: &[ActionUpdate], selected: &[usize]) -> Result<usize, PatchError> {
+    let mut selected_actions: Vec<&ActionUpdate> =
         selected.iter().filter_map(|&i| actions.get(i)).collect();
-    selected_actions.sort_by(|a, b| (&a.file, a.ref_start).cmp(&(&b.file, b.ref_start)));
+    selected_actions.sort_by(|a, b| {
+        (&a.action.file, a.action.ref_start).cmp(&(&b.action.file, b.action.ref_start))
+    });
 
-    let mut remaining: &[&ActionReference] = &selected_actions;
+    let mut remaining: &[&ActionUpdate] = &selected_actions;
     let mut total_applied = 0;
 
     while let Some(first) = remaining.first() {
-        let file = &first.file;
-        let count = remaining.iter().take_while(|a| a.file == *file).count();
+        let file = &first.action.file;
+        let count = remaining
+            .iter()
+            .take_while(|a| a.action.file == *file)
+            .count();
         let (file_actions, rest) = remaining.split_at(count);
 
         let original = fs::read_to_string(file)?;
@@ -33,14 +38,14 @@ pub fn apply_patches(actions: &[ActionReference], selected: &[usize]) -> Result<
     Ok(total_applied)
 }
 
-fn patch_text(contents: &str, actions: &[&ActionReference]) -> Result<String, PatchError> {
+fn patch_text(contents: &str, actions: &[&ActionUpdate]) -> Result<String, PatchError> {
     let mut actions: Vec<_> = actions.to_vec();
-    actions.sort_by_key(|a| a.ref_start);
+    actions.sort_by_key(|a| a.action.ref_start);
 
     for action in &actions {
-        if action.ref_start > action.ref_end
-            || action.ref_end > contents.len()
-            || contents[action.ref_start..action.ref_end] != action.current_ref
+        if action.action.ref_start > action.action.ref_end
+            || action.action.ref_end > contents.len()
+            || contents[action.action.ref_start..action.action.ref_end] != action.action.current_ref
         {
             return Err(PatchError::UpdateTargetNotFound);
         }
@@ -50,9 +55,9 @@ fn patch_text(contents: &str, actions: &[&ActionReference]) -> Result<String, Pa
     let mut cursor = 0;
 
     for action in &actions {
-        output.push_str(&contents[cursor..action.ref_start]);
+        output.push_str(&contents[cursor..action.action.ref_start]);
         output.push_str(&action.new_ref);
-        cursor = action.ref_end;
+        cursor = action.action.ref_end;
 
         if !should_write_comment(action) {
             continue;
@@ -103,10 +108,10 @@ fn patch_text(contents: &str, actions: &[&ActionReference]) -> Result<String, Pa
     Ok(output)
 }
 
-fn should_write_comment(action: &ActionReference) -> bool {
+fn should_write_comment(action: &ActionUpdate) -> bool {
     !action.new_version.is_empty()
         && (action.new_ref != action.new_version
-            || action.version_comment.is_some()
+            || action.action.version_comment.is_some()
             || action.sha_mismatch)
 }
 

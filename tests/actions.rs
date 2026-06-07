@@ -6,24 +6,17 @@ use actioneer::actions::{
 };
 
 fn action(owner: &str, name: &str, current_ref: &str, vc: Option<&str>) -> ActionReference {
-    ActionReference {
-        owner: owner.to_string(),
-        name: name.to_string(),
-        path: String::new(),
-        current_ref: current_ref.to_string(),
-        version_comment: vc.map(|s| s.to_string()),
-        file: "ci.yml".into(),
-        line: 4,
-        ref_start: 0,
-        ref_end: current_ref.len(),
-        new_ref: String::new(),
-        new_version: String::new(),
-        expected_sha: String::new(),
-        sha_mismatch: false,
-        is_branch: false,
-        is_major: false,
-        needs_update: false,
-    }
+    ActionReference::from_discovery(
+        owner.to_string(),
+        name.to_string(),
+        String::new(),
+        current_ref.to_string(),
+        vc.map(|s| s.to_string()),
+        "ci.yml".into(),
+        4,
+        0,
+        current_ref.len(),
+    )
 }
 
 fn tag(name: &str, sha: &str, major: u32, minor: u32, patch: u32) -> Tag {
@@ -218,10 +211,10 @@ fn resolve_detects_version_upgrade() {
         ("actions".into(), "checkout".into()),
         vec![tag("v4.2.0", "sha42", 4, 2, 0)],
     )]);
-    let mut actions = vec![action("actions", "checkout", "v4.1.0", None)];
-    resolve(&mut actions, &tags, &config());
-    assert!(actions[0].needs_update);
-    assert_eq!("sha42", actions[0].new_ref);
+    let actions = vec![action("actions", "checkout", "v4.1.0", None)];
+    let updates = resolve(&actions, &tags, &config());
+    assert_eq!(1, updates.len());
+    assert_eq!("sha42", updates[0].new_ref);
 }
 
 #[test]
@@ -230,10 +223,9 @@ fn resolve_detects_branch() {
         ("a".into(), "b".into()),
         vec![tag("v1.0.0", "sha1", 1, 0, 0)],
     )]);
-    let mut actions = vec![action("a", "b", "main", None)];
-    resolve(&mut actions, &tags, &config());
-    assert!(actions[0].is_branch);
-    assert!(actions[0].needs_update);
+    let actions = vec![action("a", "b", "main", None)];
+    let updates = resolve(&actions, &tags, &config());
+    assert!(updates[0].is_branch);
 }
 
 #[test]
@@ -242,13 +234,13 @@ fn resolve_skip_branches_ignores() {
         ("a".into(), "b".into()),
         vec![tag("v1.0.0", "sha1", 1, 0, 0)],
     )]);
-    let mut actions = vec![action("a", "b", "main", None)];
+    let actions = vec![action("a", "b", "main", None)];
     let cfg = ResolveConfig {
         skip_branches: true,
         ..config()
     };
-    resolve(&mut actions, &tags, &cfg);
-    assert!(!actions[0].needs_update);
+    let updates = resolve(&actions, &tags, &cfg);
+    assert!(updates.is_empty());
 }
 
 #[test]
@@ -257,10 +249,9 @@ fn resolve_sha_mismatch() {
         ("a".into(), "b".into()),
         vec![tag("v4.2.0", "goodsha", 4, 2, 0)],
     )]);
-    let mut actions = vec![action("a", "b", "badcafe0", Some("v4.2.0"))];
-    resolve(&mut actions, &tags, &config());
-    assert!(actions[0].sha_mismatch);
-    assert!(actions[0].needs_update);
+    let actions = vec![action("a", "b", "badcafe0", Some("v4.2.0"))];
+    let updates = resolve(&actions, &tags, &config());
+    assert!(updates[0].sha_mismatch);
 }
 
 #[test]
@@ -269,10 +260,9 @@ fn resolve_sha_mismatch_with_numeric_leading_sha() {
         ("a".into(), "b".into()),
         vec![tag("v4.2.0", "goodsha0", 4, 2, 0)],
     )]);
-    let mut actions = vec![action("a", "b", "1badcafe", Some("v4.2.0"))];
-    resolve(&mut actions, &tags, &config());
-    assert!(actions[0].sha_mismatch);
-    assert!(actions[0].needs_update);
+    let actions = vec![action("a", "b", "1badcafe", Some("v4.2.0"))];
+    let updates = resolve(&actions, &tags, &config());
+    assert!(updates[0].sha_mismatch);
 }
 
 #[test]
@@ -296,16 +286,15 @@ fn resolve_long_sha_typo_as_mismatch_not_branch() {
             ),
         ],
     )]);
-    let mut actions = vec![action(
+    let actions = vec![action(
         "actions",
         "checkout",
         "de0fac2ea4500dabe0009e67214ff5f5447ce83dd",
         Some("v6.0.2"),
     )];
-    resolve(&mut actions, &tags, &config());
-    assert!(actions[0].sha_mismatch);
-    assert!(!actions[0].is_branch);
-    assert!(actions[0].needs_update);
+    let updates = resolve(&actions, &tags, &config());
+    assert!(updates[0].sha_mismatch);
+    assert!(!updates[0].is_branch);
 }
 
 #[test]
@@ -314,13 +303,13 @@ fn resolve_excluded_action() {
         ("actions".into(), "checkout".into()),
         vec![tag("v4.2.0", "sha42", 4, 2, 0)],
     )]);
-    let mut actions = vec![action("actions", "checkout", "v4.1.0", None)];
+    let actions = vec![action("actions", "checkout", "v4.1.0", None)];
     let cfg = ResolveConfig {
         excludes: vec!["actions/checkout".into()],
         ..config()
     };
-    resolve(&mut actions, &tags, &cfg);
-    assert!(!actions[0].needs_update);
+    let updates = resolve(&actions, &tags, &cfg);
+    assert!(updates.is_empty());
 }
 
 #[test]
@@ -329,9 +318,9 @@ fn resolve_detects_major_bump() {
         ("a".into(), "b".into()),
         vec![tag("v3.0.0", "s1", 3, 0, 0), tag("v4.0.0", "s2", 4, 0, 0)],
     )]);
-    let mut actions = vec![action("a", "b", "v3.0.0", None)];
-    resolve(&mut actions, &tags, &config());
-    assert!(actions[0].is_major);
+    let actions = vec![action("a", "b", "v3.0.0", None)];
+    let updates = resolve(&actions, &tags, &config());
+    assert!(updates[0].is_major);
 }
 
 #[test]
@@ -340,9 +329,9 @@ fn resolve_skips_downgrade() {
         ("a".into(), "b".into()),
         vec![tag("v4.2.0", "sha42", 4, 2, 0)],
     )]);
-    let mut actions = vec![action("a", "b", "v5.0.0", None)];
-    resolve(&mut actions, &tags, &config());
-    assert!(!actions[0].needs_update);
+    let actions = vec![action("a", "b", "v5.0.0", None)];
+    let updates = resolve(&actions, &tags, &config());
+    assert!(updates.is_empty());
 }
 
 #[test]
@@ -354,16 +343,15 @@ fn resolve_sha_pin_uses_version_comment_for_minor_mode() {
             tag("v5.0.0", "sha50", 5, 0, 0),
         ],
     )]);
-    let mut actions = vec![action("a", "b", "deadbeef", Some("v4.2.0"))];
+    let actions = vec![action("a", "b", "deadbeef", Some("v4.2.0"))];
     let cfg = ResolveConfig {
         mode: UpdateMode::Minor,
         ..config()
     };
 
-    resolve(&mut actions, &tags, &cfg);
+    let updates = resolve(&actions, &tags, &cfg);
 
-    assert!(actions[0].needs_update);
-    assert_eq!("sha43", actions[0].new_ref);
-    assert_eq!("v4.3.0", actions[0].new_version);
-    assert!(!actions[0].is_major);
+    assert_eq!("sha43", updates[0].new_ref);
+    assert_eq!("v4.3.0", updates[0].new_version);
+    assert!(!updates[0].is_major);
 }

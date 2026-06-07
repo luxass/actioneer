@@ -1,18 +1,26 @@
-use actioneer::actions::ActionReference;
+use actioneer::actions::{ActionReference, ActionUpdate};
 use actioneer::terminal::display::{short_sha, update_file_count};
 
-fn action(file: &str, name: &str) -> ActionReference {
-    ActionReference::from_discovery(
-        "o".into(),
-        name.into(),
-        String::new(),
-        "v1".into(),
-        None,
-        file.into(),
-        1,
-        0,
-        2,
-    )
+fn action(file: &str, name: &str) -> ActionUpdate {
+    ActionUpdate {
+        action: ActionReference::from_discovery(
+            "o".into(),
+            name.into(),
+            String::new(),
+            "v1".into(),
+            None,
+            file.into(),
+            1,
+            0,
+            2,
+        ),
+        new_ref: "sha".into(),
+        new_version: "v1".into(),
+        expected_sha: String::new(),
+        sha_mismatch: false,
+        is_branch: false,
+        is_major: false,
+    }
 }
 
 #[test]

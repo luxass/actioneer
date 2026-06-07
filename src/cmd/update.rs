@@ -27,7 +27,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         }
     }
 
-    let mut actions = match find_action_references(&inputs, args.recursive) {
+    let actions = match find_action_references(&inputs, args.recursive) {
         Ok(a) => a,
         Err(err) => {
             printer.error(&format!("Scan failed: {err}"));
@@ -99,42 +99,41 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         mode: args.update,
         style: args.pin,
     };
-    resolve(&mut actions, &tags, &resolve_config);
-    actions.retain(|a| a.needs_update);
+    let updates = resolve(&actions, &tags, &resolve_config);
 
     if global.mode.is_json() {
-        print_json(&actions);
+        print_json(&updates);
         return Ok(ExitCode::SUCCESS);
     }
 
     printer.info(&format!(
         "Resolved {} available update{} across {} workflow file{}.",
-        actions.len().to_string().yellow(),
-        if actions.len() == 1 { "" } else { "s" },
-        update_file_count(&actions).to_string().yellow(),
-        if update_file_count(&actions) == 1 {
+        updates.len().to_string().yellow(),
+        if updates.len() == 1 { "" } else { "s" },
+        update_file_count(&updates).to_string().yellow(),
+        if update_file_count(&updates) == 1 {
             ""
         } else {
             "s"
         },
     ));
 
-    let mismatch_count = actions.iter().filter(|a| a.sha_mismatch).count();
+    let mismatch_count = updates.iter().filter(|a| a.sha_mismatch).count();
     if mismatch_count > 0 {
         printer.warn(&format!(
             "{} pinned SHA{} do not match their version comments.",
             mismatch_count.to_string().yellow(),
             if mismatch_count == 1 { "" } else { "s" },
         ));
-        for a in actions.iter().filter(|a| a.sha_mismatch) {
+        for a in updates.iter().filter(|a| a.sha_mismatch) {
             let mut line = format!(
                 "{} at {}:{} uses {}",
                 a.action_name().bold(),
-                a.file.cyan(),
-                a.line,
-                a.current_ref.red()
+                a.action.file.cyan(),
+                a.action.line,
+                a.action.current_ref.red()
             );
-            if let Some(vc) = &a.version_comment {
+            if let Some(vc) = &a.action.version_comment {
                 line.push_str(&format!(" but says {}", vc.yellow()));
             }
             if !a.expected_sha.is_empty() {
@@ -147,7 +146,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         }
     }
 
-    let branch_count = actions.iter().filter(|a| a.is_branch).count();
+    let branch_count = updates.iter().filter(|a| a.is_branch).count();
     if branch_count > 0 {
         printer.warn(&format!(
             "{} action reference{} use mutable branch refs (e.g. @main, @master). These are insecure and should be pinned to a version tag or SHA.",
@@ -159,10 +158,10 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
     if global.dry_run {
         printer.info(&format!(
             "Preview: {} available update{}.",
-            actions.len().to_string().yellow(),
-            if actions.len() == 1 { "" } else { "s" },
+            updates.len().to_string().yellow(),
+            if updates.len() == 1 { "" } else { "s" },
         ));
-        for a in &actions {
+        for a in &updates {
             let target = if a.is_major || a.is_branch {
                 a.new_ref.red().to_string()
             } else {
@@ -171,15 +170,15 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
             let mut line = format!(
                 "{}: {} -> {} ({}:{})",
                 a.action_name().bold(),
-                a.current_ref.yellow(),
+                a.action.current_ref.yellow(),
                 target,
-                a.file.bright_black(),
-                a.line
+                a.action.file.bright_black(),
+                a.action.line
             );
             if a.new_ref != a.new_version {
                 line.push_str(&format!(" [{}]", a.new_version.bright_black()));
             }
-            if let Some(vc) = &a.version_comment {
+            if let Some(vc) = &a.action.version_comment {
                 line.push_str(&format!(" #{}", vc.bright_black()));
             }
             if a.sha_mismatch {
@@ -193,15 +192,15 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         return Ok(ExitCode::SUCCESS);
     }
 
-    if actions.is_empty() {
+    if updates.is_empty() {
         printer.info("Everything is already up to date.");
         return Ok(ExitCode::SUCCESS);
     }
 
     let selected = if args.yes {
-        (0..actions.len()).collect()
+        (0..updates.len()).collect()
     } else {
-        match prompt::select(&actions) {
+        match prompt::select(&updates) {
             Ok(s) => s,
             Err(prompt::Error::NotATerminal) => {
                 printer.error("Interactive selection is not available in this terminal.");
@@ -239,7 +238,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         if selected.len() == 1 { "" } else { "s" },
     ));
     for &idx in &selected {
-        let a = &actions[idx];
+        let a = &updates[idx];
         let target = if a.is_major || a.is_branch {
             a.new_ref.red().to_string()
         } else {
@@ -247,16 +246,16 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         };
         let mut line = format!(
             "{}:{} {}: {} -> {}",
-            a.file.cyan(),
-            a.line,
+            a.action.file.cyan(),
+            a.action.line,
             a.action_name().bold(),
-            a.current_ref.bright_black(),
+            a.action.current_ref.bright_black(),
             target
         );
         if a.new_ref != a.new_version {
             line.push_str(&format!(" [{}]", a.new_version.bright_black()));
         }
-        if let Some(vc) = &a.version_comment {
+        if let Some(vc) = &a.action.version_comment {
             line.push_str(&format!(" #{}", vc.bright_black()));
         }
         if a.sha_mismatch {
@@ -268,12 +267,12 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         printer.info(&line);
     }
 
-    match apply_patches(&actions, &selected) {
+    match apply_patches(&updates, &selected) {
         Ok(applied) => {
-            let files = actions
+            let files = updates
                 .iter()
                 .enumerate()
-                .filter_map(|(i, a)| selected.contains(&i).then_some(a.file.as_str()))
+                .filter_map(|(i, a)| selected.contains(&i).then_some(a.action.file.as_str()))
                 .collect::<std::collections::BTreeSet<_>>()
                 .len();
             printer.info(&format!(

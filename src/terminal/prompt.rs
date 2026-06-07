@@ -14,7 +14,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
 
-use crate::actions::ActionUpdate;
+use crate::actions::{ActionUpdate, UpdateNote};
 
 const FOOTER: &str = "Up/Down/j/k move  ←→ scroll  PgUp/PgDn jump  d details  o open GitHub  space toggle  tab fold  f file  a all  i invert  n none  enter apply  q cancel";
 
@@ -364,30 +364,10 @@ fn draw(
             value.to_string()
         }
     };
-    let version_change = |a: &ActionUpdate| {
-        let current = a
-            .action
-            .version_comment
-            .as_deref()
-            .unwrap_or(&a.action.current_ref);
-        if current == a.new_version {
-            a.new_version.clone()
-        } else {
-            format!("{} -> {}", current, a.new_version)
-        }
-    };
-    let notes = |a: &ActionUpdate| {
-        let mut notes = Vec::new();
-        if a.sha_mismatch {
-            notes.push("SHA mismatch");
-        }
-        if a.is_branch {
-            notes.push("mutable branch");
-        }
-        if a.is_major {
-            notes.push("major update");
-        }
-        notes
+    let note_label = |note: UpdateNote| match note {
+        UpdateNote::ShaMismatch => "SHA mismatch",
+        UpdateNote::MutableBranch => "mutable branch",
+        UpdateNote::MajorUpdate => "major update",
     };
 
     let (act_w, ref_w, ver_w, loc_w) =
@@ -399,7 +379,7 @@ fn draw(
                     short_ref(&x.action.current_ref),
                     short_ref(&x.new_ref)
                 );
-                let version = version_change(x);
+                let version = x.version_label();
                 let loc = format!("{}:{}", x.action.file, x.action.line);
                 (
                     a.max(x.action_name().chars().count()),
@@ -413,7 +393,12 @@ fn draw(
         .iter()
         .map(|a| {
             let mut w = 6 + act_w + 2 + ref_w + 2 + ver_w + 2 + loc_w;
-            let notes = notes(a).join(", ");
+            let notes = a
+                .notes()
+                .into_iter()
+                .map(note_label)
+                .collect::<Vec<_>>()
+                .join(", ");
             if !notes.is_empty() {
                 w += 2 + notes.chars().count();
             }
@@ -499,7 +484,7 @@ fn draw(
             } else {
                 Style::default().fg(Color::DarkGray)
             };
-            let target_s = if a.sha_mismatch || a.is_branch {
+            let target_s = if a.is_security_sensitive() {
                 Color::Yellow
             } else if a.is_major {
                 Color::Red
@@ -530,7 +515,7 @@ fn draw(
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("{:1$}", version_change(a), ver_w),
+                    format!("{:1$}", a.version_label(), ver_w),
                     Style::default().fg(Color::Blue),
                 ),
                 Span::raw("  "),
@@ -543,14 +528,17 @@ fn draw(
                     Style::default().fg(Color::DarkGray),
                 ),
             ];
-            let notes = notes(a);
+            let notes = a.notes();
             if !notes.is_empty() {
                 spans.push(Span::raw("  "));
                 for (i, note) in notes.iter().enumerate() {
                     if i > 0 {
                         spans.push(Span::styled(", ", Style::default().fg(Color::DarkGray)));
                     }
-                    spans.push(Span::styled(*note, Style::default().fg(target_s)));
+                    spans.push(Span::styled(
+                        note_label(*note),
+                        Style::default().fg(target_s),
+                    ));
                 }
             }
             ListItem::new(Line::from(scroll_spans(spans, scroll)))
@@ -600,7 +588,12 @@ fn draw(
             }
             Some(VisibleRow::Update { original_index }) => {
                 let a = &actions[*original_index];
-                let note_text = notes(a).join(", ");
+                let note_text = a
+                    .notes()
+                    .into_iter()
+                    .map(note_label)
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 vec![
                     Line::from(Span::styled(
                         a.action_name(),
@@ -617,7 +610,7 @@ fn draw(
                     ]),
                     Line::from(vec![
                         Span::styled("Version:     ", Style::default().fg(Color::DarkGray)),
-                        Span::raw(version_change(a)),
+                        Span::raw(a.version_label()),
                     ]),
                     Line::from(vec![
                         Span::styled("Location:    ", Style::default().fg(Color::DarkGray)),

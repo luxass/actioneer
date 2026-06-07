@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use actioneer::actions::{
-    ActionReference, PinStyle, ResolveConfig, Tag, UpdateMode, Version, is_likely_sha,
-    parse_version, resolve, sha_matches,
+    ActionReference, ActionUpdate, PinStyle, ResolveConfig, Tag, UpdateMode, UpdateNote, Version,
+    is_likely_sha, parse_version, resolve, sha_matches,
 };
 
 fn action(owner: &str, name: &str, current_ref: &str, vc: Option<&str>) -> ActionReference {
@@ -40,6 +40,18 @@ fn config() -> ResolveConfig {
     }
 }
 
+fn update(current_ref: &str, version_comment: Option<&str>) -> ActionUpdate {
+    ActionUpdate {
+        action: action("actions", "checkout", current_ref, version_comment),
+        new_ref: "newsha".into(),
+        new_version: "v4.2.0".into(),
+        expected_sha: "expectedsha".into(),
+        sha_mismatch: true,
+        is_branch: true,
+        is_major: true,
+    }
+}
+
 #[test]
 fn action_name_no_path() {
     let a = ActionReference::from_discovery(
@@ -70,6 +82,24 @@ fn action_name_with_path() {
         2,
     );
     assert_eq!("own/repo/.github/workflows/ci.yml", a.action_name());
+}
+
+#[test]
+fn action_update_derives_presentation_and_edit_facts() {
+    let update = update("oldsha", Some("v4.1.0"));
+
+    assert_eq!("v4.1.0 -> v4.2.0", update.version_label());
+    assert_eq!(
+        vec![
+            UpdateNote::ShaMismatch,
+            UpdateNote::MutableBranch,
+            UpdateNote::MajorUpdate,
+        ],
+        update.notes()
+    );
+    assert!(update.should_write_version_comment());
+    assert!(update.ref_differs_from_version());
+    assert!(update.is_security_sensitive());
 }
 
 #[test]

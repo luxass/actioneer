@@ -101,7 +101,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
 
     if global.mode.is_json() {
         print_json(&findings);
-        return Ok(if findings.iter().any(|a| a.sha_mismatch || a.is_branch) {
+        return Ok(if findings.iter().any(|a| a.is_security_sensitive()) {
             ExitCode::FAILURE
         } else {
             ExitCode::SUCCESS

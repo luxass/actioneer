@@ -59,7 +59,7 @@ fn patch_text(contents: &str, actions: &[&ActionUpdate]) -> Result<String, Patch
         output.push_str(&action.new_ref);
         cursor = action.action.ref_end;
 
-        if !should_write_comment(action) {
+        if !action.should_write_version_comment() {
             continue;
         }
 
@@ -106,13 +106,6 @@ fn patch_text(contents: &str, actions: &[&ActionUpdate]) -> Result<String, Patch
 
     output.push_str(&contents[cursor..]);
     Ok(output)
-}
-
-fn should_write_comment(action: &ActionUpdate) -> bool {
-    !action.new_version.is_empty()
-        && (action.new_ref != action.new_version
-            || action.action.version_comment.is_some()
-            || action.sha_mismatch)
 }
 
 fn find_comment_start(contents: &str, offset: usize) -> Option<usize> {

@@ -3,7 +3,7 @@ use std::process::ExitCode;
 
 use owo_colors::OwoColorize;
 
-use crate::actions::{ResolveConfig, Tag, resolve};
+use crate::actions::{ActionUpdate, ResolveConfig, Tag, UpdateNote, resolve};
 use crate::cli::{GlobalArgs, ScanArgs};
 use crate::cmd::default_inputs;
 use crate::github::{Error as GitHubError, GitHubClient};
@@ -175,18 +175,11 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
                 a.action.file.bright_black(),
                 a.action.line
             );
-            if a.new_ref != a.new_version {
-                line.push_str(&format!(" [{}]", a.new_version.bright_black()));
-            }
+            append_version_detail(&mut line, a);
             if let Some(vc) = &a.action.version_comment {
                 line.push_str(&format!(" #{}", vc.bright_black()));
             }
-            if a.sha_mismatch {
-                line.push_str(&format!(" {}", "(SHA/comment mismatch)".red()));
-            }
-            if a.is_branch {
-                line.push_str(&format!(" {}", "(unpinned branch ref)".yellow()));
-            }
+            append_notes(&mut line, a);
             printer.info(&line);
         }
         return Ok(ExitCode::SUCCESS);
@@ -252,18 +245,11 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
             a.action.current_ref.bright_black(),
             target
         );
-        if a.new_ref != a.new_version {
-            line.push_str(&format!(" [{}]", a.new_version.bright_black()));
-        }
+        append_version_detail(&mut line, a);
         if let Some(vc) = &a.action.version_comment {
             line.push_str(&format!(" #{}", vc.bright_black()));
         }
-        if a.sha_mismatch {
-            line.push_str(&format!(" {}", "(SHA/comment mismatch)".red()));
-        }
-        if a.is_branch {
-            line.push_str(&format!(" {}", "(unpinned branch ref)".yellow()));
-        }
+        append_notes(&mut line, a);
         printer.info(&line);
     }
 
@@ -295,6 +281,26 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
                 }
             }
             Ok(ExitCode::FAILURE)
+        }
+    }
+}
+
+fn append_version_detail(line: &mut String, update: &ActionUpdate) {
+    if update.ref_differs_from_version() {
+        line.push_str(&format!(" [{}]", update.new_version.bright_black()));
+    }
+}
+
+fn append_notes(line: &mut String, update: &ActionUpdate) {
+    for note in update.notes() {
+        match note {
+            UpdateNote::ShaMismatch => {
+                line.push_str(&format!(" {}", "(SHA/comment mismatch)".red()));
+            }
+            UpdateNote::MutableBranch => {
+                line.push_str(&format!(" {}", "(unpinned branch ref)".yellow()));
+            }
+            UpdateNote::MajorUpdate => {}
         }
     }
 }

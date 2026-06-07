@@ -27,6 +27,13 @@ pub struct ActionUpdate {
     pub is_major: bool,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum UpdateNote {
+    ShaMismatch,
+    MutableBranch,
+    MajorUpdate,
+}
+
 impl ActionReference {
     #[allow(clippy::too_many_arguments)]
     pub fn from_discovery(
@@ -61,5 +68,47 @@ impl ActionReference {
 impl ActionUpdate {
     pub fn action_name(&self) -> String {
         self.action.action_name()
+    }
+
+    pub fn version_label(&self) -> String {
+        let current = self
+            .action
+            .version_comment
+            .as_deref()
+            .unwrap_or(&self.action.current_ref);
+        if current == self.new_version {
+            self.new_version.clone()
+        } else {
+            format!("{} -> {}", current, self.new_version)
+        }
+    }
+
+    pub fn notes(&self) -> Vec<UpdateNote> {
+        let mut notes = Vec::new();
+        if self.sha_mismatch {
+            notes.push(UpdateNote::ShaMismatch);
+        }
+        if self.is_branch {
+            notes.push(UpdateNote::MutableBranch);
+        }
+        if self.is_major {
+            notes.push(UpdateNote::MajorUpdate);
+        }
+        notes
+    }
+
+    pub fn should_write_version_comment(&self) -> bool {
+        !self.new_version.is_empty()
+            && (self.ref_differs_from_version()
+                || self.action.version_comment.is_some()
+                || self.sha_mismatch)
+    }
+
+    pub fn ref_differs_from_version(&self) -> bool {
+        self.new_ref != self.new_version
+    }
+
+    pub fn is_security_sensitive(&self) -> bool {
+        self.sha_mismatch || self.is_branch
     }
 }

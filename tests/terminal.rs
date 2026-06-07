@@ -1,19 +1,18 @@
-use actioneer::actions::{ActionReference, ActionUpdate};
+use actioneer::actions::{ActionReference, ActionUpdate, WorkflowEdit};
 use actioneer::terminal::display::{short_sha, update_file_count};
 
 fn action(file: &str, name: &str) -> ActionUpdate {
     ActionUpdate {
-        action: ActionReference::from_discovery(
-            "o".into(),
-            name.into(),
-            String::new(),
-            "v1".into(),
-            None,
-            file.into(),
-            1,
-            0,
-            2,
-        ),
+        action: ActionReference {
+            owner: "o".into(),
+            name: name.into(),
+            path: String::new(),
+            current_ref: "v1".into(),
+            version_comment: None,
+            file: file.into(),
+            line: 1,
+            edit: WorkflowEdit::new(0, 2),
+        },
         new_ref: "sha".into(),
         new_version: "v1".into(),
         expected_sha: String::new(),

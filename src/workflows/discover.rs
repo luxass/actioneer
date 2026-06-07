@@ -5,7 +5,7 @@ use serde_yaml::Value;
 use walkdir::WalkDir;
 use yamlpath::{Document, Feature, Route};
 
-use crate::actions::ActionReference;
+use crate::actions::{ActionReference, WorkflowEdit};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DiscoveryError {
@@ -231,17 +231,16 @@ fn push_action(doc: &Document, route: &Route<'_>, file: &str, actions: &mut Vec<
     let at = text.rfind('@').unwrap();
     let ref_start = value_start + at + 1;
 
-    actions.push(ActionReference::from_discovery(
-        action.owner.into(),
-        action.name.into(),
-        action.path.into(),
-        action.r#ref.into(),
-        comment,
-        file.to_string(),
-        feature.location.point_span.0.0 + 1,
-        ref_start,
-        value_end,
-    ));
+    actions.push(ActionReference {
+        owner: action.owner.into(),
+        name: action.name.into(),
+        path: action.path.into(),
+        current_ref: action.r#ref.into(),
+        version_comment: comment,
+        file: file.to_string(),
+        line: feature.location.point_span.0.0 + 1,
+        edit: WorkflowEdit::new(ref_start, value_end),
+    });
 }
 
 #[cfg(test)]

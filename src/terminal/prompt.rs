@@ -686,21 +686,20 @@ fn scroll_spans(spans: Vec<Span<'static>>, scroll: usize) -> Vec<Span<'static>> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actions::ActionReference;
+    use crate::actions::{ActionReference, WorkflowEdit};
 
     fn mk_action(file: &str, name: &str) -> ActionUpdate {
         ActionUpdate {
-            action: ActionReference::from_discovery(
-                "actions".into(),
-                name.into(),
-                String::new(),
-                "v1.0.0".into(),
-                Some("1.0.0".into()),
-                file.into(),
-                10,
-                20,
-                26,
-            ),
+            action: ActionReference {
+                owner: "actions".into(),
+                name: name.into(),
+                path: String::new(),
+                current_ref: "v1.0.0".into(),
+                version_comment: Some("1.0.0".into()),
+                file: file.into(),
+                line: 10,
+                edit: WorkflowEdit::new(20, 26),
+            },
             new_ref: "sha".into(),
             new_version: "v1.0.0".into(),
             expected_sha: String::new(),
@@ -811,17 +810,16 @@ mod tests {
     #[test]
     fn github_url_action_path_at_current_ref() {
         let action = ActionUpdate {
-            action: ActionReference::from_discovery(
-                "luxass".into(),
-                "shared-workflows".into(),
-                "/.github/workflows/reusable-ci.yaml".into(),
-                "ce9e8e27".into(),
-                Some("v0.6.0".into()),
-                "ci.yml".into(),
-                10,
-                20,
-                28,
-            ),
+            action: ActionReference {
+                owner: "luxass".into(),
+                name: "shared-workflows".into(),
+                path: "/.github/workflows/reusable-ci.yaml".into(),
+                current_ref: "ce9e8e27".into(),
+                version_comment: Some("v0.6.0".into()),
+                file: "ci.yml".into(),
+                line: 10,
+                edit: WorkflowEdit::new(20, 28),
+            },
             new_ref: "sha".into(),
             new_version: "v0.6.0".into(),
             expected_sha: String::new(),

@@ -178,8 +178,7 @@ mod tests {
             version_comment: vc.map(|s| s.to_string()),
             file: "ci.yml".into(),
             line: 4,
-            ref_start: 0,
-            ref_end: current_ref.len(),
+            edit: crate::actions::WorkflowEdit::new(0, current_ref.len()),
         }
     }
 

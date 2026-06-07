@@ -10,9 +10,7 @@ pub struct ActionReference {
     pub file: String,
     pub line: usize,
     #[serde(skip)]
-    pub(crate) ref_start: usize,
-    #[serde(skip)]
-    pub(crate) ref_end: usize,
+    pub edit: WorkflowEdit,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -34,32 +32,19 @@ pub enum UpdateNote {
     MajorUpdate,
 }
 
-impl ActionReference {
-    #[allow(clippy::too_many_arguments)]
-    pub fn from_discovery(
-        owner: String,
-        name: String,
-        path: String,
-        current_ref: String,
-        version_comment: Option<String>,
-        file: String,
-        line: usize,
-        ref_start: usize,
-        ref_end: usize,
-    ) -> Self {
-        Self {
-            owner,
-            name,
-            path,
-            current_ref,
-            version_comment,
-            file,
-            line,
-            ref_start,
-            ref_end,
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct WorkflowEdit {
+    pub(crate) ref_start: usize,
+    pub(crate) ref_end: usize,
+}
 
+impl WorkflowEdit {
+    pub fn new(ref_start: usize, ref_end: usize) -> Self {
+        Self { ref_start, ref_end }
+    }
+}
+
+impl ActionReference {
     pub fn action_name(&self) -> String {
         format!("{}/{}{}", self.owner, self.name, self.path)
     }

@@ -2,21 +2,20 @@ use std::collections::HashMap;
 
 use actioneer::actions::{
     ActionReference, ActionUpdate, PinStyle, ResolveConfig, Tag, UpdateMode, UpdateNote, Version,
-    is_likely_sha, parse_version, resolve, sha_matches,
+    WorkflowEdit, is_likely_sha, parse_version, resolve, sha_matches,
 };
 
 fn action(owner: &str, name: &str, current_ref: &str, vc: Option<&str>) -> ActionReference {
-    ActionReference::from_discovery(
-        owner.to_string(),
-        name.to_string(),
-        String::new(),
-        current_ref.to_string(),
-        vc.map(|s| s.to_string()),
-        "ci.yml".into(),
-        4,
-        0,
-        current_ref.len(),
-    )
+    ActionReference {
+        owner: owner.to_string(),
+        name: name.to_string(),
+        path: String::new(),
+        current_ref: current_ref.to_string(),
+        version_comment: vc.map(|s| s.to_string()),
+        file: "ci.yml".into(),
+        line: 4,
+        edit: WorkflowEdit::new(0, current_ref.len()),
+    }
 }
 
 fn tag(name: &str, sha: &str, major: u32, minor: u32, patch: u32) -> Tag {
@@ -54,33 +53,31 @@ fn update(current_ref: &str, version_comment: Option<&str>) -> ActionUpdate {
 
 #[test]
 fn action_name_no_path() {
-    let a = ActionReference::from_discovery(
-        "own".into(),
-        "repo".into(),
-        String::new(),
-        "v1".into(),
-        None,
-        "f".into(),
-        1,
-        0,
-        2,
-    );
+    let a = ActionReference {
+        owner: "own".into(),
+        name: "repo".into(),
+        path: String::new(),
+        current_ref: "v1".into(),
+        version_comment: None,
+        file: "f".into(),
+        line: 1,
+        edit: WorkflowEdit::new(0, 2),
+    };
     assert_eq!("own/repo", a.action_name());
 }
 
 #[test]
 fn action_name_with_path() {
-    let a = ActionReference::from_discovery(
-        "own".into(),
-        "repo".into(),
-        "/.github/workflows/ci.yml".into(),
-        "v1".into(),
-        None,
-        "f".into(),
-        1,
-        0,
-        2,
-    );
+    let a = ActionReference {
+        owner: "own".into(),
+        name: "repo".into(),
+        path: "/.github/workflows/ci.yml".into(),
+        current_ref: "v1".into(),
+        version_comment: None,
+        file: "f".into(),
+        line: 1,
+        edit: WorkflowEdit::new(0, 2),
+    };
     assert_eq!("own/repo/.github/workflows/ci.yml", a.action_name());
 }
 

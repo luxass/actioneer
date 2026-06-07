@@ -14,7 +14,7 @@ pub fn apply_patches(actions: &[ActionUpdate], selected: &[usize]) -> Result<usi
     let mut selected_actions: Vec<&ActionUpdate> =
         selected.iter().filter_map(|&i| actions.get(i)).collect();
     selected_actions.sort_by(|a, b| {
-        (&a.action.file, a.action.ref_start).cmp(&(&b.action.file, b.action.ref_start))
+        (&a.action.file, a.action.edit.ref_start).cmp(&(&b.action.file, b.action.edit.ref_start))
     });
 
     let mut remaining: &[&ActionUpdate] = &selected_actions;
@@ -40,12 +40,13 @@ pub fn apply_patches(actions: &[ActionUpdate], selected: &[usize]) -> Result<usi
 
 fn patch_text(contents: &str, actions: &[&ActionUpdate]) -> Result<String, PatchError> {
     let mut actions: Vec<_> = actions.to_vec();
-    actions.sort_by_key(|a| a.action.ref_start);
+    actions.sort_by_key(|a| a.action.edit.ref_start);
 
     for action in &actions {
-        if action.action.ref_start > action.action.ref_end
-            || action.action.ref_end > contents.len()
-            || contents[action.action.ref_start..action.action.ref_end] != action.action.current_ref
+        if action.action.edit.ref_start > action.action.edit.ref_end
+            || action.action.edit.ref_end > contents.len()
+            || contents[action.action.edit.ref_start..action.action.edit.ref_end]
+                != action.action.current_ref
         {
             return Err(PatchError::UpdateTargetNotFound);
         }
@@ -55,9 +56,9 @@ fn patch_text(contents: &str, actions: &[&ActionUpdate]) -> Result<String, Patch
     let mut cursor = 0;
 
     for action in &actions {
-        output.push_str(&contents[cursor..action.action.ref_start]);
+        output.push_str(&contents[cursor..action.action.edit.ref_start]);
         output.push_str(&action.new_ref);
-        cursor = action.action.ref_end;
+        cursor = action.action.edit.ref_end;
 
         if !action.should_write_version_comment() {
             continue;

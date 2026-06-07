@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use actioneer::actions::{ActionReference, PinStyle, ResolveConfig, Tag, UpdateMode, resolve};
+use actioneer::actions::{ActionUpdate, PinStyle, ResolveConfig, Tag, UpdateMode, resolve};
 use actioneer::github::GitHubClient;
 use actioneer::workflows::find_action_references;
 use wiremock::matchers::{method, path, query_param};
@@ -22,8 +22,8 @@ fn resolve_workspace(
     base_url: String,
     repos: &[(&str, &str)],
     config: ResolveConfig,
-) -> Vec<ActionReference> {
-    let mut actions = find_action_references(&[workspace.root()], false).unwrap();
+) -> Vec<ActionUpdate> {
+    let actions = find_action_references(&[workspace.root()], false).unwrap();
     let gh = GitHubClient::new_for_test(false, base_url, None);
     let mut tags: HashMap<(String, String), Vec<Tag>> = HashMap::new();
 
@@ -34,8 +34,7 @@ fn resolve_workspace(
         );
     }
 
-    resolve(&mut actions, &tags, &config);
-    actions
+    resolve(&actions, &tags, &config)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -70,7 +69,6 @@ async fn sha_pin_version_upgrade() {
     });
 
     assert_eq!(1, result.len());
-    assert!(result[0].needs_update);
     assert_eq!(
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         result[0].new_ref
@@ -108,7 +106,6 @@ async fn tag_pin_version_upgrade() {
         )
     });
 
-    assert!(result[0].needs_update);
     assert_eq!("v4.2.0", result[0].new_ref);
 }
 
@@ -142,7 +139,6 @@ async fn patch_mode_upgrade() {
         )
     });
 
-    assert!(result[0].needs_update);
     assert_eq!("v4.1.5", result[0].new_version);
 }
 
@@ -177,7 +173,6 @@ async fn branch_detected() {
     });
 
     assert!(result[0].is_branch);
-    assert!(result[0].needs_update);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -210,7 +205,7 @@ async fn skip_branches_excluded() {
         )
     });
 
-    assert!(!result[0].needs_update);
+    assert!(result.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -245,7 +240,6 @@ async fn sha_mismatch_detected() {
 
     assert_eq!(1, result.len());
     assert!(result[0].sha_mismatch);
-    assert!(result[0].needs_update);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -278,8 +272,7 @@ async fn already_current_no_update() {
         )
     });
 
-    assert_eq!(1, result.len());
-    assert!(!result[0].needs_update);
+    assert!(result.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -322,6 +315,4 @@ async fn multiple_repos_in_one_file() {
     });
 
     assert_eq!(2, result.len());
-    assert!(result[0].needs_update);
-    assert!(result[1].needs_update);
 }

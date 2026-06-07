@@ -16,12 +16,7 @@ The binary name is `actioneer`.
 
 ## Architecture
 
-Single-crate Rust CLI with flat module layout:
-
-```text
-cli  command dispatch and clap definitions
-cmd  update, audit, version command handlers
-```
+Single-crate Rust CLI grouped by workflow scanning, action resolution, GitHub transport, terminal output, and command handlers.
 
 ### Module Map
 
@@ -29,14 +24,28 @@ cmd  update, audit, version command handlers
 |---|---|
 | `src/main.rs` | CLI bootstrap and top-level dispatch |
 | `src/cli.rs` | Clap parsing, global args, subcommands |
-| `src/model.rs` | Action, Tag, Version, PinStyle, UpdateMode, ResolveConfig |
-| `src/scan.rs` | Filesystem traversal and YAML action reference extraction |
-| `src/github.rs` | GitHub API transport, tag resolution, disk cache, auth |
-| `src/resolve.rs` | Version comparison, SHA matching, update detection |
-| `src/rewrite.rs` | Text-edit computation and file rewriting |
-| `src/display.rs` | Human-readable and JSON output |
-| `src/prompt.rs` | Interactive picker using ratatui + crossterm |
-| `src/cmd/` | `update`, `audit`, `version` handlers |
+| `src/actions/reference.rs` | Scan-owned action references, resolved action updates, update notes, workflow edit anchors |
+| `src/actions/resolution.rs` | Tag model, pin/update config, update detection from discovered references |
+| `src/actions/version.rs` | Version parsing, SHA detection, SHA matching |
+| `src/workflows/discover.rs` | Filesystem traversal and YAML action reference extraction |
+| `src/workflows/patch.rs` | Workflow file rewriting for selected resolved updates |
+| `src/github/client.rs` | GitHub tag transport, pagination, auth token lookup |
+| `src/github/cache.rs` | Disk cache path policy, cache reads/writes, cache disabling |
+| `src/terminal/display.rs` | Human-readable printer helpers and JSON output |
+| `src/terminal/prompt.rs` | Interactive picker using ratatui + crossterm |
+| `src/cmd/` | `update`, `audit`, `version` command handlers |
+
+### Data Flow
+
+```text
+workflows::discover -> ActionReference
+actions::resolve -> ActionUpdate
+cmd::update/audit -> terminal display, prompt, or workflows::patch
+```
+
+- `ActionReference` represents a GitHub Actions reference discovered in workflow YAML.
+- `ActionUpdate` represents a resolved update or audit finding derived from an `ActionReference`.
+- `WorkflowEdit` groups workflow rewrite coordinates and is skipped from JSON output.
 
 ## Conventions
 

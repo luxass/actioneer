@@ -3,7 +3,7 @@ use std::io::{self, IsTerminal, Write};
 
 use owo_colors::OwoColorize;
 
-use crate::actions::ActionReference;
+use crate::actions::ActionUpdate;
 use crate::cli::Mode;
 
 pub struct Printer {
@@ -73,17 +73,17 @@ fn color_enabled() -> bool {
     std::env::var_os("NO_COLOR").is_none()
 }
 
-pub fn print_json(actions: &[ActionReference]) {
+pub fn print_json(actions: &[ActionUpdate]) {
     let json = serde_json::to_string(&serde_json::json!({ "updates": actions }))
         .expect("serializing updates");
     let mut stdout = io::stdout().lock();
     let _ = writeln!(stdout, "{}", json);
 }
 
-pub fn update_file_count(actions: &[ActionReference]) -> usize {
+pub fn update_file_count(actions: &[ActionUpdate]) -> usize {
     actions
         .iter()
-        .map(|a| a.file.as_str())
+        .map(|a| a.action.file.as_str())
         .collect::<BTreeSet<_>>()
         .len()
 }

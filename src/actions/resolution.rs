@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::actions::reference::ActionReference;
+use crate::actions::reference::{ActionReference, ActionUpdate};
 use crate::actions::version::{Version, is_likely_sha, parse_version, sha_matches};
 
 #[derive(Debug, Clone)]
@@ -41,11 +41,12 @@ enum CurrentRefKind {
 }
 
 pub fn resolve(
-    actions: &mut [ActionReference],
+    actions: &[ActionReference],
     tags: &HashMap<(String, String), Vec<Tag>>,
     config: &ResolveConfig,
-) {
-    for action in actions.iter_mut() {
+) -> Vec<ActionUpdate> {
+    let mut updates = Vec::new();
+    for action in actions {
         let action_name = action.action_name();
         if config.excludes.iter().any(|ex| action_name.contains(ex)) {
             continue;
@@ -67,7 +68,7 @@ pub fn resolve(
             .as_deref()
             .and_then(|vc| repo_tags.iter().find(|t| t.name == vc));
 
-        action.expected_sha = if let Some(tag) = comment_tag {
+        let expected_sha = if let Some(tag) = comment_tag {
             tag.sha.clone()
         } else if let Some(tag_ref) = repo_tags.iter().find(|t| {
             t.name == action.current_ref
@@ -81,7 +82,7 @@ pub fn resolve(
             String::new()
         };
 
-        action.sha_mismatch = matches!(ctx, CurrentRefKind::Sha)
+        let sha_mismatch = matches!(ctx, CurrentRefKind::Sha)
             && comment_tag
                 .map(|t| !sha_matches(&action.current_ref, &t.sha))
                 .unwrap_or(false);
@@ -101,23 +102,26 @@ pub fn resolve(
             continue;
         }
 
-        if !action.sha_mismatch
-            && current_ref_matches_style(&action.current_ref, target, config.style)
-        {
+        if !sha_mismatch && current_ref_matches_style(&action.current_ref, target, config.style) {
             continue;
         }
 
-        action.is_branch = matches!(ctx, CurrentRefKind::Branch);
-        action.is_major = current_version
-            .map(|v| target.version.major > v.major)
-            .unwrap_or(false);
-        action.new_ref = match config.style {
-            PinStyle::Sha => target.sha.clone(),
-            PinStyle::Tag => target.name.clone(),
-        };
-        action.new_version = target.name.clone();
-        action.needs_update = true;
+        updates.push(ActionUpdate {
+            action: action.clone(),
+            new_ref: match config.style {
+                PinStyle::Sha => target.sha.clone(),
+                PinStyle::Tag => target.name.clone(),
+            },
+            new_version: target.name.clone(),
+            expected_sha,
+            sha_mismatch,
+            is_branch: matches!(ctx, CurrentRefKind::Branch),
+            is_major: current_version
+                .map(|v| target.version.major > v.major)
+                .unwrap_or(false),
+        });
     }
+    updates
 }
 
 fn classify(action: &ActionReference, skip_branches: bool) -> Option<CurrentRefKind> {
@@ -176,13 +180,6 @@ mod tests {
             line: 4,
             ref_start: 0,
             ref_end: current_ref.len(),
-            new_ref: String::new(),
-            new_version: String::new(),
-            expected_sha: String::new(),
-            sha_mismatch: false,
-            is_branch: false,
-            is_major: false,
-            needs_update: false,
         }
     }
 

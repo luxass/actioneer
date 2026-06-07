@@ -90,7 +90,7 @@ fn finds_composite_action_step_uses() {
 }
 
 #[test]
-fn preserves_ref_offsets_for_quoted_values() {
+fn discovers_quoted_values() {
     let input = r#"
         jobs:
           build:
@@ -104,9 +104,7 @@ fn preserves_ref_offsets_for_quoted_values() {
     let actions = references_in(&workspace, "ci.yml");
 
     assert_eq!(1, actions.len());
-    let normalized = workspace.read("ci.yml");
-    assert_eq!(normalized.find("v4").unwrap(), actions[0].ref_start);
-    assert_eq!(normalized.find("v4").unwrap() + 2, actions[0].ref_end);
+    assert_eq!("v4", actions[0].current_ref);
 }
 
 #[test]

@@ -14,7 +14,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
 
-use crate::actions::ActionReference;
+use crate::actions::{ActionUpdate, UpdateNote};
 
 const FOOTER: &str = "Up/Down/j/k move  ←→ scroll  PgUp/PgDn jump  d details  o open GitHub  space toggle  tab fold  f file  a all  i invert  n none  enter apply  q cancel";
 
@@ -78,7 +78,7 @@ impl State {
     }
 }
 
-pub fn select(actions: &[ActionReference]) -> Result<Vec<usize>, Error> {
+pub fn select(actions: &[ActionUpdate]) -> Result<Vec<usize>, Error> {
     if actions.is_empty() {
         return Ok(Vec::new());
     }
@@ -113,7 +113,7 @@ pub fn select(actions: &[ActionReference]) -> Result<Vec<usize>, Error> {
 
 fn run<B: Backend>(
     terminal: &mut Terminal<B>,
-    actions: &[ActionReference],
+    actions: &[ActionUpdate],
 ) -> Result<Vec<usize>, Error> {
     let mut state = State::new(actions.len());
 
@@ -145,10 +145,10 @@ fn run<B: Backend>(
                     let all_on = actions
                         .iter()
                         .zip(state.selected.iter())
-                        .filter(|(a, _)| a.file == *file)
+                        .filter(|(a, _)| a.action.file == *file)
                         .all(|(_, s)| *s);
                     for (a, s) in actions.iter().zip(state.selected.iter_mut()) {
-                        if a.file == *file {
+                        if a.action.file == *file {
                             *s = !all_on;
                         }
                     }
@@ -166,10 +166,10 @@ fn run<B: Backend>(
                 let all_on = actions
                     .iter()
                     .zip(state.selected.iter())
-                    .filter(|(a, _)| a.file == file)
+                    .filter(|(a, _)| a.action.file == file)
                     .all(|(_, s)| *s);
                 for (a, s) in actions.iter().zip(state.selected.iter_mut()) {
-                    if a.file == file {
+                    if a.action.file == file {
                         *s = !all_on;
                     }
                 }
@@ -216,16 +216,16 @@ fn run<B: Backend>(
 fn cursor_file<'a>(
     visible: &'a [VisibleRow],
     cursor: usize,
-    actions: &'a [ActionReference],
+    actions: &'a [ActionUpdate],
 ) -> &'a str {
     match visible.get(cursor) {
         Some(VisibleRow::FileHeader { file }) => file.as_str(),
-        Some(VisibleRow::Update { original_index }) => &actions[*original_index].file,
+        Some(VisibleRow::Update { original_index }) => &actions[*original_index].action.file,
         None => "",
     }
 }
 
-fn open_github(action: &ActionReference) -> Result<(), Error> {
+fn open_github(action: &ActionUpdate) -> Result<(), Error> {
     let url = github_url(action);
     let mut command = if cfg!(target_os = "macos") {
         let mut cmd = Command::new("open");
@@ -248,7 +248,8 @@ fn open_github(action: &ActionReference) -> Result<(), Error> {
     Ok(())
 }
 
-fn github_url(action: &ActionReference) -> String {
+fn github_url(update: &ActionUpdate) -> String {
+    let action = &update.action;
     let repo = format!("https://github.com/{}/{}", action.owner, action.name);
     let path = action.path.trim_start_matches('/');
     if path.is_empty() {
@@ -317,11 +318,11 @@ fn read_key() -> Result<Key, Error> {
     }
 }
 
-fn visible_rows(actions: &[ActionReference], collapsed: &HashSet<String>) -> Vec<VisibleRow> {
+fn visible_rows(actions: &[ActionUpdate], collapsed: &HashSet<String>) -> Vec<VisibleRow> {
     let mut indexed: Vec<(usize, &str)> = actions
         .iter()
         .enumerate()
-        .map(|(i, a)| (i, a.file.as_str()))
+        .map(|(i, a)| (i, a.action.file.as_str()))
         .collect();
     indexed.sort_by_key(|(_, f)| *f);
 
@@ -347,7 +348,7 @@ fn visible_rows(actions: &[ActionReference], collapsed: &HashSet<String>) -> Vec
 
 fn draw(
     frame: &mut ratatui::Frame<'_>,
-    actions: &[ActionReference],
+    actions: &[ActionUpdate],
     visible: &[VisibleRow],
     state: &State,
 ) {
@@ -363,35 +364,23 @@ fn draw(
             value.to_string()
         }
     };
-    let version_change = |a: &ActionReference| {
-        let current = a.version_comment.as_deref().unwrap_or(&a.current_ref);
-        if current == a.new_version {
-            a.new_version.clone()
-        } else {
-            format!("{} -> {}", current, a.new_version)
-        }
-    };
-    let notes = |a: &ActionReference| {
-        let mut notes = Vec::new();
-        if a.sha_mismatch {
-            notes.push("SHA mismatch");
-        }
-        if a.is_branch {
-            notes.push("mutable branch");
-        }
-        if a.is_major {
-            notes.push("major update");
-        }
-        notes
+    let note_label = |note: UpdateNote| match note {
+        UpdateNote::ShaMismatch => "SHA mismatch",
+        UpdateNote::MutableBranch => "mutable branch",
+        UpdateNote::MajorUpdate => "major update",
     };
 
     let (act_w, ref_w, ver_w, loc_w) =
         actions
             .iter()
             .fold((0usize, 0usize, 0usize, 0usize), |(a, r, v, l), x| {
-                let refs = format!("{} -> {}", short_ref(&x.current_ref), short_ref(&x.new_ref));
-                let version = version_change(x);
-                let loc = format!("{}:{}", x.file, x.line);
+                let refs = format!(
+                    "{} -> {}",
+                    short_ref(&x.action.current_ref),
+                    short_ref(&x.new_ref)
+                );
+                let version = x.version_label();
+                let loc = format!("{}:{}", x.action.file, x.action.line);
                 (
                     a.max(x.action_name().chars().count()),
                     r.max(refs.chars().count()),
@@ -404,7 +393,12 @@ fn draw(
         .iter()
         .map(|a| {
             let mut w = 6 + act_w + 2 + ref_w + 2 + ver_w + 2 + loc_w;
-            let notes = notes(a).join(", ");
+            let notes = a
+                .notes()
+                .into_iter()
+                .map(note_label)
+                .collect::<Vec<_>>()
+                .join(", ");
             if !notes.is_empty() {
                 w += 2 + notes.chars().count();
             }
@@ -452,7 +446,7 @@ fn draw(
             let (sel, total) = actions
                 .iter()
                 .zip(state.selected.iter())
-                .filter(|(a, _)| a.file == *file)
+                .filter(|(a, _)| a.action.file == *file)
                 .fold((0, 0), |(s, t), (_, x)| (s + usize::from(*x), t + 1));
             let marker = if state.collapsed.contains(file) {
                 "▸"
@@ -490,7 +484,7 @@ fn draw(
             } else {
                 Style::default().fg(Color::DarkGray)
             };
-            let target_s = if a.sha_mismatch || a.is_branch {
+            let target_s = if a.is_security_sensitive() {
                 Color::Yellow
             } else if a.is_major {
                 Color::Red
@@ -510,30 +504,41 @@ fn draw(
                 Span::styled(
                     format!(
                         "{:1$}",
-                        format!("{} -> {}", short_ref(&a.current_ref), short_ref(&a.new_ref)),
+                        format!(
+                            "{} -> {}",
+                            short_ref(&a.action.current_ref),
+                            short_ref(&a.new_ref)
+                        ),
                         ref_w
                     ),
                     Style::default().fg(target_s),
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("{:1$}", version_change(a), ver_w),
+                    format!("{:1$}", a.version_label(), ver_w),
                     Style::default().fg(Color::Blue),
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("{:1$}", format!("{}:{}", a.file, a.line), loc_w),
+                    format!(
+                        "{:1$}",
+                        format!("{}:{}", a.action.file, a.action.line),
+                        loc_w
+                    ),
                     Style::default().fg(Color::DarkGray),
                 ),
             ];
-            let notes = notes(a);
+            let notes = a.notes();
             if !notes.is_empty() {
                 spans.push(Span::raw("  "));
                 for (i, note) in notes.iter().enumerate() {
                     if i > 0 {
                         spans.push(Span::styled(", ", Style::default().fg(Color::DarkGray)));
                     }
-                    spans.push(Span::styled(*note, Style::default().fg(target_s)));
+                    spans.push(Span::styled(
+                        note_label(*note),
+                        Style::default().fg(target_s),
+                    ));
                 }
             }
             ListItem::new(Line::from(scroll_spans(spans, scroll)))
@@ -567,7 +572,7 @@ fn draw(
                 let (sel, total) = actions
                     .iter()
                     .zip(state.selected.iter())
-                    .filter(|(a, _)| a.file == *file)
+                    .filter(|(a, _)| a.action.file == *file)
                     .fold((0, 0), |(s, t), (_, x)| (s + usize::from(*x), t + 1));
                 vec![
                     Line::from(Span::styled(
@@ -583,7 +588,12 @@ fn draw(
             }
             Some(VisibleRow::Update { original_index }) => {
                 let a = &actions[*original_index];
-                let note_text = notes(a).join(", ");
+                let note_text = a
+                    .notes()
+                    .into_iter()
+                    .map(note_label)
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 vec![
                     Line::from(Span::styled(
                         a.action_name(),
@@ -592,7 +602,7 @@ fn draw(
                     Line::from(""),
                     Line::from(vec![
                         Span::styled("Current ref: ", Style::default().fg(Color::DarkGray)),
-                        Span::raw(a.current_ref.clone()),
+                        Span::raw(a.action.current_ref.clone()),
                     ]),
                     Line::from(vec![
                         Span::styled("Target ref:  ", Style::default().fg(Color::DarkGray)),
@@ -600,11 +610,11 @@ fn draw(
                     ]),
                     Line::from(vec![
                         Span::styled("Version:     ", Style::default().fg(Color::DarkGray)),
-                        Span::raw(version_change(a)),
+                        Span::raw(a.version_label()),
                     ]),
                     Line::from(vec![
                         Span::styled("Location:    ", Style::default().fg(Color::DarkGray)),
-                        Span::raw(format!("{}:{}", a.file, a.line)),
+                        Span::raw(format!("{}:{}", a.action.file, a.action.line)),
                     ]),
                     Line::from(vec![
                         Span::styled("GitHub:      ", Style::default().fg(Color::DarkGray)),
@@ -676,19 +686,28 @@ fn scroll_spans(spans: Vec<Span<'static>>, scroll: usize) -> Vec<Span<'static>> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::ActionReference;
 
-    fn mk_action(file: &str, name: &str) -> ActionReference {
-        ActionReference::from_discovery(
-            "actions".into(),
-            name.into(),
-            String::new(),
-            "v1.0.0".into(),
-            Some("1.0.0".into()),
-            file.into(),
-            10,
-            20,
-            26,
-        )
+    fn mk_action(file: &str, name: &str) -> ActionUpdate {
+        ActionUpdate {
+            action: ActionReference::from_discovery(
+                "actions".into(),
+                name.into(),
+                String::new(),
+                "v1.0.0".into(),
+                Some("1.0.0".into()),
+                file.into(),
+                10,
+                20,
+                26,
+            ),
+            new_ref: "sha".into(),
+            new_version: "v1.0.0".into(),
+            expected_sha: String::new(),
+            sha_mismatch: false,
+            is_branch: false,
+            is_major: false,
+        }
     }
 
     #[test]
@@ -791,17 +810,25 @@ mod tests {
 
     #[test]
     fn github_url_action_path_at_current_ref() {
-        let action = ActionReference::from_discovery(
-            "luxass".into(),
-            "shared-workflows".into(),
-            "/.github/workflows/reusable-ci.yaml".into(),
-            "ce9e8e27".into(),
-            Some("v0.6.0".into()),
-            "ci.yml".into(),
-            10,
-            20,
-            28,
-        );
+        let action = ActionUpdate {
+            action: ActionReference::from_discovery(
+                "luxass".into(),
+                "shared-workflows".into(),
+                "/.github/workflows/reusable-ci.yaml".into(),
+                "ce9e8e27".into(),
+                Some("v0.6.0".into()),
+                "ci.yml".into(),
+                10,
+                20,
+                28,
+            ),
+            new_ref: "sha".into(),
+            new_version: "v0.6.0".into(),
+            expected_sha: String::new(),
+            sha_mismatch: false,
+            is_branch: false,
+            is_major: false,
+        };
         assert_eq!(
             "https://github.com/luxass/shared-workflows/blob/ce9e8e27/.github/workflows/reusable-ci.yaml",
             github_url(&action)

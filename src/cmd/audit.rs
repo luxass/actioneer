@@ -26,7 +26,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         }
     }
 
-    let mut actions = match find_action_references(&inputs, args.recursive) {
+    let actions = match find_action_references(&inputs, args.recursive) {
         Ok(a) => a,
         Err(err) => {
             printer.error(&format!("Scan failed: {err}"));
@@ -94,20 +94,22 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         mode: args.update,
         style: args.pin,
     };
-    resolve(&mut actions, &tags, &resolve_config);
-    actions.retain(|a| a.is_branch || a.sha_mismatch);
+    let findings: Vec<_> = resolve(&actions, &tags, &resolve_config)
+        .into_iter()
+        .filter(|a| a.is_branch || a.sha_mismatch)
+        .collect();
 
     if global.mode.is_json() {
-        print_json(&actions);
-        return Ok(if actions.iter().any(|a| a.sha_mismatch || a.is_branch) {
+        print_json(&findings);
+        return Ok(if findings.iter().any(|a| a.is_security_sensitive()) {
             ExitCode::FAILURE
         } else {
             ExitCode::SUCCESS
         });
     }
 
-    let branch_count = actions.iter().filter(|a| a.is_branch).count();
-    let mismatch_count = actions.iter().filter(|a| a.sha_mismatch).count();
+    let branch_count = findings.iter().filter(|a| a.is_branch).count();
+    let mismatch_count = findings.iter().filter(|a| a.sha_mismatch).count();
 
     if branch_count == 0 && mismatch_count == 0 {
         printer.info("All references are securely pinned.");
@@ -122,13 +124,13 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
             if branch_count == 1 { "uses" } else { "use" },
             if branch_count == 1 { "is" } else { "are" },
         ));
-        for a in actions.iter().filter(|a| a.is_branch) {
+        for a in findings.iter().filter(|a| a.is_branch) {
             printer.error(&format!(
                 "{} at {}:{} uses {} (unpinned branch ref)",
                 a.action_name().bold(),
-                a.file.cyan(),
-                a.line,
-                a.current_ref.red()
+                a.action.file.cyan(),
+                a.action.line,
+                a.action.current_ref.red()
             ));
         }
     }
@@ -139,15 +141,15 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
             mismatch_count.to_string().yellow(),
             if mismatch_count == 1 { "" } else { "s" },
         ));
-        for a in actions.iter().filter(|a| a.sha_mismatch) {
+        for a in findings.iter().filter(|a| a.sha_mismatch) {
             let mut line = format!(
                 "{} at {}:{} uses {}",
                 a.action_name().bold(),
-                a.file.cyan(),
-                a.line,
-                a.current_ref.red()
+                a.action.file.cyan(),
+                a.action.line,
+                a.action.current_ref.red()
             );
-            if let Some(vc) = &a.version_comment {
+            if let Some(vc) = &a.action.version_comment {
                 line.push_str(&format!(" but says {}", vc.yellow()));
             }
             if !a.expected_sha.is_empty() {

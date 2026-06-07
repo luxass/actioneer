@@ -19,16 +19,9 @@ fn main() -> ExitCode {
 fn run(app: App) -> anyhow::Result<ExitCode> {
     let global = app.global.clone();
     let gh = GitHubClient::new(!global.no_cache);
-    match app.command {
-        Some(Command::Version) => Ok(cmd::version::run()),
-        Some(Command::Audit(args)) => {
-            cmd::audit::run(global, args, gh)
-        }
-        Some(Command::Update(args)) => {
-            cmd::update::run(global, args, gh)
-        }
-        None => {
-            cmd::update::run(global, app.update, gh)
-        }
+    match app.command.unwrap_or(Command::Update(app.update)) {
+        Command::Version => Ok(cmd::version::run()),
+        Command::Audit(args) => cmd::audit::run(global, args, gh),
+        Command::Update(args) => cmd::update::run(global, args, gh),
     }
 }

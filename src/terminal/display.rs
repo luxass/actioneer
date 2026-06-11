@@ -92,6 +92,26 @@ pub fn short_sha(sha: &str) -> &str {
     &sha[..sha.len().min(12)]
 }
 
+pub fn sha_mismatch_line(action: &ActionUpdate) -> String {
+    let mut line = format!(
+        "{} at {}:{} uses {}",
+        action.action_name().bold(),
+        action.action.file.cyan(),
+        action.action.line,
+        action.action.current_ref.red()
+    );
+    if let Some(vc) = &action.action.version_comment {
+        line.push_str(&format!(" but says {}", vc.yellow()));
+    }
+    if !action.expected_sha.is_empty() {
+        line.push_str(&format!(
+            "; expected {}",
+            short_sha(&action.expected_sha).green()
+        ));
+    }
+    line
+}
+
 pub(crate) fn strip_ansi(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
@@ -108,4 +128,49 @@ pub(crate) fn strip_ansi(input: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::actions::{ActionReference, WorkflowEdit};
+
+    #[test]
+    fn sha_mismatch_line_includes_comment_and_expected_sha() {
+        let action = action_update(
+            "de0fac2e4500dabe0009e67214ff5f5447ce83dd",
+            Some("v6.0.2"),
+            "df4cb1c069e1874edd31b4311f1884172cec0e10",
+        );
+
+        assert_eq!(
+            "actions/checkout at .github/workflows/ci.yaml:37 uses de0fac2e4500dabe0009e67214ff5f5447ce83dd but says v6.0.2; expected df4cb1c069e1",
+            strip_ansi(&sha_mismatch_line(&action))
+        );
+    }
+
+    fn action_update(
+        current_ref: &str,
+        version_comment: Option<&str>,
+        expected_sha: &str,
+    ) -> ActionUpdate {
+        ActionUpdate {
+            action: ActionReference {
+                owner: "actions".into(),
+                name: "checkout".into(),
+                path: String::new(),
+                current_ref: current_ref.into(),
+                version_comment: version_comment.map(str::to_string),
+                file: ".github/workflows/ci.yaml".into(),
+                line: 37,
+                edit: WorkflowEdit::new(0, 0),
+            },
+            new_ref: expected_sha.into(),
+            new_version: "v6.0.3".into(),
+            expected_sha: expected_sha.into(),
+            sha_mismatch: true,
+            is_branch: false,
+            is_major: false,
+        }
+    }
 }

@@ -206,18 +206,13 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         return Ok(ExitCode::SUCCESS);
     }
 
+    let selected_files = selected_file_count(&updates, &selected);
     printer.info(&format!(
         "Applying {} selected update{} across {} file{}:",
         selected.len().to_string().yellow(),
         if selected.len() == 1 { "" } else { "s" },
-        selected_file_count(&updates, &selected)
-            .to_string()
-            .yellow(),
-        if selected_file_count(&updates, &selected) == 1 {
-            ""
-        } else {
-            "s"
-        },
+        selected_files.to_string().yellow(),
+        if selected_files == 1 { "" } else { "s" },
     ));
     print_update_list(&printer, &updates, &selected);
 
@@ -327,6 +322,7 @@ fn append_notes(line: &mut String, update: &ActionUpdate) {
 mod tests {
     use super::*;
     use crate::actions::{ActionReference, WorkflowEdit};
+    use crate::terminal::display::strip_ansi;
 
     #[test]
     fn update_change_prefers_version_comment_and_shortens_shas() {
@@ -339,7 +335,7 @@ mod tests {
 
         assert_eq!(
             "v6.0.2 -> v6.0.3 (de0fac2e4500 -> df4cb1c069e1)",
-            strip_ansi_for_test(&format_update_change(&update))
+            strip_ansi(&format_update_change(&update))
         );
     }
 
@@ -349,7 +345,7 @@ mod tests {
 
         assert_eq!(
             "v4.1.0 -> v4.2.0",
-            strip_ansi_for_test(&format_update_change(&update))
+            strip_ansi(&format_update_change(&update))
         );
     }
 
@@ -377,23 +373,5 @@ mod tests {
             is_branch: false,
             is_major: false,
         }
-    }
-
-    fn strip_ansi_for_test(input: &str) -> String {
-        let mut out = String::with_capacity(input.len());
-        let mut chars = input.chars().peekable();
-        while let Some(ch) = chars.next() {
-            if ch == '\x1b' && chars.peek() == Some(&'[') {
-                chars.next();
-                for c in chars.by_ref() {
-                    if c.is_ascii_alphabetic() {
-                        break;
-                    }
-                }
-            } else {
-                out.push(ch);
-            }
-        }
-        out
     }
 }

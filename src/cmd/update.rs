@@ -5,7 +5,8 @@ use owo_colors::OwoColorize;
 use crate::actions::{ActionUpdate, UpdateNote, is_likely_sha, resolve};
 use crate::cli::{GlobalArgs, ScanArgs};
 use crate::cmd::{
-    default_inputs, describe_sha_mismatch, discover_actions, fetch_tags_reporting, resolve_config,
+    default_inputs, describe_sha_mismatch, discover_actions, fetch_tags_reporting, plural,
+    resolve_config,
 };
 use crate::github::GitHubClient;
 use crate::terminal::display::{Printer, print_json, short_sha, update_file_count};
@@ -36,13 +37,9 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> ExitCode {
     printer.info(&format!(
         "Resolved {} available update{} across {} workflow file{}.",
         updates.len().to_string().yellow(),
-        if updates.len() == 1 { "" } else { "s" },
+        plural(updates.len()),
         update_file_count(&updates).to_string().yellow(),
-        if update_file_count(&updates) == 1 {
-            ""
-        } else {
-            "s"
-        },
+        plural(update_file_count(&updates)),
     ));
 
     let mismatch_count = updates.iter().filter(|a| a.sha_mismatch).count();
@@ -50,7 +47,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> ExitCode {
         printer.warn(&format!(
             "{} pinned SHA{} do not match their version comments.",
             mismatch_count.to_string().yellow(),
-            if mismatch_count == 1 { "" } else { "s" },
+            plural(mismatch_count),
         ));
         for a in updates.iter().filter(|a| a.sha_mismatch) {
             printer.warn(&describe_sha_mismatch(a));
@@ -62,7 +59,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> ExitCode {
         printer.warn(&format!(
             "{} action reference{} use mutable branch refs (e.g. @main, @master). These are insecure and should be pinned to a version tag or SHA.",
             branch_count.to_string().yellow(),
-            if branch_count == 1 { "" } else { "s" },
+            plural(branch_count),
         ));
     }
 
@@ -70,7 +67,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> ExitCode {
         printer.info(&format!(
             "Preview: {} available update{}.",
             updates.len().to_string().yellow(),
-            if updates.len() == 1 { "" } else { "s" },
+            plural(updates.len()),
         ));
         let selected: Vec<_> = (0..updates.len()).collect();
         print_update_list(&printer, &updates, &selected);
@@ -121,9 +118,9 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> ExitCode {
     printer.info(&format!(
         "Applying {} selected update{} across {} file{}:",
         selected.len().to_string().yellow(),
-        if selected.len() == 1 { "" } else { "s" },
+        plural(selected.len()),
         selected_files.to_string().yellow(),
-        if selected_files == 1 { "" } else { "s" },
+        plural(selected_files),
     ));
     print_update_list(&printer, &updates, &selected);
 
@@ -133,9 +130,9 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> ExitCode {
             printer.info(&format!(
                 "Updated {} workflow reference{} across {} file{}.",
                 applied.to_string().yellow(),
-                if applied == 1 { "" } else { "s" },
+                plural(applied),
                 files.to_string().yellow(),
-                if files == 1 { "" } else { "s" },
+                plural(files),
             ));
             ExitCode::SUCCESS
         }
@@ -232,7 +229,7 @@ fn append_notes(line: &mut String, update: &ActionUpdate) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actions::{ActionReference, WorkflowEdit};
+    use crate::actions::{ActionReference, fixtures};
     use crate::terminal::display::strip_ansi;
 
     #[test]
@@ -267,22 +264,15 @@ mod tests {
         new_version: &str,
     ) -> ActionUpdate {
         ActionUpdate {
-            action: ActionReference {
-                owner: "actions".into(),
-                name: "checkout".into(),
-                path: String::new(),
-                current_ref: current_ref.into(),
-                version_comment: version_comment.map(str::to_string),
-                file: ".github/workflows/ci.yaml".into(),
-                line: 1,
-                edit: WorkflowEdit::new(0, 0),
-            },
             new_ref: new_ref.into(),
             new_version: new_version.into(),
             expected_sha: new_ref.into(),
-            sha_mismatch: false,
-            is_branch: false,
-            is_major: false,
+            ..fixtures::update(ActionReference {
+                current_ref: current_ref.into(),
+                version_comment: version_comment.map(str::to_string),
+                file: ".github/workflows/ci.yaml".into(),
+                ..fixtures::reference()
+            })
         }
     }
 }

@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use crate::actions::{Tag, parse_version};
+use crate::actions::Tag;
 
 const CACHE_TTL: Duration = Duration::from_secs(60 * 60 * 6);
 
@@ -48,13 +48,7 @@ pub fn read_cache(path: &Path) -> Option<Vec<Tag>> {
     Some(
         cached
             .into_iter()
-            .filter_map(|t| {
-                Some(Tag {
-                    name: t.name.clone(),
-                    sha: t.sha,
-                    version: parse_version(&t.name)?,
-                })
-            })
+            .filter_map(|t| Tag::from_name_sha(t.name, t.sha))
             .collect(),
     )
 }
@@ -91,6 +85,7 @@ fn is_truthy(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::parse_version;
 
     #[test]
     fn encode_keeps_safe_characters() {

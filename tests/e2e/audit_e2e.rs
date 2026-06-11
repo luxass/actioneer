@@ -4,8 +4,7 @@ use actioneer::actions::{PinStyle, UpdateMode};
 use actioneer::cli::{GlobalArgs, Mode, ScanArgs};
 use actioneer::cmd::audit;
 use actioneer::github::GitHubClient;
-use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::MockServer;
 
 fn global_args() -> GlobalArgs {
     GlobalArgs {
@@ -39,14 +38,13 @@ async fn all_secure_returns_success() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"goodsha"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"goodsha"}}]"#,
+    )
+    .await;
 
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
@@ -67,14 +65,13 @@ async fn branch_ref_returns_failure() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
+    )
+    .await;
 
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
@@ -95,14 +92,13 @@ async fn sha_mismatch_returns_failure() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"goodsha"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"goodsha"}}]"#,
+    )
+    .await;
 
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
@@ -140,14 +136,13 @@ async fn json_mode_clean_returns_success() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"goodsha"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"goodsha"}}]"#,
+    )
+    .await;
 
     let mut global = global_args();
     global.mode = Mode::Json;
@@ -170,14 +165,13 @@ async fn json_mode_with_issue_returns_failure() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
+    )
+    .await;
 
     let mut global = global_args();
     global.mode = Mode::Json;

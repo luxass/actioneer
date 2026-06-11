@@ -142,16 +142,7 @@ fn run<B: Backend>(
             }
             Key::Toggle => match &visible[state.cursor] {
                 VisibleRow::FileHeader { file } => {
-                    let all_on = actions
-                        .iter()
-                        .zip(state.selected.iter())
-                        .filter(|(a, _)| a.action.file == *file)
-                        .all(|(_, s)| *s);
-                    for (a, s) in actions.iter().zip(state.selected.iter_mut()) {
-                        if a.action.file == *file {
-                            *s = !all_on;
-                        }
-                    }
+                    toggle_file_selection(actions, &mut state.selected, file);
                 }
                 VisibleRow::Update { original_index } => {
                     state.selected[*original_index] = !state.selected[*original_index];
@@ -162,17 +153,8 @@ fn run<B: Backend>(
                 state.selected.fill(!all);
             }
             Key::ToggleFile => {
-                let file = cursor_file(&visible, state.cursor, actions);
-                let all_on = actions
-                    .iter()
-                    .zip(state.selected.iter())
-                    .filter(|(a, _)| a.action.file == file)
-                    .all(|(_, s)| *s);
-                for (a, s) in actions.iter().zip(state.selected.iter_mut()) {
-                    if a.action.file == file {
-                        *s = !all_on;
-                    }
-                }
+                let file = cursor_file(&visible, state.cursor, actions).to_string();
+                toggle_file_selection(actions, &mut state.selected, &file);
             }
             Key::ToggleCollapse => {
                 let file = cursor_file(&visible, state.cursor, actions);
@@ -211,6 +193,31 @@ fn run<B: Backend>(
             Key::Resize | Key::Ignore => {}
         }
     }
+}
+
+fn toggle_file_selection(actions: &[ActionUpdate], selected: &mut [bool], file: &str) {
+    let all_on = actions
+        .iter()
+        .zip(selected.iter())
+        .filter(|(a, _)| a.action.file == file)
+        .all(|(_, s)| *s);
+    for (a, s) in actions.iter().zip(selected.iter_mut()) {
+        if a.action.file == file {
+            *s = !all_on;
+        }
+    }
+}
+
+fn file_selection_counts(
+    actions: &[ActionUpdate],
+    selected: &[bool],
+    file: &str,
+) -> (usize, usize) {
+    actions
+        .iter()
+        .zip(selected.iter())
+        .filter(|(a, _)| a.action.file == file)
+        .fold((0, 0), |(s, t), (_, x)| (s + usize::from(*x), t + 1))
 }
 
 fn cursor_file<'a>(
@@ -443,11 +450,7 @@ fn draw(
 
     items.extend(visible.iter().map(|row| match row {
         VisibleRow::FileHeader { file } => {
-            let (sel, total) = actions
-                .iter()
-                .zip(state.selected.iter())
-                .filter(|(a, _)| a.action.file == *file)
-                .fold((0, 0), |(s, t), (_, x)| (s + usize::from(*x), t + 1));
+            let (sel, total) = file_selection_counts(actions, &state.selected, file);
             let marker = if state.collapsed.contains(file) {
                 "▸"
             } else {
@@ -569,11 +572,7 @@ fn draw(
     if let Some(details_area) = body.1 {
         let detail_lines = match visible.get(state.cursor) {
             Some(VisibleRow::FileHeader { file }) => {
-                let (sel, total) = actions
-                    .iter()
-                    .zip(state.selected.iter())
-                    .filter(|(a, _)| a.action.file == *file)
-                    .fold((0, 0), |(s, t), (_, x)| (s + usize::from(*x), t + 1));
+                let (sel, total) = file_selection_counts(actions, &state.selected, file);
                 vec![
                     Line::from(Span::styled(
                         file.clone(),
@@ -686,27 +685,15 @@ fn scroll_spans(spans: Vec<Span<'static>>, scroll: usize) -> Vec<Span<'static>> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actions::{ActionReference, WorkflowEdit};
+    use crate::actions::{ActionReference, fixtures};
 
     fn mk_action(file: &str, name: &str) -> ActionUpdate {
-        ActionUpdate {
-            action: ActionReference {
-                owner: "actions".into(),
-                name: name.into(),
-                path: String::new(),
-                current_ref: "v1.0.0".into(),
-                version_comment: Some("1.0.0".into()),
-                file: file.into(),
-                line: 10,
-                edit: WorkflowEdit::new(20, 26),
-            },
-            new_ref: "sha".into(),
-            new_version: "v1.0.0".into(),
-            expected_sha: String::new(),
-            sha_mismatch: false,
-            is_branch: false,
-            is_major: false,
-        }
+        fixtures::update(ActionReference {
+            name: name.into(),
+            version_comment: Some("1.0.0".into()),
+            file: file.into(),
+            ..fixtures::reference()
+        })
     }
 
     #[test]
@@ -809,24 +796,14 @@ mod tests {
 
     #[test]
     fn github_url_action_path_at_current_ref() {
-        let action = ActionUpdate {
-            action: ActionReference {
-                owner: "luxass".into(),
-                name: "shared-workflows".into(),
-                path: "/.github/workflows/reusable-ci.yaml".into(),
-                current_ref: "ce9e8e27".into(),
-                version_comment: Some("v0.6.0".into()),
-                file: "ci.yml".into(),
-                line: 10,
-                edit: WorkflowEdit::new(20, 28),
-            },
-            new_ref: "sha".into(),
-            new_version: "v0.6.0".into(),
-            expected_sha: String::new(),
-            sha_mismatch: false,
-            is_branch: false,
-            is_major: false,
-        };
+        let action = fixtures::update(ActionReference {
+            owner: "luxass".into(),
+            name: "shared-workflows".into(),
+            path: "/.github/workflows/reusable-ci.yaml".into(),
+            current_ref: "ce9e8e27".into(),
+            version_comment: Some("v0.6.0".into()),
+            ..fixtures::reference()
+        });
         assert_eq!(
             "https://github.com/luxass/shared-workflows/blob/ce9e8e27/.github/workflows/reusable-ci.yaml",
             github_url(&action)

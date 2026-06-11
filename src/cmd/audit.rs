@@ -5,7 +5,8 @@ use owo_colors::OwoColorize;
 use crate::actions::resolve;
 use crate::cli::{GlobalArgs, ScanArgs};
 use crate::cmd::{
-    default_inputs, describe_sha_mismatch, discover_actions, fetch_tags_reporting, resolve_config,
+    default_inputs, describe_sha_mismatch, discover_actions, fetch_tags_reporting, plural,
+    resolve_config,
 };
 use crate::github::GitHubClient;
 use crate::terminal::display::{Printer, print_json};
@@ -50,7 +51,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> ExitCode {
         printer.error(&format!(
             "{} action reference{} {} mutable branch refs and {} insecure.",
             branch_count.to_string().yellow(),
-            if branch_count == 1 { "" } else { "s" },
+            plural(branch_count),
             if branch_count == 1 { "uses" } else { "use" },
             if branch_count == 1 { "is" } else { "are" },
         ));
@@ -69,7 +70,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> ExitCode {
         printer.error(&format!(
             "{} pinned SHA{} do not match their stated versions.",
             mismatch_count.to_string().yellow(),
-            if mismatch_count == 1 { "" } else { "s" },
+            plural(mismatch_count),
         ));
         for a in findings.iter().filter(|a| a.sha_mismatch) {
             printer.error(&describe_sha_mismatch(a));

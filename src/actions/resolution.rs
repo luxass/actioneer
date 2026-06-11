@@ -10,6 +10,13 @@ pub struct Tag {
     pub version: Version,
 }
 
+impl Tag {
+    pub fn from_name_sha(name: String, sha: String) -> Option<Self> {
+        let version = parse_version(&name)?;
+        Some(Self { name, sha, version })
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, clap::ValueEnum)]
 pub enum PinStyle {
     #[default]
@@ -165,6 +172,7 @@ fn current_ref_matches_style(current_ref: &str, target: &Tag, style: PinStyle) -
 
 #[cfg(test)]
 mod tests {
+    use crate::actions::fixtures::{self, tag};
     use crate::actions::version::Version;
 
     use super::*;
@@ -173,24 +181,10 @@ mod tests {
         ActionReference {
             owner: owner.to_string(),
             name: name.to_string(),
-            path: String::new(),
             current_ref: current_ref.to_string(),
             version_comment: vc.map(|s| s.to_string()),
-            file: "ci.yml".into(),
-            line: 4,
             edit: crate::actions::WorkflowEdit::new(0, current_ref.len()),
-        }
-    }
-
-    fn tag(name: &str, sha: &str, major: u32, minor: u32, patch: u32) -> Tag {
-        Tag {
-            name: name.to_string(),
-            sha: sha.to_string(),
-            version: Version {
-                major,
-                minor,
-                patch,
-            },
+            ..fixtures::reference()
         }
     }
 

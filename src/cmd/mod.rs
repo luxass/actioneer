@@ -41,6 +41,10 @@ pub(crate) fn fetch_tags_for_actions(
     Ok(tags)
 }
 
+pub(crate) fn plural(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
+}
+
 fn default_inputs(inputs: Vec<String>, recursive: bool) -> Vec<String> {
     if inputs.is_empty() {
         vec![if recursive { "." } else { ".github" }.to_string()]

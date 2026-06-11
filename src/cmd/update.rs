@@ -2,98 +2,35 @@ use std::process::ExitCode;
 
 use owo_colors::OwoColorize;
 
-use crate::actions::{ActionUpdate, ResolveConfig, UpdateNote, is_likely_sha, resolve};
+use crate::actions::{ActionUpdate, UpdateNote, is_likely_sha, resolve};
 use crate::cli::{GlobalArgs, ScanArgs};
-use crate::cmd::{default_inputs, fetch_tags_for_actions};
-use crate::github::{Error as GitHubError, GitHubClient};
+use crate::cmd::{
+    default_inputs, describe_sha_mismatch, discover_actions, fetch_tags_reporting, resolve_config,
+};
+use crate::github::GitHubClient;
 use crate::terminal::display::{Printer, print_json, short_sha, update_file_count};
 use crate::terminal::prompt;
-use crate::workflows::{PatchError, apply_patches, find_action_references};
+use crate::workflows::{PatchError, apply_patches};
 
-pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Result<ExitCode> {
+pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> ExitCode {
     let printer = Printer::new(global.mode);
-    let inputs = default_inputs(args.inputs, args.recursive);
+    let inputs = default_inputs(args.inputs.clone(), args.recursive);
 
-    if inputs.len() == 1 {
-        printer.info(&format!("Scanning workflows in {}", inputs[0].bold()));
-    } else {
-        printer.info(&format!(
-            "Scanning {} input paths:",
-            inputs.len().to_string().yellow()
-        ));
-        for input in &inputs {
-            printer.debug(&format!("  {}", input.bright_black()));
-        }
-    }
-
-    let actions = match find_action_references(&inputs, args.recursive) {
-        Ok(a) => a,
-        Err(err) => {
-            printer.error(&format!("Scan failed: {err}"));
-            return Ok(ExitCode::FAILURE);
-        }
+    let actions = match discover_actions(&printer, global.mode, &inputs, args.recursive) {
+        Ok(actions) => actions,
+        Err(code) => return code,
     };
 
-    if actions.is_empty() {
-        if global.mode.is_json() {
-            print_json(&[]);
-        } else {
-            printer.warn("No action references found.");
-            printer.info("Point actioneer at a workflow file or directory with `uses:` entries.");
-        }
-        return Ok(ExitCode::SUCCESS);
-    }
-
-    let tags = match fetch_tags_for_actions(&actions, &gh) {
+    let tags = match fetch_tags_reporting(&printer, &actions, &gh) {
         Ok(tags) => tags,
-        Err(err) => {
-            printer.error(&format!(
-                "GitHub lookup failed for {}/{}.",
-                err.owner.bold(),
-                err.name.bold()
-            ));
-            match &err.error {
-                GitHubError::HttpStatus(status) => {
-                    printer.error(&format!(
-                        "GitHub returned HTTP {}.",
-                        status.to_string().yellow()
-                    ));
-                    let hint = match status {
-                        401 => {
-                            "Set GITHUB_TOKEN or run `gh auth login` so actioneer can authenticate GitHub requests."
-                        }
-                        403 => {
-                            "This is usually a rate limit or access restriction. Set GITHUB_TOKEN or run `gh auth login` before retrying."
-                        }
-                        404 => "The repository was not found or is not publicly accessible.",
-                        429 => "GitHub is rate limiting these requests.",
-                        502..=504 => "GitHub appears temporarily unavailable.",
-                        _ => {
-                            "Retry later, or run with --dry-run/--mode json to inspect scanned references."
-                        }
-                    };
-                    printer.info(hint);
-                }
-                GitHubError::Request(error) => {
-                    printer.error(&format!("Request error: {}.", error.to_string().yellow()));
-                    printer.info("Check network, DNS, proxy, and TLS settings. If you are unauthenticated, set GITHUB_TOKEN or run `gh auth login`.");
-                }
-            }
-            return Ok(ExitCode::FAILURE);
-        }
+        Err(code) => return code,
     };
 
-    let resolve_config = ResolveConfig {
-        excludes: global.excludes,
-        skip_branches: args.skip_branches,
-        mode: args.update,
-        style: args.pin,
-    };
-    let updates = resolve(&actions, &tags, &resolve_config);
+    let updates = resolve(&actions, &tags, &resolve_config(&global, &args));
 
     if global.mode.is_json() {
         print_json(&updates);
-        return Ok(ExitCode::SUCCESS);
+        return ExitCode::SUCCESS;
     }
 
     printer.info(&format!(
@@ -116,23 +53,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
             if mismatch_count == 1 { "" } else { "s" },
         ));
         for a in updates.iter().filter(|a| a.sha_mismatch) {
-            let mut line = format!(
-                "{} at {}:{} uses {}",
-                a.action_name().bold(),
-                a.action.file.cyan(),
-                a.action.line,
-                a.action.current_ref.red()
-            );
-            if let Some(vc) = &a.action.version_comment {
-                line.push_str(&format!(" but says {}", vc.yellow()));
-            }
-            if !a.expected_sha.is_empty() {
-                line.push_str(&format!(
-                    "; expected {}",
-                    short_sha(&a.expected_sha).green()
-                ));
-            }
-            printer.warn(&format!("{line}."));
+            printer.warn(&describe_sha_mismatch(a));
         }
     }
 
@@ -153,12 +74,12 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         ));
         let selected: Vec<_> = (0..updates.len()).collect();
         print_update_list(&printer, &updates, &selected);
-        return Ok(ExitCode::SUCCESS);
+        return ExitCode::SUCCESS;
     }
 
     if updates.is_empty() {
         printer.info("Everything is already up to date.");
-        return Ok(ExitCode::SUCCESS);
+        return ExitCode::SUCCESS;
     }
 
     let selected = if args.yes {
@@ -174,26 +95,26 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
                     "--dry-run".cyan(),
                     "--mode json".cyan()
                 ));
-                return Ok(ExitCode::FAILURE);
+                return ExitCode::FAILURE;
             }
             Err(prompt::Error::Canceled) => {
                 printer.warn("Selection canceled.");
-                return Ok(ExitCode::SUCCESS);
+                return ExitCode::SUCCESS;
             }
             Err(prompt::Error::Interrupted) => {
                 printer.warn("Selection interrupted.");
-                return Ok(ExitCode::FAILURE);
+                return ExitCode::FAILURE;
             }
             Err(e) => {
                 printer.error(&format!("Prompt error: {e}"));
-                return Ok(ExitCode::FAILURE);
+                return ExitCode::FAILURE;
             }
         }
     };
 
     if selected.is_empty() {
         printer.info("No updates selected. No files were changed.");
-        return Ok(ExitCode::SUCCESS);
+        return ExitCode::SUCCESS;
     }
 
     let selected_files = selected_file_count(&updates, &selected);
@@ -216,7 +137,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
                 files.to_string().yellow(),
                 if files == 1 { "" } else { "s" },
             ));
-            Ok(ExitCode::SUCCESS)
+            ExitCode::SUCCESS
         }
         Err(err) => {
             printer.error(&format!("Could not write selected updates: {err}."));
@@ -228,7 +149,7 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
                     printer.info("Some files may already have been written. Review your working tree before retrying.");
                 }
             }
-            Ok(ExitCode::FAILURE)
+            ExitCode::FAILURE
         }
     }
 }

@@ -10,6 +10,7 @@
 cargo build
 cargo run -- <args>
 cargo test
+cargo test --features e2e --test e2e   # opt-in e2e suite (hermetic, wiremock-backed)
 ```
 
 The binary name is `actioneer`.
@@ -33,6 +34,7 @@ Single-crate Rust CLI grouped by workflow scanning, action resolution, GitHub tr
 | `src/github/cache.rs` | Disk cache path policy, cache reads/writes, cache disabling |
 | `src/terminal/display.rs` | Human-readable printer helpers and JSON output |
 | `src/terminal/prompt.rs` | Interactive picker using ratatui + crossterm |
+| `src/cmd/mod.rs` | Shared command pipeline: input defaults, scan banner, discovery, tag fetching with error reporting |
 | `src/cmd/` | `update`, `audit`, `version` command handlers |
 
 ### Data Flow

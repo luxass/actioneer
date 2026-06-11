@@ -50,7 +50,7 @@ async fn all_secure_returns_success() {
 
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
-        audit::run(global_args(), scan_args(vec![workspace.root()]), gh).unwrap()
+        audit::run(global_args(), scan_args(vec![workspace.root()]), gh)
     });
     assert_eq!(ExitCode::SUCCESS, code);
 }
@@ -78,7 +78,7 @@ async fn branch_ref_returns_failure() {
 
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
-        audit::run(global_args(), scan_args(vec![workspace.root()]), gh).unwrap()
+        audit::run(global_args(), scan_args(vec![workspace.root()]), gh)
     });
     assert_eq!(ExitCode::FAILURE, code);
 }
@@ -106,7 +106,7 @@ async fn sha_mismatch_returns_failure() {
 
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
-        audit::run(global_args(), scan_args(vec![workspace.root()]), gh).unwrap()
+        audit::run(global_args(), scan_args(vec![workspace.root()]), gh)
     });
     assert_eq!(ExitCode::FAILURE, code);
 }
@@ -123,7 +123,7 @@ async fn empty_scan_returns_success() {
 
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, "http://localhost:1".into(), None);
-        audit::run(global_args(), scan_args(vec![workspace.root()]), gh).unwrap()
+        audit::run(global_args(), scan_args(vec![workspace.root()]), gh)
     });
     assert_eq!(ExitCode::SUCCESS, code);
 }
@@ -153,7 +153,7 @@ async fn json_mode_clean_returns_success() {
     global.mode = Mode::Json;
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
-        audit::run(global, scan_args(vec![workspace.root()]), gh).unwrap()
+        audit::run(global, scan_args(vec![workspace.root()]), gh)
     });
     assert_eq!(ExitCode::SUCCESS, code);
 }
@@ -183,7 +183,7 @@ async fn json_mode_with_issue_returns_failure() {
     global.mode = Mode::Json;
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
-        audit::run(global, scan_args(vec![workspace.root()]), gh).unwrap()
+        audit::run(global, scan_args(vec![workspace.root()]), gh)
     });
     assert_eq!(ExitCode::FAILURE, code);
 }

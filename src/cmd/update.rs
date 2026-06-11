@@ -3,7 +3,7 @@ use std::process::ExitCode;
 
 use owo_colors::OwoColorize;
 
-use crate::actions::{ActionUpdate, ResolveConfig, Tag, UpdateNote, resolve};
+use crate::actions::{ActionUpdate, ResolveConfig, Tag, UpdateNote, is_likely_sha, resolve};
 use crate::cli::{GlobalArgs, ScanArgs};
 use crate::cmd::default_inputs;
 use crate::github::{Error as GitHubError, GitHubClient};
@@ -161,27 +161,8 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
             updates.len().to_string().yellow(),
             if updates.len() == 1 { "" } else { "s" },
         ));
-        for a in &updates {
-            let target = if a.is_major || a.is_branch {
-                a.new_ref.red().to_string()
-            } else {
-                a.new_ref.green().to_string()
-            };
-            let mut line = format!(
-                "{}: {} -> {} ({}:{})",
-                a.action_name().bold(),
-                a.action.current_ref.yellow(),
-                target,
-                a.action.file.bright_black(),
-                a.action.line
-            );
-            append_version_detail(&mut line, a);
-            if let Some(vc) = &a.action.version_comment {
-                line.push_str(&format!(" #{}", vc.bright_black()));
-            }
-            append_notes(&mut line, a);
-            printer.info(&line);
-        }
+        let selected: Vec<_> = (0..updates.len()).collect();
+        print_update_list(&printer, &updates, &selected);
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -226,41 +207,23 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
     }
 
     printer.info(&format!(
-        "Applying {} selected update{}:",
+        "Applying {} selected update{} across {} file{}:",
         selected.len().to_string().yellow(),
         if selected.len() == 1 { "" } else { "s" },
-    ));
-    for &idx in &selected {
-        let a = &updates[idx];
-        let target = if a.is_major || a.is_branch {
-            a.new_ref.red().to_string()
+        selected_file_count(&updates, &selected)
+            .to_string()
+            .yellow(),
+        if selected_file_count(&updates, &selected) == 1 {
+            ""
         } else {
-            a.new_ref.green().to_string()
-        };
-        let mut line = format!(
-            "{}:{} {}: {} -> {}",
-            a.action.file.cyan(),
-            a.action.line,
-            a.action_name().bold(),
-            a.action.current_ref.bright_black(),
-            target
-        );
-        append_version_detail(&mut line, a);
-        if let Some(vc) = &a.action.version_comment {
-            line.push_str(&format!(" #{}", vc.bright_black()));
-        }
-        append_notes(&mut line, a);
-        printer.info(&line);
-    }
+            "s"
+        },
+    ));
+    print_update_list(&printer, &updates, &selected);
 
     match apply_patches(&updates, &selected) {
         Ok(applied) => {
-            let files = updates
-                .iter()
-                .enumerate()
-                .filter_map(|(i, a)| selected.contains(&i).then_some(a.action.file.as_str()))
-                .collect::<std::collections::BTreeSet<_>>()
-                .len();
+            let files = selected_file_count(&updates, &selected);
             printer.info(&format!(
                 "Updated {} workflow reference{} across {} file{}.",
                 applied.to_string().yellow(),
@@ -285,9 +248,64 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
     }
 }
 
-fn append_version_detail(line: &mut String, update: &ActionUpdate) {
-    if update.ref_differs_from_version() {
-        line.push_str(&format!(" [{}]", update.new_version.bright_black()));
+fn print_update_list(printer: &Printer, updates: &[ActionUpdate], selected: &[usize]) {
+    let mut current_file = None;
+    for &idx in selected {
+        let update = &updates[idx];
+        if current_file != Some(update.action.file.as_str()) {
+            current_file = Some(update.action.file.as_str());
+            printer.info(&update.action.file.cyan().to_string());
+        }
+
+        let mut line = format!(
+            "  L{} {}: {}",
+            update.action.line.to_string().bright_black(),
+            update.action_name().bold(),
+            format_update_change(update)
+        );
+        append_notes(&mut line, update);
+        printer.info(&line);
+    }
+}
+
+fn selected_file_count(updates: &[ActionUpdate], selected: &[usize]) -> usize {
+    updates
+        .iter()
+        .enumerate()
+        .filter_map(|(i, a)| selected.contains(&i).then_some(a.action.file.as_str()))
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+}
+
+fn format_update_change(update: &ActionUpdate) -> String {
+    let version_change = if update.is_major || update.is_branch {
+        update.version_label().red().to_string()
+    } else {
+        update.version_label().green().to_string()
+    };
+    let current_label = update
+        .action
+        .version_comment
+        .as_deref()
+        .unwrap_or(&update.action.current_ref);
+
+    if update.action.current_ref == current_label && !update.ref_differs_from_version() {
+        return version_change;
+    }
+
+    format!(
+        "{} ({} -> {})",
+        version_change,
+        format_ref_detail(&update.action.current_ref).bright_black(),
+        format_ref_detail(&update.new_ref).bright_black()
+    )
+}
+
+fn format_ref_detail(value: &str) -> &str {
+    if is_likely_sha(value) {
+        short_sha(value)
+    } else {
+        value
     }
 }
 
@@ -302,5 +320,80 @@ fn append_notes(line: &mut String, update: &ActionUpdate) {
             }
             UpdateNote::MajorUpdate => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::actions::{ActionReference, WorkflowEdit};
+
+    #[test]
+    fn update_change_prefers_version_comment_and_shortens_shas() {
+        let update = action_update(
+            "de0fac2e4500dabe0009e67214ff5f5447ce83dd",
+            Some("v6.0.2"),
+            "df4cb1c069e1874edd31b4311f1884172cec0e10",
+            "v6.0.3",
+        );
+
+        assert_eq!(
+            "v6.0.2 -> v6.0.3 (de0fac2e4500 -> df4cb1c069e1)",
+            strip_ansi_for_test(&format_update_change(&update))
+        );
+    }
+
+    #[test]
+    fn update_change_omits_ref_detail_for_tag_updates() {
+        let update = action_update("v4.1.0", None, "v4.2.0", "v4.2.0");
+
+        assert_eq!(
+            "v4.1.0 -> v4.2.0",
+            strip_ansi_for_test(&format_update_change(&update))
+        );
+    }
+
+    fn action_update(
+        current_ref: &str,
+        version_comment: Option<&str>,
+        new_ref: &str,
+        new_version: &str,
+    ) -> ActionUpdate {
+        ActionUpdate {
+            action: ActionReference {
+                owner: "actions".into(),
+                name: "checkout".into(),
+                path: String::new(),
+                current_ref: current_ref.into(),
+                version_comment: version_comment.map(str::to_string),
+                file: ".github/workflows/ci.yaml".into(),
+                line: 1,
+                edit: WorkflowEdit::new(0, 0),
+            },
+            new_ref: new_ref.into(),
+            new_version: new_version.into(),
+            expected_sha: new_ref.into(),
+            sha_mismatch: false,
+            is_branch: false,
+            is_major: false,
+        }
+    }
+
+    fn strip_ansi_for_test(input: &str) -> String {
+        let mut out = String::with_capacity(input.len());
+        let mut chars = input.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\x1b' && chars.peek() == Some(&'[') {
+                chars.next();
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            } else {
+                out.push(ch);
+            }
+        }
+        out
     }
 }

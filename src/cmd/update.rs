@@ -7,9 +7,7 @@ use crate::actions::{ActionUpdate, ResolveConfig, Tag, UpdateNote, is_likely_sha
 use crate::cli::{GlobalArgs, ScanArgs};
 use crate::cmd::default_inputs;
 use crate::github::{Error as GitHubError, GitHubClient};
-use crate::terminal::display::{
-    Printer, print_json, sha_mismatch_line, short_sha, update_file_count,
-};
+use crate::terminal::display::{Printer, print_json, short_sha, update_file_count};
 use crate::terminal::prompt;
 use crate::workflows::{PatchError, apply_patches, find_action_references};
 
@@ -128,7 +126,23 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
             if mismatch_count == 1 { "" } else { "s" },
         ));
         for a in updates.iter().filter(|a| a.sha_mismatch) {
-            printer.warn(&format!("{}.", sha_mismatch_line(a)));
+            let mut line = format!(
+                "{} at {}:{} uses {}",
+                a.action_name().bold(),
+                a.action.file.cyan(),
+                a.action.line,
+                a.action.current_ref.red()
+            );
+            if let Some(vc) = &a.action.version_comment {
+                line.push_str(&format!(" but says {}", vc.yellow()));
+            }
+            if !a.expected_sha.is_empty() {
+                line.push_str(&format!(
+                    "; expected {}",
+                    short_sha(&a.expected_sha).green()
+                ));
+            }
+            printer.warn(&format!("{line}."));
         }
     }
 

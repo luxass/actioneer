@@ -109,3 +109,34 @@ pub(crate) fn strip_ansi(input: &str) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use owo_colors::OwoColorize;
+
+    use super::*;
+
+    #[test]
+    fn strip_ansi_passes_plain_text_through() {
+        assert_eq!("hello world", strip_ansi("hello world"));
+        assert_eq!("", strip_ansi(""));
+    }
+
+    #[test]
+    fn strip_ansi_removes_color_codes() {
+        let colored = format!("{} and {}", "red".red(), "bold".bold());
+        assert_eq!("red and bold", strip_ansi(&colored));
+    }
+
+    #[test]
+    fn strip_ansi_keeps_escape_without_bracket() {
+        assert_eq!("a\x1bb", strip_ansi("a\x1bb"));
+    }
+
+    #[test]
+    fn short_sha_is_at_most_twelve_chars() {
+        assert_eq!("abcdef012345", short_sha("abcdef0123456789abcdef"));
+        assert_eq!("abc", short_sha("abc"));
+        assert_eq!("", short_sha(""));
+    }
+}

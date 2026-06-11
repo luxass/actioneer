@@ -11,6 +11,10 @@ check:
 test:
   cargo test --locked
 
+# Run the end-to-end suite (opt-in via the e2e feature)
+test-e2e:
+  cargo test --locked --features e2e --test e2e
+
 # Build
 build:
   cargo build --locked
@@ -26,11 +30,16 @@ fmt-check:
 lint:
   cargo clippy -- -D warnings
 
+# Run zizmor workflow security analysis
+zizmor path=".":
+  zizmor {{path}}
+
 # Run all CI checks
 ci:
   just fmt-check
   just lint
   just test
+  just test-e2e
 
 # ==================== RELEASE ====================
 

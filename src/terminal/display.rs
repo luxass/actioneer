@@ -92,7 +92,7 @@ pub fn short_sha(sha: &str) -> &str {
     &sha[..sha.len().min(12)]
 }
 
-fn strip_ansi(input: &str) -> String {
+pub(crate) fn strip_ansi(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
     while let Some(ch) = chars.next() {

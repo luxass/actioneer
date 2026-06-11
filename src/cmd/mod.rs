@@ -1,6 +1,39 @@
+use std::collections::{HashMap, HashSet};
+
+use crate::actions::{ActionReference, Tag};
+use crate::github::{Error as GitHubError, GitHubClient};
+
 pub mod audit;
 pub mod update;
 pub mod version;
+
+pub(crate) struct FetchTagsError {
+    pub owner: String,
+    pub name: String,
+    pub error: GitHubError,
+}
+
+pub(crate) fn fetch_tags_for_actions(
+    actions: &[ActionReference],
+    gh: &GitHubClient,
+) -> Result<HashMap<(String, String), Vec<Tag>>, FetchTagsError> {
+    let repos: HashSet<(String, String)> = actions
+        .iter()
+        .map(|a| (a.owner.clone(), a.name.clone()))
+        .collect();
+    let mut tags = HashMap::new();
+    for (owner, name) in repos {
+        match gh.fetch_tags(&owner, &name) {
+            Ok(repo_tags) => {
+                tags.insert((owner, name), repo_tags);
+            }
+            Err(error) => {
+                return Err(FetchTagsError { owner, name, error });
+            }
+        }
+    }
+    Ok(tags)
+}
 
 fn default_inputs(inputs: Vec<String>, recursive: bool) -> Vec<String> {
     if inputs.is_empty() {

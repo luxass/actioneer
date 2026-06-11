@@ -1,11 +1,10 @@
-use std::collections::{HashMap, HashSet};
 use std::process::ExitCode;
 
 use owo_colors::OwoColorize;
 
-use crate::actions::{ResolveConfig, Tag, resolve};
+use crate::actions::{ResolveConfig, resolve};
 use crate::cli::{GlobalArgs, ScanArgs};
-use crate::cmd::default_inputs;
+use crate::cmd::{default_inputs, fetch_tags_for_actions};
 use crate::github::{Error as GitHubError, GitHubClient};
 use crate::terminal::display::{Printer, print_json, short_sha};
 use crate::workflows::find_action_references;
@@ -44,49 +43,40 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> anyhow::Resu
         return Ok(ExitCode::SUCCESS);
     }
 
-    let repos: HashSet<(String, String)> = actions
-        .iter()
-        .map(|a| (a.owner.clone(), a.name.clone()))
-        .collect();
-    let mut tags: HashMap<(String, String), Vec<Tag>> = HashMap::new();
-    for (owner, name) in &repos {
-        match gh.fetch_tags(owner, name) {
-            Ok(repo_tags) => {
-                tags.insert((owner.clone(), name.clone()), repo_tags);
-            }
-            Err(e) => {
-                printer.error(&format!(
-                    "GitHub lookup failed for {}/{}.",
-                    owner.bold(),
-                    name.bold()
-                ));
-                match &e {
-                    GitHubError::HttpStatus(status) => {
-                        printer.error(&format!(
-                            "GitHub returned HTTP {}.",
-                            status.to_string().yellow()
-                        ));
-                        let hint = match status {
-                            401 => "Set GITHUB_TOKEN or run `gh auth login`.",
-                            403 => {
-                                "Rate limit or access restriction. Set GITHUB_TOKEN or run `gh auth login`."
-                            }
-                            404 => "Repository not found or not publicly accessible.",
-                            429 => "GitHub is rate limiting these requests.",
-                            502..=504 => "GitHub appears temporarily unavailable.",
-                            _ => "Retry later.",
-                        };
-                        printer.info(hint);
-                    }
-                    GitHubError::Request(err) => {
-                        printer.error(&format!("Request error: {}.", err.to_string().yellow()));
-                        printer.info("Check network, DNS, proxy, and TLS settings.");
-                    }
+    let tags = match fetch_tags_for_actions(&actions, &gh) {
+        Ok(tags) => tags,
+        Err(err) => {
+            printer.error(&format!(
+                "GitHub lookup failed for {}/{}.",
+                err.owner.bold(),
+                err.name.bold()
+            ));
+            match &err.error {
+                GitHubError::HttpStatus(status) => {
+                    printer.error(&format!(
+                        "GitHub returned HTTP {}.",
+                        status.to_string().yellow()
+                    ));
+                    let hint = match status {
+                        401 => "Set GITHUB_TOKEN or run `gh auth login`.",
+                        403 => {
+                            "Rate limit or access restriction. Set GITHUB_TOKEN or run `gh auth login`."
+                        }
+                        404 => "Repository not found or not publicly accessible.",
+                        429 => "GitHub is rate limiting these requests.",
+                        502..=504 => "GitHub appears temporarily unavailable.",
+                        _ => "Retry later.",
+                    };
+                    printer.info(hint);
                 }
-                return Ok(ExitCode::FAILURE);
+                GitHubError::Request(error) => {
+                    printer.error(&format!("Request error: {}.", error.to_string().yellow()));
+                    printer.info("Check network, DNS, proxy, and TLS settings.");
+                }
             }
+            return Ok(ExitCode::FAILURE);
         }
-    }
+    };
 
     let resolve_config = ResolveConfig {
         excludes: global.excludes,

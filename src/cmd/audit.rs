@@ -5,8 +5,8 @@ use owo_colors::OwoColorize;
 use crate::actions::resolve;
 use crate::cli::{GlobalArgs, ScanArgs};
 use crate::cmd::{
-    default_inputs, describe_sha_mismatch, discover_actions, fetch_tags_reporting, plural,
-    resolve_config,
+    apply_filters, default_inputs, describe_sha_mismatch, discover_actions, fetch_tags_reporting,
+    plural, resolve_config,
 };
 use crate::github::GitHubClient;
 use crate::terminal::display::{Printer, print_json};
@@ -25,10 +25,13 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> ExitCode {
         Err(code) => return code,
     };
 
-    let findings: Vec<_> = resolve(&actions, &tags, &resolve_config(&global, &args))
-        .into_iter()
-        .filter(|a| a.is_branch || a.sha_mismatch)
-        .collect();
+    let findings: Vec<_> = apply_filters(
+        resolve(&actions, &tags, &resolve_config(&global, &args)),
+        &args.filters,
+    )
+    .into_iter()
+    .filter(|a| a.is_branch || a.sha_mismatch)
+    .collect();
 
     if global.mode.is_json() {
         print_json(&findings);

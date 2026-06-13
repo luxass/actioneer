@@ -5,8 +5,8 @@ use owo_colors::OwoColorize;
 use crate::actions::{ActionUpdate, UpdateNote, is_likely_sha, resolve};
 use crate::cli::{GlobalArgs, ScanArgs};
 use crate::cmd::{
-    default_inputs, describe_sha_mismatch, discover_actions, fetch_tags_reporting, plural,
-    resolve_config,
+    apply_filters, default_inputs, describe_sha_mismatch, discover_actions, fetch_tags_reporting,
+    plural, resolve_config,
 };
 use crate::github::GitHubClient;
 use crate::terminal::display::{Printer, print_json, short_sha, update_file_count};
@@ -27,7 +27,10 @@ pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> ExitCode {
         Err(code) => return code,
     };
 
-    let updates = resolve(&actions, &tags, &resolve_config(&global, &args));
+    let updates = apply_filters(
+        resolve(&actions, &tags, &resolve_config(&global, &args)),
+        &args.filters,
+    );
 
     if global.mode.is_json() {
         print_json(&updates);

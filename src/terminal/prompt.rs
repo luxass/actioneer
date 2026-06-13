@@ -413,7 +413,11 @@ fn build_file_header_item(
             Span::styled(format!("{marker} "), Style::default().fg(Color::Cyan)),
             Span::styled(
                 format!("[{label}] "),
-                bold(if sel > 0 { Color::Green } else { Color::DarkGray }),
+                bold(if sel > 0 {
+                    Color::Green
+                } else {
+                    Color::DarkGray
+                }),
             ),
             Span::styled(file.to_string(), bold(Color::Cyan)),
         ],
@@ -483,7 +487,10 @@ fn build_update_item(
             if i > 0 {
                 spans.push(Span::styled(", ", Style::default().fg(Color::DarkGray)));
             }
-            spans.push(Span::styled(note_label(*note), Style::default().fg(target_s)));
+            spans.push(Span::styled(
+                note_label(*note),
+                Style::default().fg(target_s),
+            ));
         }
     }
     ListItem::new(Line::from(scroll_spans(spans, scroll)))
@@ -507,7 +514,11 @@ fn render_details(
                 )),
                 Line::from(Span::styled(
                     format!("{sel}/{total} selected"),
-                    Style::default().fg(if sel > 0 { Color::Green } else { Color::DarkGray }),
+                    Style::default().fg(if sel > 0 {
+                        Color::Green
+                    } else {
+                        Color::DarkGray
+                    }),
                 )),
                 Line::from(""),
             ];
@@ -629,7 +640,11 @@ fn draw(frame: &mut ratatui::Frame<'_>, actions: &[ActionUpdate], state: &State)
                 .collect::<Vec<_>>()
                 .join(", ");
             let base = 6 + act_w + 2 + ref_w + 2 + ver_w + 2 + loc_w;
-            if notes.is_empty() { base } else { base + 2 + notes.chars().count() }
+            if notes.is_empty() {
+                base
+            } else {
+                base + 2 + notes.chars().count()
+            }
         })
         .max()
         .unwrap_or(0);
@@ -752,7 +767,11 @@ mod tests {
 
     #[test]
     fn state_new_defaults() {
-        let actions = vec![mk_action("a.yml", "c1"), mk_action("a.yml", "c2"), mk_action("b.yml", "c3")];
+        let actions = vec![
+            mk_action("a.yml", "c1"),
+            mk_action("a.yml", "c2"),
+            mk_action("b.yml", "c3"),
+        ];
         let s = State::new(&actions);
         assert_eq!(vec![false, false, false], s.selected);
         assert_eq!(0, s.cursor);
@@ -781,7 +800,12 @@ mod tests {
 
     #[test]
     fn selected_indices_none() {
-        let s = State::new(&[mk_action("a.yml", "c1"), mk_action("a.yml", "c2"), mk_action("a.yml", "c3"), mk_action("a.yml", "c4")]);
+        let s = State::new(&[
+            mk_action("a.yml", "c1"),
+            mk_action("a.yml", "c2"),
+            mk_action("a.yml", "c3"),
+            mk_action("a.yml", "c4"),
+        ]);
         assert_eq!(Vec::<usize>::new(), s.selected_indices());
     }
 
@@ -800,7 +824,11 @@ mod tests {
 
     #[test]
     fn selected_indices_all() {
-        let actions = vec![mk_action("a.yml", "c1"), mk_action("a.yml", "c2"), mk_action("a.yml", "c3")];
+        let actions = vec![
+            mk_action("a.yml", "c1"),
+            mk_action("a.yml", "c2"),
+            mk_action("a.yml", "c3"),
+        ];
         let mut s = State::new(&actions);
         s.selected = vec![true, true, true];
         assert_eq!(vec![0, 1, 2], s.selected_indices());
@@ -918,7 +946,10 @@ mod tests {
 
     #[test]
     fn column_widths_picks_widest_action() {
-        let actions = vec![mk_action("a.yml", "x"), mk_action("a.yml", "much-longer-name")];
+        let actions = vec![
+            mk_action("a.yml", "x"),
+            mk_action("a.yml", "much-longer-name"),
+        ];
         let (act_w, _, _, _) = column_widths(&actions);
         assert_eq!("actions/much-longer-name".chars().count(), act_w);
     }

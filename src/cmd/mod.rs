@@ -70,7 +70,7 @@ pub(crate) fn apply_filters(updates: Vec<ActionUpdate>, filters: &[String]) -> V
         .into_iter()
         .filter(|u| {
             let key = format!("{}/{}", u.action.owner, u.action.name);
-            filters.iter().any(|f| *f == key)
+            filters.contains(&key)
         })
         .collect()
 }

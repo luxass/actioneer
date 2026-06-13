@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/luxass/actioneer/compare/v0.1.17...v0.2.0) - 2026-06-13
+
+### 🚀 Features
+
+- add minimum release age guard ([#26](https://github.com/luxass/actioneer/pull/26)) (by @luxass)
+- add --filter flag to target specific actions non-interactively ([#25](https://github.com/luxass/actioneer/pull/25)) (by @luxass)
+
+### 🚜 Refactor
+
+- extract shared command pipeline, expand tests, enforce e2e in CI ([#20](https://github.com/luxass/actioneer/pull/20)) (by @luxass)
+
+### Contributors
+
+* @luxass
+
 ## [0.1.17](https://github.com/luxass/actioneer/compare/v0.1.16...v0.1.17) - 2026-06-11
 
 ### 🐛 Bug Fixes

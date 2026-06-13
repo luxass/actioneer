@@ -386,4 +386,35 @@ mod tests {
             .unwrap();
         assert_eq!(None, extract_comment(&doc, &feature));
     }
+
+    #[test]
+    fn collect_workflow_reusable_with_matrix() {
+        let source = r#"name: Test Build Tools
+on:
+  workflow_dispatch:
+
+jobs:
+  test-build-tools:
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        tool:
+          - { name: "@rspack/core", version: latest }
+          - { name: "webpack", version: latest }
+    uses: luxass/shared-workflows/.github/workflows/reusable-test-build-tools.yaml@v0.10.0
+    with:
+      tool-name: ${{ matrix.tool.name }}
+      tool-version: ${{ matrix.tool.version }}
+"#;
+        let root: serde_yaml::Value = serde_yaml::from_str(source).unwrap();
+        let doc = Document::new(source.to_string()).unwrap();
+        let mut actions = Vec::new();
+        collect_workflow(&root, &doc, "test.yml", &mut actions);
+        assert_eq!(1, actions.len());
+        assert_eq!("luxass", actions[0].owner);
+        assert_eq!("shared-workflows", actions[0].name);
+        assert_eq!("v0.10.0", actions[0].current_ref);
+    }
 }

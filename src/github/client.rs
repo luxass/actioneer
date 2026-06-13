@@ -3,7 +3,7 @@ use std::time::Duration;
 use reqwest::blocking::Client as HttpClient;
 use serde::Deserialize;
 
-use crate::actions::{Tag, parse_version};
+use crate::actions::Tag;
 use crate::github::cache::{cache_path, no_cache_from_env, read_cache, write_cache};
 
 const MAX_PAGES: usize = 10;
@@ -103,13 +103,10 @@ impl GitHubClient {
 
             let next = next_link(response.headers().get("link"));
             let body: Vec<ApiTag> = response.json()?;
-            tags.extend(body.into_iter().filter_map(|t| {
-                Some(Tag {
-                    name: t.name.clone(),
-                    sha: t.commit.sha,
-                    version: parse_version(&t.name)?,
-                })
-            }));
+            tags.extend(
+                body.into_iter()
+                    .filter_map(|t| Tag::from_name_sha(t.name, t.commit.sha)),
+            );
 
             url = next;
         }

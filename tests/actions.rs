@@ -1,32 +1,22 @@
 use std::collections::HashMap;
 
 use actioneer::actions::{
-    ActionReference, ActionUpdate, PinStyle, ResolveConfig, Tag, UpdateMode, UpdateNote, Version,
+    ActionReference, ActionUpdate, PinStyle, ResolveConfig, UpdateMode, UpdateNote, Version,
     WorkflowEdit, is_likely_sha, parse_version, resolve, sha_matches,
 };
+
+#[path = "support/fixtures.rs"]
+mod fixtures;
+use fixtures::tag;
 
 fn action(owner: &str, name: &str, current_ref: &str, vc: Option<&str>) -> ActionReference {
     ActionReference {
         owner: owner.to_string(),
         name: name.to_string(),
-        path: String::new(),
         current_ref: current_ref.to_string(),
         version_comment: vc.map(|s| s.to_string()),
-        file: "ci.yml".into(),
-        line: 4,
         edit: WorkflowEdit::new(0, current_ref.len()),
-    }
-}
-
-fn tag(name: &str, sha: &str, major: u32, minor: u32, patch: u32) -> Tag {
-    Tag {
-        name: name.to_string(),
-        sha: sha.to_string(),
-        version: Version {
-            major,
-            minor,
-            patch,
-        },
+        ..fixtures::reference()
     }
 }
 
@@ -41,13 +31,13 @@ fn config() -> ResolveConfig {
 
 fn update(current_ref: &str, version_comment: Option<&str>) -> ActionUpdate {
     ActionUpdate {
-        action: action("actions", "checkout", current_ref, version_comment),
         new_ref: "newsha".into(),
         new_version: "v4.2.0".into(),
         expected_sha: "expectedsha".into(),
         sha_mismatch: true,
         is_branch: true,
         is_major: true,
+        ..fixtures::update(action("actions", "checkout", current_ref, version_comment))
     }
 }
 
@@ -56,12 +46,7 @@ fn action_name_no_path() {
     let a = ActionReference {
         owner: "own".into(),
         name: "repo".into(),
-        path: String::new(),
-        current_ref: "v1".into(),
-        version_comment: None,
-        file: "f".into(),
-        line: 1,
-        edit: WorkflowEdit::new(0, 2),
+        ..fixtures::reference()
     };
     assert_eq!("own/repo", a.action_name());
 }
@@ -72,11 +57,7 @@ fn action_name_with_path() {
         owner: "own".into(),
         name: "repo".into(),
         path: "/.github/workflows/ci.yml".into(),
-        current_ref: "v1".into(),
-        version_comment: None,
-        file: "f".into(),
-        line: 1,
-        edit: WorkflowEdit::new(0, 2),
+        ..fixtures::reference()
     };
     assert_eq!("own/repo/.github/workflows/ci.yml", a.action_name());
 }

@@ -2,10 +2,13 @@
 name = "actioneer"
 version = "0.1.17"
 edition = "2024"
+rust-version = "1.95"
 license = "MIT"
 description = "CLI that detects outdated GitHub Actions and updates them to the latest versions or pinned SHAs"
 repository = "https://github.com/luxass/actioneer"
 readme = "README.md"
+keywords = ["github-actions", "cli", "security", "dependencies", "workflow"]
+categories = ["command-line-utilities", "development-tools"]
 
 [lib]
 name = "actioneer"
@@ -25,8 +28,6 @@ e2e = []
 
 [dependencies]
 clap = { version = "4.6.1", features = ["derive", "env"] }
-tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread", "io-std"] }
-anyhow = "1.0.102"
 thiserror = "2.0.18"
 owo-colors = "4.3.0"
 crossterm = "0.28"
@@ -39,4 +40,16 @@ walkdir = "2"
 yamlpath = "1.24.1"
 
 [dev-dependencies]
+tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
 wiremock = "0.6"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+
+[profile.release]
+lto = true
+strip = "symbols"

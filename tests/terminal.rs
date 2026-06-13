@@ -1,25 +1,16 @@
-use actioneer::actions::{ActionReference, ActionUpdate, WorkflowEdit};
+use actioneer::actions::{ActionReference, ActionUpdate};
 use actioneer::terminal::display::{short_sha, update_file_count};
 
+#[path = "support/fixtures.rs"]
+#[allow(dead_code)]
+mod fixtures;
+
 fn action(file: &str, name: &str) -> ActionUpdate {
-    ActionUpdate {
-        action: ActionReference {
-            owner: "o".into(),
-            name: name.into(),
-            path: String::new(),
-            current_ref: "v1".into(),
-            version_comment: None,
-            file: file.into(),
-            line: 1,
-            edit: WorkflowEdit::new(0, 2),
-        },
-        new_ref: "sha".into(),
-        new_version: "v1".into(),
-        expected_sha: String::new(),
-        sha_mismatch: false,
-        is_branch: false,
-        is_major: false,
-    }
+    fixtures::update(ActionReference {
+        name: name.into(),
+        file: file.into(),
+        ..fixtures::reference()
+    })
 }
 
 #[test]

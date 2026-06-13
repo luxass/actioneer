@@ -60,6 +60,18 @@ impl TestWorkspace {
     }
 }
 
+#[allow(dead_code)]
+pub async fn mock_tags(server: &wiremock::MockServer, owner: &str, repo: &str, body: &str) {
+    use wiremock::matchers::{method, path};
+    wiremock::Mock::given(method("GET"))
+        .and(path(format!("/repos/{owner}/{repo}/tags")))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_raw(body.to_string(), "application/json"),
+        )
+        .mount(server)
+        .await;
+}
+
 fn normalize_fixture(contents: &str) -> String {
     let contents = contents.strip_prefix('\n').unwrap_or(contents);
     let contents = contents.strip_suffix('\n').unwrap_or(contents);

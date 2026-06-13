@@ -4,8 +4,7 @@ use actioneer::actions::{PinStyle, UpdateMode};
 use actioneer::cli::{GlobalArgs, Mode, ScanArgs};
 use actioneer::cmd::audit;
 use actioneer::github::GitHubClient;
-use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::MockServer;
 
 fn global_args() -> GlobalArgs {
     GlobalArgs {
@@ -39,18 +38,17 @@ async fn all_secure_returns_success() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"goodsha"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"goodsha"}}]"#,
+    )
+    .await;
 
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
-        audit::run(global_args(), scan_args(vec![workspace.root()]), gh).unwrap()
+        audit::run(global_args(), scan_args(vec![workspace.root()]), gh)
     });
     assert_eq!(ExitCode::SUCCESS, code);
 }
@@ -67,18 +65,17 @@ async fn branch_ref_returns_failure() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
+    )
+    .await;
 
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
-        audit::run(global_args(), scan_args(vec![workspace.root()]), gh).unwrap()
+        audit::run(global_args(), scan_args(vec![workspace.root()]), gh)
     });
     assert_eq!(ExitCode::FAILURE, code);
 }
@@ -95,18 +92,17 @@ async fn sha_mismatch_returns_failure() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"goodsha"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"goodsha"}}]"#,
+    )
+    .await;
 
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
-        audit::run(global_args(), scan_args(vec![workspace.root()]), gh).unwrap()
+        audit::run(global_args(), scan_args(vec![workspace.root()]), gh)
     });
     assert_eq!(ExitCode::FAILURE, code);
 }
@@ -123,7 +119,7 @@ async fn empty_scan_returns_success() {
 
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, "http://localhost:1".into(), None);
-        audit::run(global_args(), scan_args(vec![workspace.root()]), gh).unwrap()
+        audit::run(global_args(), scan_args(vec![workspace.root()]), gh)
     });
     assert_eq!(ExitCode::SUCCESS, code);
 }
@@ -140,20 +136,19 @@ async fn json_mode_clean_returns_success() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"goodsha"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"goodsha"}}]"#,
+    )
+    .await;
 
     let mut global = global_args();
     global.mode = Mode::Json;
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
-        audit::run(global, scan_args(vec![workspace.root()]), gh).unwrap()
+        audit::run(global, scan_args(vec![workspace.root()]), gh)
     });
     assert_eq!(ExitCode::SUCCESS, code);
 }
@@ -170,20 +165,19 @@ async fn json_mode_with_issue_returns_failure() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
+    )
+    .await;
 
     let mut global = global_args();
     global.mode = Mode::Json;
     let code = tokio::task::block_in_place(|| {
         let gh = GitHubClient::new_for_test(false, server.uri(), None);
-        audit::run(global, scan_args(vec![workspace.root()]), gh).unwrap()
+        audit::run(global, scan_args(vec![workspace.root()]), gh)
     });
     assert_eq!(ExitCode::FAILURE, code);
 }

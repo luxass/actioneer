@@ -1,6 +1,7 @@
 use actioneer::actions::{ActionReference, ActionUpdate, WorkflowEdit};
 use actioneer::workflows::{PatchError, apply_patches};
 
+use crate::fixtures;
 use crate::support;
 
 fn action_reference_at(
@@ -13,22 +14,18 @@ fn action_reference_at(
     ref_start: usize,
 ) -> ActionUpdate {
     ActionUpdate {
-        action: ActionReference {
+        new_ref: new_ref.to_string(),
+        new_version: new_version.to_string(),
+        sha_mismatch: mismatch,
+        ..fixtures::update(ActionReference {
             owner: "a".into(),
             name: "b".into(),
-            path: String::new(),
             current_ref: current.to_string(),
             version_comment: vc.map(|s| s.to_string()),
             file: file.to_string(),
-            line: 4,
             edit: WorkflowEdit::new(ref_start, ref_start + current.len()),
-        },
-        new_ref: new_ref.to_string(),
-        new_version: new_version.to_string(),
-        expected_sha: String::new(),
-        sha_mismatch: mismatch,
-        is_branch: false,
-        is_major: false,
+            ..fixtures::reference()
+        })
     }
 }
 

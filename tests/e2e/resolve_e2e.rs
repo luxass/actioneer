@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use actioneer::actions::{ActionUpdate, PinStyle, ResolveConfig, Tag, UpdateMode, resolve};
 use actioneer::github::GitHubClient;
 use actioneer::workflows::find_action_references;
-use wiremock::matchers::{method, path, query_param};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::MockServer;
 
 use crate::support;
 
@@ -49,15 +48,7 @@ async fn sha_pin_version_upgrade() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .and(query_param("per_page", "100"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},{"name":"v4.1.0","commit":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(&server, "actions", "checkout", r#"[{"name":"v4.2.0","commit":{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},{"name":"v4.1.0","commit":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}]"#).await;
 
     let result = tokio::task::block_in_place(|| {
         resolve_workspace(
@@ -88,14 +79,13 @@ async fn tag_pin_version_upgrade() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
+    )
+    .await;
 
     let result = tokio::task::block_in_place(|| {
         resolve_workspace(
@@ -121,14 +111,13 @@ async fn patch_mode_upgrade() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.1.5","commit":{"sha":"p15"}},{"name":"v4.2.0","commit":{"sha":"p20"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.1.5","commit":{"sha":"p15"}},{"name":"v4.2.0","commit":{"sha":"p20"}}]"#,
+    )
+    .await;
 
     let result = tokio::task::block_in_place(|| {
         resolve_workspace(
@@ -154,14 +143,13 @@ async fn branch_detected() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
+    )
+    .await;
 
     let result = tokio::task::block_in_place(|| {
         resolve_workspace(
@@ -187,14 +175,13 @@ async fn skip_branches_excluded() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
+    )
+    .await;
 
     let result = tokio::task::block_in_place(|| {
         resolve_workspace(
@@ -220,14 +207,13 @@ async fn sha_mismatch_detected() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"goodsha0goodsha0goodsha0goodsha0"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"goodsha0goodsha0goodsha0goodsha0"}}]"#,
+    )
+    .await;
 
     let result = tokio::task::block_in_place(|| {
         resolve_workspace(
@@ -254,14 +240,13 @@ async fn already_current_no_update() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"goodsha"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"goodsha"}}]"#,
+    )
+    .await;
 
     let result = tokio::task::block_in_place(|| {
         resolve_workspace(
@@ -288,22 +273,20 @@ async fn multiple_repos_in_one_file() {
     };
 
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/checkout/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/repos/actions/setup-node/tags"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"[{"name":"v4.0.0","commit":{"sha":"node40"}}]"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "checkout",
+        r#"[{"name":"v4.2.0","commit":{"sha":"sha42"}}]"#,
+    )
+    .await;
+    crate::support::mock_tags(
+        &server,
+        "actions",
+        "setup-node",
+        r#"[{"name":"v4.0.0","commit":{"sha":"node40"}}]"#,
+    )
+    .await;
 
     let result = tokio::task::block_in_place(|| {
         resolve_workspace(

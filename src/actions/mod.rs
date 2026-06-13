@@ -1,3 +1,5 @@
+#[cfg(test)]
+pub(crate) mod fixtures;
 pub mod reference;
 pub mod resolution;
 pub mod version;

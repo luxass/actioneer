@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use actioneer::actions::{PinStyle, UpdateMode};
 use actioneer::cli::{App, Command, Mode};
 use clap::Parser;
@@ -6,7 +8,7 @@ use clap::Parser;
 fn root_no_args() {
     let app = App::parse_from(["actioneer"]);
     assert!(app.command.is_none());
-    assert!(app.update.inputs.is_empty());
+    assert!(app.update.scan.inputs.is_empty());
     assert!(!app.global.dry_run);
     assert_eq!(Mode::Beautiful, app.global.mode);
 }
@@ -14,7 +16,7 @@ fn root_no_args() {
 #[test]
 fn root_with_inputs() {
     let app = App::parse_from(["actioneer", ".github", "ci.yml"]);
-    assert_eq!(2, app.update.inputs.len());
+    assert_eq!(2, app.update.scan.inputs.len());
 }
 
 #[test]
@@ -29,11 +31,11 @@ fn root_with_flags() {
         "tag",
         "--yes",
     ]);
-    assert!(app.update.recursive);
-    assert!(app.update.skip_branches);
-    assert_eq!(UpdateMode::Patch, app.update.update);
-    assert_eq!(PinStyle::Tag, app.update.pin);
-    assert!(app.update.yes);
+    assert!(app.update.scan.recursive);
+    assert!(app.update.scan.skip_branches);
+    assert_eq!(UpdateMode::Patch, app.update.scan.update);
+    assert_eq!(PinStyle::Tag, app.update.scan.pin);
+    assert!(app.update.scan.yes);
 }
 
 #[test]
@@ -50,10 +52,10 @@ fn update_subcommand() {
     ]);
     match app.command {
         Some(Command::Update(args)) => {
-            assert!(args.recursive);
-            assert_eq!(UpdateMode::Minor, args.update);
-            assert_eq!(PinStyle::Sha, args.pin);
-            assert_eq!(vec!["."], args.inputs);
+            assert!(args.scan.recursive);
+            assert_eq!(UpdateMode::Minor, args.scan.update);
+            assert_eq!(PinStyle::Sha, args.scan.pin);
+            assert_eq!(vec!["."], args.scan.inputs);
         }
         other => panic!("expected update, got {other:?}"),
     }
@@ -116,7 +118,7 @@ fn filter_single() {
     let app = App::parse_from(["actioneer", "update", "--filter", "actions/checkout"]);
     match app.command {
         Some(Command::Update(args)) => {
-            assert_eq!(vec!["actions/checkout"], args.filters);
+            assert_eq!(vec!["actions/checkout"], args.scan.filters);
         }
         other => panic!("expected update, got {other:?}"),
     }
@@ -134,7 +136,10 @@ fn filter_multiple() {
     ]);
     match app.command {
         Some(Command::Update(args)) => {
-            assert_eq!(vec!["actions/checkout", "actions/setup-node"], args.filters);
+            assert_eq!(
+                vec!["actions/checkout", "actions/setup-node"],
+                args.scan.filters
+            );
         }
         other => panic!("expected update, got {other:?}"),
     }
@@ -145,10 +150,58 @@ fn filter_empty_by_default() {
     let app = App::parse_from(["actioneer", "update"]);
     match app.command {
         Some(Command::Update(args)) => {
-            assert!(args.filters.is_empty());
+            assert!(args.scan.filters.is_empty());
         }
         other => panic!("expected update, got {other:?}"),
     }
+}
+
+#[test]
+fn min_release_age_root_update_flag() {
+    let app = App::parse_from(["actioneer", "--min-release-age", "30m"]);
+    assert_eq!(
+        Duration::from_secs(30 * 60),
+        app.update.min_release_age.unwrap().as_duration()
+    );
+}
+
+#[test]
+fn min_release_age_update_subcommand() {
+    let app = App::parse_from(["actioneer", "update", "--min-release-age", "12h"]);
+    match app.command {
+        Some(Command::Update(args)) => {
+            assert_eq!(
+                Duration::from_secs(12 * 60 * 60),
+                args.min_release_age.unwrap().as_duration()
+            );
+        }
+        other => panic!("expected update, got {other:?}"),
+    }
+}
+
+#[test]
+fn min_release_age_days() {
+    let app = App::parse_from(["actioneer", "update", "--min-release-age", "90d"]);
+    match app.command {
+        Some(Command::Update(args)) => {
+            assert_eq!(
+                Duration::from_secs(90 * 24 * 60 * 60),
+                args.min_release_age.unwrap().as_duration()
+            );
+        }
+        other => panic!("expected update, got {other:?}"),
+    }
+}
+
+#[test]
+fn min_release_age_rejects_weeks_and_months() {
+    assert!(App::try_parse_from(["actioneer", "update", "--min-release-age", "2w"]).is_err());
+    assert!(App::try_parse_from(["actioneer", "update", "--min-release-age", "1mo"]).is_err());
+}
+
+#[test]
+fn min_release_age_is_update_only() {
+    assert!(App::try_parse_from(["actioneer", "audit", "--min-release-age", "30m"]).is_err());
 }
 
 #[test]

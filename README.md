@@ -41,6 +41,7 @@ By default, `actioneer` scans `.github`. Use `--recursive` to scan from the curr
 ## Notes
 
 - Updates are rewritten as pinned SHAs with version comments by default. Use `--pin tag` to write tag refs instead.
+- Use `--min-release-age 30m`, `12h`, or `7d` to skip tags released too recently.
 - `audit` exits non-zero on SHA/comment mismatches.
 - Interactive selection requires a TTY.
 - Set `GITHUB_TOKEN` if you want higher GitHub API rate limits.

@@ -1,4 +1,5 @@
 use std::fs;
+use std::time::UNIX_EPOCH;
 
 use actioneer::github::{self, GitHubClient};
 use wiremock::matchers::{header, method, path, query_param};
@@ -179,6 +180,88 @@ async fn fetch_tags_rate_limit() {
             .unwrap_err()
     });
     assert!(matches!(err, github::Error::HttpStatus(429)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fetch_tag_release_time_annotated_tag_uses_tagger_date() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/o/n/git/ref/tags/v1.0.0"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"object":{"type":"tag","sha":"tagsha"}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/o/n/git/tags/tagsha"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"tagger":{"date":"2024-01-02T03:04:05Z"}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let release_time = tokio::task::block_in_place(|| {
+        GitHubClient::new_for_test(false, server.uri(), None)
+            .fetch_tag_release_time("o", "n", "v1.0.0")
+            .unwrap()
+    });
+
+    assert_eq!(
+        1_704_164_645,
+        release_time.duration_since(UNIX_EPOCH).unwrap().as_secs()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fetch_tag_release_time_lightweight_tag_uses_commit_date() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/o/n/git/ref/tags/v1.0.0"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"object":{"type":"commit","sha":"commitsha"}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/o/n/git/commits/commitsha"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"committer":{"date":"2024-01-02T03:04:05Z"}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let release_time = tokio::task::block_in_place(|| {
+        GitHubClient::new_for_test(false, server.uri(), None)
+            .fetch_tag_release_time("o", "n", "v1.0.0")
+            .unwrap()
+    });
+
+    assert_eq!(
+        1_704_164_645,
+        release_time.duration_since(UNIX_EPOCH).unwrap().as_secs()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fetch_tag_release_time_propagates_ref_http_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/o/n/git/ref/tags/v1.0.0"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let err = tokio::task::block_in_place(|| {
+        GitHubClient::new_for_test(false, server.uri(), None)
+            .fetch_tag_release_time("o", "n", "v1.0.0")
+            .unwrap_err()
+    });
+
+    assert!(matches!(err, github::Error::HttpStatus(404)));
 }
 
 #[tokio::test(flavor = "multi_thread")]

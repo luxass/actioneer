@@ -498,17 +498,47 @@ fn render_details(
     let detail_lines = match state.visible.get(state.cursor) {
         Some(VisibleRow::FileHeader { file }) => {
             let (sel, total) = file_selection_counts(actions, &state.selected, file);
-            vec![
+            let mut lines = vec![
                 Line::from(Span::styled(
                     file.clone(),
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
                 )),
+                Line::from(Span::styled(
+                    format!("{sel}/{total} selected"),
+                    Style::default().fg(if sel > 0 { Color::Green } else { Color::DarkGray }),
+                )),
                 Line::from(""),
-                Line::from(format!("Selected: {sel}/{total}")),
-                Line::from(format!("Collapsed: {}", state.collapsed.contains(file))),
-            ]
+            ];
+            for (i, action) in actions.iter().enumerate() {
+                if action.action.file != *file {
+                    continue;
+                }
+                let marker = if state.selected[i] { "✓" } else { "·" };
+                let marker_style = if state.selected[i] {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+                let version_color = if action.is_security_sensitive() {
+                    Color::Yellow
+                } else if action.is_major {
+                    Color::Red
+                } else {
+                    Color::Green
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{marker} "), marker_style),
+                    Span::styled(
+                        action.action_name(),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(action.version_label(), Style::default().fg(version_color)),
+                ]));
+            }
+            lines
         }
         Some(VisibleRow::Update { original_index }) => {
             let a = &actions[*original_index];

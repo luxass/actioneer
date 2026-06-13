@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::actions::Tag;
 
-const CACHE_TTL: Duration = Duration::from_secs(60 * 60 * 6);
+const CACHE_TTL: Duration = Duration::from_secs(60 * 5);
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct CachedTag {

@@ -125,35 +125,46 @@ pub(crate) fn fetch_tags_reporting(
             err.owner.bold(),
             err.name.bold()
         ));
-        match &err.error {
-            GitHubError::HttpStatus(status) => {
-                printer.error(&format!(
-                    "GitHub returned HTTP {}.",
-                    status.to_string().yellow()
-                ));
-                let hint = match status {
-                    401 => {
-                        "Set GITHUB_TOKEN or run `gh auth login` so actioneer can authenticate GitHub requests."
-                    }
-                    403 => {
-                        "This is usually a rate limit or access restriction. Set GITHUB_TOKEN or run `gh auth login` before retrying."
-                    }
-                    404 => "The repository was not found or is not publicly accessible.",
-                    429 => "GitHub is rate limiting these requests.",
-                    502..=504 => "GitHub appears temporarily unavailable.",
-                    _ => {
-                        "Retry later, or run with --dry-run/--mode json to inspect scanned references."
-                    }
-                };
-                printer.info(hint);
-            }
-            GitHubError::Request(error) => {
-                printer.error(&format!("Request error: {}.", error.to_string().yellow()));
-                printer.info("Check network, DNS, proxy, and TLS settings. If you are unauthenticated, set GITHUB_TOKEN or run `gh auth login`.");
-            }
-        }
+        report_github_error(printer, &err.error);
         ExitCode::FAILURE
     })
+}
+
+pub(crate) fn report_github_error(printer: &Printer, error: &GitHubError) {
+    match error {
+        GitHubError::HttpStatus(status) => {
+            printer.error(&format!(
+                "GitHub returned HTTP {}.",
+                status.to_string().yellow()
+            ));
+            let hint = match status {
+                401 => {
+                    "Set GITHUB_TOKEN or run `gh auth login` so actioneer can authenticate GitHub requests."
+                }
+                403 => {
+                    "This is usually a rate limit or access restriction. Set GITHUB_TOKEN or run `gh auth login` before retrying."
+                }
+                404 => "The repository was not found or is not publicly accessible.",
+                429 => "GitHub is rate limiting these requests.",
+                502..=504 => "GitHub appears temporarily unavailable.",
+                _ => {
+                    "Retry later, or run with --dry-run/--mode json to inspect scanned references."
+                }
+            };
+            printer.info(hint);
+        }
+        GitHubError::Request(error) => {
+            printer.error(&format!("Request error: {}.", error.to_string().yellow()));
+            printer.info("Check network, DNS, proxy, and TLS settings. If you are unauthenticated, set GITHUB_TOKEN or run `gh auth login`.");
+        }
+        GitHubError::MissingReleaseDate | GitHubError::InvalidReleaseDate(_) => {
+            printer.error(&format!(
+                "GitHub response error: {}.",
+                error.to_string().yellow()
+            ));
+            printer.info("Retry later, or run without --min-release-age if you do not need release age filtering.");
+        }
+    }
 }
 
 pub(crate) fn describe_sha_mismatch(update: &ActionUpdate) -> String {

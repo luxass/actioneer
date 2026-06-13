@@ -1,7 +1,9 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use reqwest::blocking::Client as HttpClient;
-use serde::Deserialize;
+use reqwest::blocking::{Client as HttpClient, Response};
+use serde::{Deserialize, de::DeserializeOwned};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::actions::Tag;
 use crate::github::cache::{cache_path, no_cache_from_env, read_cache, write_cache};
@@ -14,6 +16,10 @@ pub enum Error {
     HttpStatus(u16),
     #[error(transparent)]
     Request(#[from] reqwest::Error),
+    #[error("github response did not contain a release date")]
+    MissingReleaseDate,
+    #[error("github response contained an invalid release date: {0}")]
+    InvalidReleaseDate(String),
 }
 
 pub struct GitHubClient {
@@ -75,6 +81,46 @@ impl GitHubClient {
         Ok(tags)
     }
 
+    pub fn fetch_tag_release_time(
+        &self,
+        owner: &str,
+        name: &str,
+        tag: &str,
+    ) -> Result<SystemTime, Error> {
+        let ref_url = format!("{}/repos/{owner}/{name}/git/ref/tags/{tag}", self.base_url);
+        let tag_ref: ApiGitRef = self.get_json(&ref_url)?;
+
+        match tag_ref.object.kind.as_str() {
+            "tag" => {
+                let tag_url = format!(
+                    "{}/repos/{owner}/{name}/git/tags/{}",
+                    self.base_url, tag_ref.object.sha
+                );
+                let tag: ApiGitTag = self.get_json(&tag_url)?;
+                parse_github_time(
+                    tag.tagger
+                        .and_then(|tagger| tagger.date)
+                        .ok_or(Error::MissingReleaseDate)?,
+                )
+            }
+            "commit" => {
+                let commit_url = format!(
+                    "{}/repos/{owner}/{name}/git/commits/{}",
+                    self.base_url, tag_ref.object.sha
+                );
+                let commit: ApiGitCommit = self.get_json(&commit_url)?;
+                parse_github_time(
+                    commit
+                        .committer
+                        .and_then(|committer| committer.date)
+                        .or_else(|| commit.author.and_then(|author| author.date))
+                        .ok_or(Error::MissingReleaseDate)?,
+                )
+            }
+            _ => Err(Error::MissingReleaseDate),
+        }
+    }
+
     fn fetch_all_pages(&self, start_url: &str) -> Result<Vec<Tag>, Error> {
         let mut tags = Vec::new();
         let mut url = Some(start_url.to_string());
@@ -86,21 +132,7 @@ impl GitHubClient {
             }
             pages += 1;
 
-            let mut req = self
-                .http
-                .get(&page_url)
-                .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "actioneer")
-                .header("X-GitHub-Api-Version", "2022-11-28");
-            if let Some(token) = &self.token {
-                req = req.bearer_auth(token);
-            }
-
-            let response = req.send()?;
-            if !response.status().is_success() {
-                return Err(Error::HttpStatus(response.status().as_u16()));
-            }
-
+            let response = self.get(&page_url)?;
             let next = next_link(response.headers().get("link"));
             let body: Vec<ApiTag> = response.json()?;
             tags.extend(
@@ -113,6 +145,28 @@ impl GitHubClient {
 
         Ok(tags)
     }
+
+    fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T, Error> {
+        Ok(self.get(url)?.json()?)
+    }
+
+    fn get(&self, url: &str) -> Result<Response, Error> {
+        let mut req = self
+            .http
+            .get(url)
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "actioneer")
+            .header("X-GitHub-Api-Version", "2022-11-28");
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+
+        let response = req.send()?;
+        if !response.status().is_success() {
+            return Err(Error::HttpStatus(response.status().as_u16()));
+        }
+        Ok(response)
+    }
 }
 
 #[derive(Deserialize)]
@@ -124,6 +178,35 @@ struct ApiTag {
 struct ApiCommit {
     sha: String,
 }
+
+#[derive(Deserialize)]
+struct ApiGitRef {
+    object: ApiGitObject,
+}
+
+#[derive(Deserialize)]
+struct ApiGitObject {
+    #[serde(rename = "type")]
+    kind: String,
+    sha: String,
+}
+
+#[derive(Deserialize)]
+struct ApiGitTag {
+    tagger: Option<ApiGitActor>,
+}
+
+#[derive(Deserialize)]
+struct ApiGitCommit {
+    author: Option<ApiGitActor>,
+    committer: Option<ApiGitActor>,
+}
+
+#[derive(Deserialize)]
+struct ApiGitActor {
+    date: Option<String>,
+}
+
 fn next_link(header: Option<&reqwest::header::HeaderValue>) -> Option<String> {
     let value = header?.to_str().ok()?;
     for part in value.split(',') {
@@ -135,6 +218,16 @@ fn next_link(header: Option<&reqwest::header::HeaderValue>) -> Option<String> {
         }
     }
     None
+}
+
+fn parse_github_time(value: String) -> Result<SystemTime, Error> {
+    let parsed = OffsetDateTime::parse(&value, &Rfc3339)
+        .map_err(|_| Error::InvalidReleaseDate(value.clone()))?;
+    let seconds = parsed.unix_timestamp();
+    if seconds < 0 {
+        return Err(Error::InvalidReleaseDate(value));
+    }
+    Ok(UNIX_EPOCH + Duration::new(seconds as u64, parsed.nanosecond()))
 }
 
 fn resolve_token() -> Option<String> {

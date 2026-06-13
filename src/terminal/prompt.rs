@@ -45,6 +45,7 @@ impl From<io::Error> for Error {
     }
 }
 
+#[derive(Clone)]
 enum VisibleRow {
     FileHeader { file: String },
     Update { original_index: usize },
@@ -53,20 +54,29 @@ enum VisibleRow {
 struct State {
     selected: Vec<bool>,
     collapsed: HashSet<String>,
+    visible: Vec<VisibleRow>,
     cursor: usize,
     h_scroll: usize,
     details_visible: bool,
 }
 
 impl State {
-    fn new(count: usize) -> Self {
+    fn new(actions: &[ActionUpdate]) -> Self {
         Self {
-            selected: vec![false; count],
+            selected: vec![false; actions.len()],
             collapsed: HashSet::new(),
+            visible: visible_rows(actions, &HashSet::new()),
             cursor: 0,
             h_scroll: 0,
             details_visible: true,
         }
+    }
+
+    fn toggle_collapse(&mut self, actions: &[ActionUpdate], file: &str) {
+        if !self.collapsed.remove(file) {
+            self.collapsed.insert(file.to_string());
+        }
+        self.visible = visible_rows(actions, &self.collapsed);
     }
 
     fn selected_indices(&self) -> Vec<usize> {
@@ -115,54 +125,50 @@ fn run<B: Backend>(
     terminal: &mut Terminal<B>,
     actions: &[ActionUpdate],
 ) -> Result<Vec<usize>, Error> {
-    let mut state = State::new(actions.len());
+    let mut state = State::new(actions);
 
     loop {
-        let visible = visible_rows(actions, &state.collapsed);
-        if state.cursor >= visible.len() {
-            state.cursor = visible.len().saturating_sub(1);
+        if state.cursor >= state.visible.len() {
+            state.cursor = state.visible.len().saturating_sub(1);
         }
 
-        terminal.draw(|frame| draw(frame, actions, &visible, &state))?;
+        terminal.draw(|frame| draw(frame, actions, &state))?;
 
         match read_key()? {
             Key::Up => {
                 state.cursor = if state.cursor > 0 {
                     state.cursor - 1
                 } else {
-                    visible.len().saturating_sub(1)
+                    state.visible.len().saturating_sub(1)
                 };
             }
             Key::Down => {
-                state.cursor = if state.cursor + 1 < visible.len() {
+                state.cursor = if state.cursor + 1 < state.visible.len() {
                     state.cursor + 1
                 } else {
                     0
                 };
             }
-            Key::Toggle => match &visible[state.cursor] {
-                VisibleRow::FileHeader { file } => {
-                    toggle_file_selection(actions, &mut state.selected, file);
+            Key::Toggle => match state.visible.get(state.cursor).cloned() {
+                Some(VisibleRow::FileHeader { file }) => {
+                    toggle_file_selection(actions, &mut state.selected, &file);
                 }
-                VisibleRow::Update { original_index } => {
-                    state.selected[*original_index] = !state.selected[*original_index];
+                Some(VisibleRow::Update { original_index }) => {
+                    state.selected[original_index] = !state.selected[original_index];
                 }
+                None => {}
             },
             Key::ToggleAll => {
                 let all = state.selected.iter().all(|s| *s);
                 state.selected.fill(!all);
             }
             Key::ToggleFile => {
-                let file = cursor_file(&visible, state.cursor, actions).to_string();
+                let file = cursor_file(&state.visible, state.cursor, actions).to_string();
                 toggle_file_selection(actions, &mut state.selected, &file);
             }
             Key::ToggleCollapse => {
-                let file = cursor_file(&visible, state.cursor, actions);
-                if state.collapsed.contains(file) {
-                    state.collapsed.remove(file);
-                } else {
-                    state.collapsed.insert(file.to_string());
-                }
+                let file = cursor_file(&state.visible, state.cursor, actions).to_string();
+                state.toggle_collapse(actions, &file);
             }
             Key::ToggleDetails => state.details_visible = !state.details_visible,
             Key::PageUp => {
@@ -171,10 +177,10 @@ fn run<B: Backend>(
             }
             Key::PageDown => {
                 let page = usize::from(terminal.size()?.height.saturating_sub(4)).max(1);
-                state.cursor = (state.cursor + page).min(visible.len().saturating_sub(1));
+                state.cursor = (state.cursor + page).min(state.visible.len().saturating_sub(1));
             }
             Key::Home => state.cursor = 0,
-            Key::End => state.cursor = visible.len().saturating_sub(1),
+            Key::End => state.cursor = state.visible.len().saturating_sub(1),
             Key::Invert => {
                 for s in &mut state.selected {
                     *s = !*s;
@@ -184,8 +190,10 @@ fn run<B: Backend>(
             Key::ScrollLeft => state.h_scroll = state.h_scroll.saturating_sub(4),
             Key::ScrollRight => state.h_scroll += 4,
             Key::OpenGitHub => {
-                if let Some(VisibleRow::Update { original_index }) = visible.get(state.cursor) {
-                    open_github(&actions[*original_index])?;
+                if let Some(VisibleRow::Update { original_index }) =
+                    state.visible.get(state.cursor).cloned()
+                {
+                    open_github(&actions[original_index])?;
                 }
             }
             Key::Accept => return Ok(state.selected_indices()),
@@ -353,63 +361,245 @@ fn visible_rows(actions: &[ActionUpdate], collapsed: &HashSet<String>) -> Vec<Vi
 
 // --- draw ---
 
-fn draw(
+fn short_ref(value: &str) -> String {
+    if value.chars().count() > 12 {
+        value.chars().take(7).collect()
+    } else {
+        value.to_string()
+    }
+}
+
+fn note_label(note: UpdateNote) -> &'static str {
+    match note {
+        UpdateNote::ShaMismatch => "SHA mismatch",
+        UpdateNote::MutableBranch => "mutable branch",
+        UpdateNote::MajorUpdate => "major update",
+    }
+}
+
+fn column_widths(actions: &[ActionUpdate]) -> (usize, usize, usize, usize) {
+    actions.iter().fold((0, 0, 0, 0), |(a, r, v, l), x| {
+        let refs = format!(
+            "{} -> {}",
+            short_ref(&x.action.current_ref),
+            short_ref(&x.new_ref),
+        );
+        let loc = format!("{}:{}", x.action.file, x.action.line);
+        (
+            a.max(x.action_name().chars().count()),
+            r.max(refs.chars().count()),
+            v.max(x.version_label().chars().count()),
+            l.max(loc.chars().count()),
+        )
+    })
+}
+
+fn build_file_header_item(
+    file: &str,
+    sel: usize,
+    total: usize,
+    collapsed: bool,
+    scroll: usize,
+) -> ListItem<'static> {
+    let marker = if collapsed { "▸" } else { "▾" };
+    let label = if sel == total {
+        "all".to_string()
+    } else {
+        format!("{sel}/{total}")
+    };
+    let bold = |c| Style::default().fg(c).add_modifier(Modifier::BOLD);
+    ListItem::new(Line::from(scroll_spans(
+        vec![
+            Span::styled(format!("{marker} "), Style::default().fg(Color::Cyan)),
+            Span::styled(
+                format!("[{label}] "),
+                bold(if sel > 0 { Color::Green } else { Color::DarkGray }),
+            ),
+            Span::styled(file.to_string(), bold(Color::Cyan)),
+        ],
+        scroll,
+    )))
+}
+
+fn build_update_item(
+    action: &ActionUpdate,
+    selected: bool,
+    (act_w, ref_w, ver_w, loc_w): (usize, usize, usize, usize),
+    scroll: usize,
+) -> ListItem<'static> {
+    let marker = if selected { "[x]" } else { "[ ]" };
+    let marker_s = if selected {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let target_s = if action.is_security_sensitive() {
+        Color::Yellow
+    } else if action.is_major {
+        Color::Red
+    } else {
+        Color::Green
+    };
+    let mut spans = vec![
+        Span::raw("  "),
+        Span::styled(marker, marker_s),
+        Span::raw(" "),
+        Span::styled(
+            format!("{:1$}", action.action_name(), act_w),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!(
+                "{:1$}",
+                format!(
+                    "{} -> {}",
+                    short_ref(&action.action.current_ref),
+                    short_ref(&action.new_ref),
+                ),
+                ref_w,
+            ),
+            Style::default().fg(target_s),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("{:1$}", action.version_label(), ver_w),
+            Style::default().fg(Color::Blue),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!(
+                "{:1$}",
+                format!("{}:{}", action.action.file, action.action.line),
+                loc_w,
+            ),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ];
+    let notes = action.notes();
+    if !notes.is_empty() {
+        spans.push(Span::raw("  "));
+        for (i, note) in notes.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::styled(", ", Style::default().fg(Color::DarkGray)));
+            }
+            spans.push(Span::styled(note_label(*note), Style::default().fg(target_s)));
+        }
+    }
+    ListItem::new(Line::from(scroll_spans(spans, scroll)))
+}
+
+fn render_details(
     frame: &mut ratatui::Frame<'_>,
+    area: layout::Rect,
     actions: &[ActionUpdate],
-    visible: &[VisibleRow],
     state: &State,
 ) {
+    let detail_lines = match state.visible.get(state.cursor) {
+        Some(VisibleRow::FileHeader { file }) => {
+            let (sel, total) = file_selection_counts(actions, &state.selected, file);
+            vec![
+                Line::from(Span::styled(
+                    file.clone(),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(format!("Selected: {sel}/{total}")),
+                Line::from(format!("Collapsed: {}", state.collapsed.contains(file))),
+            ]
+        }
+        Some(VisibleRow::Update { original_index }) => {
+            let a = &actions[*original_index];
+            let note_text = a
+                .notes()
+                .into_iter()
+                .map(note_label)
+                .collect::<Vec<_>>()
+                .join(", ");
+            vec![
+                Line::from(Span::styled(
+                    a.action_name(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Current ref: ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(a.action.current_ref.clone()),
+                ]),
+                Line::from(vec![
+                    Span::styled("Target ref:  ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(a.new_ref.clone()),
+                ]),
+                Line::from(vec![
+                    Span::styled("Version:     ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(a.version_label()),
+                ]),
+                Line::from(vec![
+                    Span::styled("Location:    ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(format!("{}:{}", a.action.file, a.action.line)),
+                ]),
+                Line::from(vec![
+                    Span::styled("GitHub:      ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(github_url(a)),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Notes:       ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(if note_text.is_empty() {
+                        "none".to_string()
+                    } else {
+                        note_text
+                    }),
+                ]),
+            ]
+        }
+        None => vec![Line::from("No selection")],
+    };
+    let details = Paragraph::new(detail_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(" Details "),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(details, area);
+}
+
+fn render_footer(frame: &mut ratatui::Frame<'_>, area: layout::Rect) {
+    let footer = Paragraph::new(FOOTER)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(" Keys "),
+        )
+        .wrap(Wrap { trim: true })
+        .style(Style::default().fg(Color::Cyan));
+    frame.render_widget(footer, area);
+}
+
+fn draw(frame: &mut ratatui::Frame<'_>, actions: &[ActionUpdate], state: &State) {
     let area = frame.area();
     let sections =
         layout::Layout::vertical([layout::Constraint::Min(6), layout::Constraint::Length(3)])
             .split(area);
 
-    let short_ref = |value: &str| {
-        if value.chars().count() > 12 {
-            value.chars().take(7).collect::<String>()
-        } else {
-            value.to_string()
-        }
-    };
-    let note_label = |note: UpdateNote| match note {
-        UpdateNote::ShaMismatch => "SHA mismatch",
-        UpdateNote::MutableBranch => "mutable branch",
-        UpdateNote::MajorUpdate => "major update",
-    };
-
-    let (act_w, ref_w, ver_w, loc_w) =
-        actions
-            .iter()
-            .fold((0usize, 0usize, 0usize, 0usize), |(a, r, v, l), x| {
-                let refs = format!(
-                    "{} -> {}",
-                    short_ref(&x.action.current_ref),
-                    short_ref(&x.new_ref)
-                );
-                let version = x.version_label();
-                let loc = format!("{}:{}", x.action.file, x.action.line);
-                (
-                    a.max(x.action_name().chars().count()),
-                    r.max(refs.chars().count()),
-                    v.max(version.chars().count()),
-                    l.max(loc.chars().count()),
-                )
-            });
-
+    let widths = column_widths(actions);
+    let (act_w, ref_w, ver_w, loc_w) = widths;
     let content_width = actions
         .iter()
         .map(|a| {
-            let mut w = 6 + act_w + 2 + ref_w + 2 + ver_w + 2 + loc_w;
             let notes = a
                 .notes()
                 .into_iter()
                 .map(note_label)
                 .collect::<Vec<_>>()
                 .join(", ");
-            if !notes.is_empty() {
-                w += 2 + notes.chars().count();
-            }
-            w
+            let base = 6 + act_w + 2 + ref_w + 2 + ver_w + 2 + loc_w;
+            if notes.is_empty() { base } else { base + 2 + notes.chars().count() }
         })
         .max()
         .unwrap_or(0);
@@ -448,104 +638,17 @@ fn draw(
         scroll,
     )))];
 
-    items.extend(visible.iter().map(|row| match row {
+    items.extend(state.visible.iter().map(|row| match row {
         VisibleRow::FileHeader { file } => {
             let (sel, total) = file_selection_counts(actions, &state.selected, file);
-            let marker = if state.collapsed.contains(file) {
-                "▸"
-            } else {
-                "▾"
-            };
-            let label = if sel == total {
-                "all".to_string()
-            } else {
-                format!("{sel}/{total}")
-            };
-            let style = |c| Style::default().fg(c).add_modifier(Modifier::BOLD);
-            ListItem::new(Line::from(scroll_spans(
-                vec![
-                    Span::styled(format!("{marker} "), Style::default().fg(Color::Cyan)),
-                    Span::styled(
-                        format!("[{label}] "),
-                        style(if sel > 0 {
-                            Color::Green
-                        } else {
-                            Color::DarkGray
-                        }),
-                    ),
-                    Span::styled(file.clone(), style(Color::Cyan)),
-                ],
-                scroll,
-            )))
+            build_file_header_item(file, sel, total, state.collapsed.contains(file), scroll)
         }
-        VisibleRow::Update { original_index } => {
-            let a = &actions[*original_index];
-            let sel = state.selected[*original_index];
-            let marker = if sel { "[x]" } else { "[ ]" };
-            let marker_s = if sel {
-                Style::default().fg(Color::Green)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            };
-            let target_s = if a.is_security_sensitive() {
-                Color::Yellow
-            } else if a.is_major {
-                Color::Red
-            } else {
-                Color::Green
-            };
-
-            let mut spans = vec![
-                Span::raw("  "),
-                Span::styled(marker, marker_s),
-                Span::raw(" "),
-                Span::styled(
-                    format!("{:1$}", a.action_name(), act_w),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("  "),
-                Span::styled(
-                    format!(
-                        "{:1$}",
-                        format!(
-                            "{} -> {}",
-                            short_ref(&a.action.current_ref),
-                            short_ref(&a.new_ref)
-                        ),
-                        ref_w
-                    ),
-                    Style::default().fg(target_s),
-                ),
-                Span::raw("  "),
-                Span::styled(
-                    format!("{:1$}", a.version_label(), ver_w),
-                    Style::default().fg(Color::Blue),
-                ),
-                Span::raw("  "),
-                Span::styled(
-                    format!(
-                        "{:1$}",
-                        format!("{}:{}", a.action.file, a.action.line),
-                        loc_w
-                    ),
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ];
-            let notes = a.notes();
-            if !notes.is_empty() {
-                spans.push(Span::raw("  "));
-                for (i, note) in notes.iter().enumerate() {
-                    if i > 0 {
-                        spans.push(Span::styled(", ", Style::default().fg(Color::DarkGray)));
-                    }
-                    spans.push(Span::styled(
-                        note_label(*note),
-                        Style::default().fg(target_s),
-                    ));
-                }
-            }
-            ListItem::new(Line::from(scroll_spans(spans, scroll)))
-        }
+        VisibleRow::Update { original_index } => build_update_item(
+            &actions[*original_index],
+            state.selected[*original_index],
+            widths,
+            scroll,
+        ),
     }));
 
     let mut list_state = ListState::default();
@@ -570,89 +673,10 @@ fn draw(
     frame.render_stateful_widget(list, body.0, &mut list_state);
 
     if let Some(details_area) = body.1 {
-        let detail_lines = match visible.get(state.cursor) {
-            Some(VisibleRow::FileHeader { file }) => {
-                let (sel, total) = file_selection_counts(actions, &state.selected, file);
-                vec![
-                    Line::from(Span::styled(
-                        file.clone(),
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    )),
-                    Line::from(""),
-                    Line::from(format!("Selected: {sel}/{total}")),
-                    Line::from(format!("Collapsed: {}", state.collapsed.contains(file))),
-                ]
-            }
-            Some(VisibleRow::Update { original_index }) => {
-                let a = &actions[*original_index];
-                let note_text = a
-                    .notes()
-                    .into_iter()
-                    .map(note_label)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                vec![
-                    Line::from(Span::styled(
-                        a.action_name(),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    )),
-                    Line::from(""),
-                    Line::from(vec![
-                        Span::styled("Current ref: ", Style::default().fg(Color::DarkGray)),
-                        Span::raw(a.action.current_ref.clone()),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("Target ref:  ", Style::default().fg(Color::DarkGray)),
-                        Span::raw(a.new_ref.clone()),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("Version:     ", Style::default().fg(Color::DarkGray)),
-                        Span::raw(a.version_label()),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("Location:    ", Style::default().fg(Color::DarkGray)),
-                        Span::raw(format!("{}:{}", a.action.file, a.action.line)),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("GitHub:      ", Style::default().fg(Color::DarkGray)),
-                        Span::raw(github_url(a)),
-                    ]),
-                    Line::from(""),
-                    Line::from(vec![
-                        Span::styled("Notes:       ", Style::default().fg(Color::DarkGray)),
-                        Span::raw(if note_text.is_empty() {
-                            "none".to_string()
-                        } else {
-                            note_text
-                        }),
-                    ]),
-                ]
-            }
-            None => vec![Line::from("No selection")],
-        };
-        let details = Paragraph::new(detail_lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .title(" Details "),
-            )
-            .wrap(Wrap { trim: false });
-        frame.render_widget(details, details_area);
+        render_details(frame, details_area, actions, state);
     }
 
-    let footer = Paragraph::new(FOOTER)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .title(" Keys "),
-        )
-        .wrap(Wrap { trim: true })
-        .style(Style::default().fg(Color::Cyan));
-    frame.render_widget(footer, sections[1]);
+    render_footer(frame, sections[1]);
 }
 
 fn scroll_spans(spans: Vec<Span<'static>>, scroll: usize) -> Vec<Span<'static>> {
@@ -685,7 +709,7 @@ fn scroll_spans(spans: Vec<Span<'static>>, scroll: usize) -> Vec<Span<'static>> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actions::{ActionReference, fixtures};
+    use crate::actions::{ActionReference, UpdateNote, fixtures};
 
     fn mk_action(file: &str, name: &str) -> ActionUpdate {
         fixtures::update(ActionReference {
@@ -698,35 +722,56 @@ mod tests {
 
     #[test]
     fn state_new_defaults() {
-        let s = State::new(3);
+        let actions = vec![mk_action("a.yml", "c1"), mk_action("a.yml", "c2"), mk_action("b.yml", "c3")];
+        let s = State::new(&actions);
         assert_eq!(vec![false, false, false], s.selected);
         assert_eq!(0, s.cursor);
         assert_eq!(0, s.h_scroll);
         assert!(s.details_visible);
+        assert!(!s.visible.is_empty());
     }
 
     #[test]
-    fn state_new_zero() {
-        let s = State::new(0);
+    fn state_new_empty() {
+        let s = State::new(&[]);
         assert!(s.selected.is_empty());
+        assert!(s.visible.is_empty());
+    }
+
+    #[test]
+    fn state_toggle_collapse_hides_and_restores() {
+        let actions = vec![mk_action("a.yml", "c1"), mk_action("a.yml", "c2")];
+        let mut s = State::new(&actions);
+        assert_eq!(3, s.visible.len());
+        s.toggle_collapse(&actions, "a.yml");
+        assert_eq!(1, s.visible.len());
+        s.toggle_collapse(&actions, "a.yml");
+        assert_eq!(3, s.visible.len());
     }
 
     #[test]
     fn selected_indices_none() {
-        let s = State::new(4);
+        let s = State::new(&[mk_action("a.yml", "c1"), mk_action("a.yml", "c2"), mk_action("a.yml", "c3"), mk_action("a.yml", "c4")]);
         assert_eq!(Vec::<usize>::new(), s.selected_indices());
     }
 
     #[test]
     fn selected_indices_some() {
-        let mut s = State::new(4);
+        let actions = vec![
+            mk_action("a.yml", "c1"),
+            mk_action("a.yml", "c2"),
+            mk_action("a.yml", "c3"),
+            mk_action("a.yml", "c4"),
+        ];
+        let mut s = State::new(&actions);
         s.selected = vec![false, true, false, true];
         assert_eq!(vec![1, 3], s.selected_indices());
     }
 
     #[test]
     fn selected_indices_all() {
-        let mut s = State::new(3);
+        let actions = vec![mk_action("a.yml", "c1"), mk_action("a.yml", "c2"), mk_action("a.yml", "c3")];
+        let mut s = State::new(&actions);
         s.selected = vec![true, true, true];
         assert_eq!(vec![0, 1, 2], s.selected_indices());
     }
@@ -808,5 +853,141 @@ mod tests {
             "https://github.com/luxass/shared-workflows/blob/ce9e8e27/.github/workflows/reusable-ci.yaml",
             github_url(&action)
         );
+    }
+
+    #[test]
+    fn short_ref_preserves_short_values() {
+        assert_eq!("abc", short_ref("abc"));
+        assert_eq!("abcdef012345", short_ref("abcdef012345"));
+    }
+
+    #[test]
+    fn short_ref_truncates_long_values() {
+        assert_eq!("abcdefg", short_ref("abcdefghijklm"));
+        assert_eq!("abcdefg", short_ref("abcdefg0123456789"));
+    }
+
+    #[test]
+    fn note_label_all_variants() {
+        assert_eq!("SHA mismatch", note_label(UpdateNote::ShaMismatch));
+        assert_eq!("mutable branch", note_label(UpdateNote::MutableBranch));
+        assert_eq!("major update", note_label(UpdateNote::MajorUpdate));
+    }
+
+    #[test]
+    fn column_widths_empty() {
+        assert_eq!((0, 0, 0, 0), column_widths(&[]));
+    }
+
+    #[test]
+    fn column_widths_action_name_width() {
+        let actions = vec![mk_action("ci.yml", "checkout")];
+        let (act_w, _, _, _) = column_widths(&actions);
+        assert_eq!("actions/checkout".chars().count(), act_w);
+    }
+
+    #[test]
+    fn column_widths_picks_widest_action() {
+        let actions = vec![mk_action("a.yml", "x"), mk_action("a.yml", "much-longer-name")];
+        let (act_w, _, _, _) = column_widths(&actions);
+        assert_eq!("actions/much-longer-name".chars().count(), act_w);
+    }
+
+    #[test]
+    fn scroll_spans_zero_passthrough() {
+        let spans = vec![Span::raw("hello"), Span::raw(" world")];
+        let result = scroll_spans(spans, 0);
+        assert_eq!(2, result.len());
+        assert_eq!("hello", result[0].content.as_ref());
+        assert_eq!(" world", result[1].content.as_ref());
+    }
+
+    #[test]
+    fn scroll_spans_within_first_span() {
+        let spans = vec![Span::raw("hello world")];
+        let result = scroll_spans(spans, 5);
+        assert_eq!(1, result.len());
+        assert_eq!(" world", result[0].content.as_ref());
+    }
+
+    #[test]
+    fn scroll_spans_past_first_span() {
+        let spans = vec![Span::raw("abc"), Span::raw("def")];
+        let result = scroll_spans(spans, 3);
+        assert_eq!(1, result.len());
+        assert_eq!("def", result[0].content.as_ref());
+    }
+
+    #[test]
+    fn scroll_spans_partial_second_span() {
+        let spans = vec![Span::raw("abc"), Span::raw("defgh")];
+        let result = scroll_spans(spans, 4);
+        assert_eq!(1, result.len());
+        assert_eq!("efgh", result[0].content.as_ref());
+    }
+
+    #[test]
+    fn scroll_spans_past_all() {
+        let spans = vec![Span::raw("abc"), Span::raw("def")];
+        let result = scroll_spans(spans, 100);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn toggle_file_all_off_turns_on() {
+        let actions = vec![mk_action("a.yml", "c1"), mk_action("a.yml", "c2")];
+        let mut selected = vec![false, false];
+        toggle_file_selection(&actions, &mut selected, "a.yml");
+        assert_eq!(vec![true, true], selected);
+    }
+
+    #[test]
+    fn toggle_file_partial_turns_all_on() {
+        let actions = vec![mk_action("a.yml", "c1"), mk_action("a.yml", "c2")];
+        let mut selected = vec![true, false];
+        toggle_file_selection(&actions, &mut selected, "a.yml");
+        assert_eq!(vec![true, true], selected);
+    }
+
+    #[test]
+    fn toggle_file_all_on_turns_off() {
+        let actions = vec![mk_action("a.yml", "c1"), mk_action("a.yml", "c2")];
+        let mut selected = vec![true, true];
+        toggle_file_selection(&actions, &mut selected, "a.yml");
+        assert_eq!(vec![false, false], selected);
+    }
+
+    #[test]
+    fn toggle_file_only_affects_target_file() {
+        let actions = vec![mk_action("a.yml", "c1"), mk_action("b.yml", "c2")];
+        let mut selected = vec![false, true];
+        toggle_file_selection(&actions, &mut selected, "a.yml");
+        assert_eq!(vec![true, true], selected);
+    }
+
+    #[test]
+    fn file_selection_counts_none_selected() {
+        let actions = vec![mk_action("a.yml", "c1"), mk_action("a.yml", "c2")];
+        let selected = vec![false, false];
+        assert_eq!((0, 2), file_selection_counts(&actions, &selected, "a.yml"));
+    }
+
+    #[test]
+    fn file_selection_counts_partial() {
+        let actions = vec![
+            mk_action("a.yml", "c1"),
+            mk_action("a.yml", "c2"),
+            mk_action("a.yml", "c3"),
+        ];
+        let selected = vec![true, false, true];
+        assert_eq!((2, 3), file_selection_counts(&actions, &selected, "a.yml"));
+    }
+
+    #[test]
+    fn file_selection_counts_ignores_other_files() {
+        let actions = vec![mk_action("a.yml", "c1"), mk_action("b.yml", "c2")];
+        let selected = vec![true, true];
+        assert_eq!((1, 1), file_selection_counts(&actions, &selected, "a.yml"));
+        assert_eq!((1, 1), file_selection_counts(&actions, &selected, "b.yml"));
     }
 }

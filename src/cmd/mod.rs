@@ -62,6 +62,19 @@ pub(crate) fn resolve_config(global: &GlobalArgs, args: &ScanArgs) -> ResolveCon
     }
 }
 
+pub(crate) fn apply_filters(updates: Vec<ActionUpdate>, filters: &[String]) -> Vec<ActionUpdate> {
+    if filters.is_empty() {
+        return updates;
+    }
+    updates
+        .into_iter()
+        .filter(|u| {
+            let key = format!("{}/{}", u.action.owner, u.action.name);
+            filters.iter().any(|f| *f == key)
+        })
+        .collect()
+}
+
 pub(crate) fn discover_actions(
     printer: &Printer,
     mode: Mode,
@@ -167,6 +180,7 @@ pub(crate) fn describe_sha_mismatch(update: &ActionUpdate) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::fixtures;
 
     #[test]
     fn empty_recursive_defaults_to_dot() {
@@ -181,5 +195,62 @@ mod tests {
     #[test]
     fn explicit_inputs_returned_verbatim() {
         assert_eq!(vec!["ci.yml"], default_inputs(vec!["ci.yml".into()], true));
+    }
+
+    fn make_update(owner: &str, name: &str) -> ActionUpdate {
+        fixtures::update(ActionReference {
+            owner: owner.into(),
+            name: name.into(),
+            ..fixtures::reference()
+        })
+    }
+
+    #[test]
+    fn apply_filters_empty_returns_all() {
+        let updates = vec![
+            make_update("actions", "checkout"),
+            make_update("actions", "setup-node"),
+        ];
+        assert_eq!(2, apply_filters(updates, &[]).len());
+    }
+
+    #[test]
+    fn apply_filters_single_match() {
+        let updates = vec![
+            make_update("actions", "checkout"),
+            make_update("actions", "setup-node"),
+        ];
+        let result = apply_filters(updates, &["actions/checkout".into()]);
+        assert_eq!(1, result.len());
+        assert_eq!("checkout", result[0].action.name);
+    }
+
+    #[test]
+    fn apply_filters_multiple_matches() {
+        let updates = vec![
+            make_update("actions", "checkout"),
+            make_update("actions", "setup-node"),
+            make_update("actions", "cache"),
+        ];
+        let result = apply_filters(
+            updates,
+            &["actions/checkout".into(), "actions/cache".into()],
+        );
+        assert_eq!(2, result.len());
+    }
+
+    #[test]
+    fn apply_filters_no_match_returns_empty() {
+        let updates = vec![make_update("actions", "checkout")];
+        let result = apply_filters(updates, &["actions/setup-node".into()]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn apply_filters_requires_exact_owner_name() {
+        let updates = vec![make_update("actions", "checkout")];
+        // partial matches should not work
+        let result = apply_filters(updates, &["checkout".into()]);
+        assert!(result.is_empty());
     }
 }

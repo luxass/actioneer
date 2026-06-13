@@ -63,6 +63,9 @@ pub struct ScanArgs {
     #[arg(long, short = 'y', default_value_t = false)]
     pub yes: bool,
 
+    #[arg(long = "filter", value_name = "OWNER/NAME")]
+    pub filters: Vec<String>,
+
     #[arg(value_name = "INPUT")]
     pub inputs: Vec<String>,
 }

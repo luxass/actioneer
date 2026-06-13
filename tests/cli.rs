@@ -110,3 +110,61 @@ fn mode_is_json() {
     assert!(!Mode::Plain.is_json());
     assert!(!Mode::Beautiful.is_json());
 }
+
+#[test]
+fn filter_single() {
+    let app = App::parse_from(["actioneer", "update", "--filter", "actions/checkout"]);
+    match app.command {
+        Some(Command::Update(args)) => {
+            assert_eq!(vec!["actions/checkout"], args.filters);
+        }
+        other => panic!("expected update, got {other:?}"),
+    }
+}
+
+#[test]
+fn filter_multiple() {
+    let app = App::parse_from([
+        "actioneer",
+        "update",
+        "--filter",
+        "actions/checkout",
+        "--filter",
+        "actions/setup-node",
+    ]);
+    match app.command {
+        Some(Command::Update(args)) => {
+            assert_eq!(vec!["actions/checkout", "actions/setup-node"], args.filters);
+        }
+        other => panic!("expected update, got {other:?}"),
+    }
+}
+
+#[test]
+fn filter_empty_by_default() {
+    let app = App::parse_from(["actioneer", "update"]);
+    match app.command {
+        Some(Command::Update(args)) => {
+            assert!(args.filters.is_empty());
+        }
+        other => panic!("expected update, got {other:?}"),
+    }
+}
+
+#[test]
+fn filter_audit_subcommand() {
+    let app = App::parse_from([
+        "actioneer",
+        "audit",
+        "--filter",
+        "actions/checkout",
+        "--mode",
+        "json",
+    ]);
+    match app.command {
+        Some(Command::Audit(args)) => {
+            assert_eq!(vec!["actions/checkout"], args.filters);
+        }
+        other => panic!("expected audit, got {other:?}"),
+    }
+}

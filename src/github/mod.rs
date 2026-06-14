@@ -77,10 +77,15 @@ impl GitHubTags {
             let response = self
                 .http
                 .get(&url)
-                .header("user-agent", concat!("actioneer/", env!("CARGO_PKG_VERSION")))
+                .header(
+                    "user-agent",
+                    concat!("actioneer/", env!("CARGO_PKG_VERSION")),
+                )
                 .bearer_auth_token_from_env()
                 .send()
-                .map_err(|error| format!("GitHub tags request failed for {owner}/{name}: {error}"))?;
+                .map_err(|error| {
+                    format!("GitHub tags request failed for {owner}/{name}: {error}")
+                })?;
 
             if !response.status().is_success() {
                 return Err(format!(
@@ -95,10 +100,13 @@ impl GitHubTags {
                 .and_then(|value| value.to_str().ok())
                 .and_then(next_link_url);
 
-            let page = response
-                .json::<Vec<GitHubTagResponse>>()
-                .map_err(|error| format!("failed to parse GitHub tags for {owner}/{name}: {error}"))?;
-            tags.extend(page.into_iter().filter_map(GitHubTagResponse::into_version_tag));
+            let page = response.json::<Vec<GitHubTagResponse>>().map_err(|error| {
+                format!("failed to parse GitHub tags for {owner}/{name}: {error}")
+            })?;
+            tags.extend(
+                page.into_iter()
+                    .filter_map(GitHubTagResponse::into_version_tag),
+            );
         }
 
         Ok(tags)
@@ -110,10 +118,18 @@ impl GitHubTags {
             return Ok(None);
         }
 
-        let contents = fs::read_to_string(&path)
-            .map_err(|error| format!("failed to read GitHub tag cache {}: {error}", path.display()))?;
-        let cache = serde_json::from_str::<CachedTags>(&contents)
-            .map_err(|error| format!("failed to parse GitHub tag cache {}: {error}", path.display()))?;
+        let contents = fs::read_to_string(&path).map_err(|error| {
+            format!(
+                "failed to read GitHub tag cache {}: {error}",
+                path.display()
+            )
+        })?;
+        let cache = serde_json::from_str::<CachedTags>(&contents).map_err(|error| {
+            format!(
+                "failed to parse GitHub tag cache {}: {error}",
+                path.display()
+            )
+        })?;
 
         Ok(Some(cache.tags))
     }
@@ -121,8 +137,12 @@ impl GitHubTags {
     fn write_cache(&self, owner: &str, name: &str, tags: &[GitHubTag]) -> Result<(), String> {
         let path = self.cache_path(owner, name);
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("failed to create GitHub tag cache {}: {error}", parent.display()))?;
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "failed to create GitHub tag cache {}: {error}",
+                    parent.display()
+                )
+            })?;
         }
 
         let contents = serde_json::to_string_pretty(&CachedTags {
@@ -130,14 +150,20 @@ impl GitHubTags {
             tags: tags.to_vec(),
         })
         .map_err(|error| format!("failed to serialize GitHub tag cache: {error}"))?;
-        fs::write(&path, contents)
-            .map_err(|error| format!("failed to write GitHub tag cache {}: {error}", path.display()))
+        fs::write(&path, contents).map_err(|error| {
+            format!(
+                "failed to write GitHub tag cache {}: {error}",
+                path.display()
+            )
+        })
     }
 
     fn cache_path(&self, owner: &str, name: &str) -> PathBuf {
-        self.cache_dir
-            .join("github-tags")
-            .join(format!("{}--{}.json", sanitize(owner), sanitize(name)))
+        self.cache_dir.join("github-tags").join(format!(
+            "{}--{}.json",
+            sanitize(owner),
+            sanitize(name)
+        ))
     }
 }
 

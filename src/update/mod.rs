@@ -2,108 +2,53 @@ pub mod output;
 
 use crate::{
     config::{Config, PinStyle},
-    discovery::DiscoveredActionRef,
+    discovery::ActionRef,
     github::{GitHubTag, GitHubTags},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UpdatePlan {
-    pub references: usize,
-    pub candidates: Vec<UpdateCandidate>,
-}
-
-impl UpdatePlan {
-    pub fn selected_count(&self) -> usize {
-        self.candidates
-            .iter()
-            .filter(|candidate| candidate.selected)
-            .count()
-    }
-
-    pub fn applied_count(&self) -> usize {
-        self.candidates
-            .iter()
-            .filter(|candidate| candidate.applied)
-            .count()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UpdateCandidate {
+pub struct Candidate {
     pub id: String,
-    pub kind: UpdateKind,
-    pub file: String,
-    pub line: usize,
-    pub action: UpdateAction,
-    pub target: UpdateTarget,
-    pub reason: UpdateReason,
-    pub notes: Vec<UpdateNote>,
+    pub action: ActionRef,
+    pub target_ref: String,
+    pub version: String,
+    pub sha: String,
+    pub pin: PinStyle,
+    pub notes: Vec<&'static str>,
     pub selected: bool,
     pub applied: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UpdateKind {
-    VersionUpdate,
-}
+impl Candidate {
+    pub fn kind(&self) -> &'static str {
+        "version_update"
+    }
 
-impl UpdateKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::VersionUpdate => "version_update",
-        }
+    pub fn reason(&self) -> &'static str {
+        "newer_version_available"
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UpdateAction {
-    pub owner: String,
-    pub name: String,
-    pub repo: String,
-    pub path: String,
-    pub current_ref: String,
+pub fn selected_count(candidates: &[Candidate]) -> usize {
+    candidates
+        .iter()
+        .filter(|candidate| candidate.selected)
+        .count()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UpdateTarget {
-    pub ref_name: String,
-    pub version: String,
-    pub sha: String,
-    pub pin: PinStyle,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UpdateReason {
-    NewerVersionAvailable,
-}
-
-impl UpdateReason {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::NewerVersionAvailable => "newer_version_available",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UpdateNote {
-    MutableRef,
-}
-
-impl UpdateNote {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::MutableRef => "mutable_ref",
-        }
-    }
+pub fn applied_count(candidates: &[Candidate]) -> usize {
+    candidates
+        .iter()
+        .filter(|candidate| candidate.applied)
+        .count()
 }
 
 pub fn plan_update_candidates(
-    references: &[DiscoveredActionRef],
+    references: &[ActionRef],
     config: &Config,
     github_tags: &GitHubTags,
     select_all: bool,
-) -> Result<UpdatePlan, String> {
+) -> Result<Vec<Candidate>, String> {
     let mut candidates = Vec::new();
 
     for action_ref in references {
@@ -122,42 +67,27 @@ pub fn plan_update_candidates(
             continue;
         }
 
-        candidates.push(UpdateCandidate {
+        candidates.push(Candidate {
             id: format!("update-{}", candidates.len() + 1),
-            kind: UpdateKind::VersionUpdate,
-            file: action_ref.file.display().to_string(),
-            line: action_ref.line,
-            action: UpdateAction {
-                owner: action_ref.owner.clone(),
-                name: action_ref.name.clone(),
-                repo: action_ref.repo.clone(),
-                path: action_ref.path.clone(),
-                current_ref: action_ref.ref_name.clone(),
-            },
-            target: UpdateTarget {
-                ref_name: target_ref,
-                version: target_tag.name.clone(),
-                sha: target_tag.sha.clone(),
-                pin,
-            },
-            reason: UpdateReason::NewerVersionAvailable,
+            action: action_ref.clone(),
+            target_ref,
+            version: target_tag.name.clone(),
+            sha: target_tag.sha.clone(),
+            pin,
             notes: update_notes(action_ref),
             selected: select_all,
             applied: false,
         });
     }
 
-    Ok(UpdatePlan {
-        references: references.len(),
-        candidates,
-    })
+    Ok(candidates)
 }
 
-fn update_notes(action_ref: &DiscoveredActionRef) -> Vec<UpdateNote> {
+fn update_notes(action_ref: &ActionRef) -> Vec<&'static str> {
     if is_full_sha(&action_ref.ref_name) {
         Vec::new()
     } else {
-        vec![UpdateNote::MutableRef]
+        vec!["mutable_ref"]
     }
 }
 
@@ -174,5 +104,8 @@ fn version_key(tag: &str) -> Vec<u64> {
 }
 
 fn is_full_sha(ref_name: &str) -> bool {
-    ref_name.len() == 40 && ref_name.chars().all(|character| character.is_ascii_hexdigit())
+    ref_name.len() == 40
+        && ref_name
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
 }

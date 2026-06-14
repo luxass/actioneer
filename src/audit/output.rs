@@ -1,161 +1,107 @@
-use serde::Serialize;
+use serde_json::json;
 
 use crate::{
-    audit::{fix::AuditFix, AuditAction, AuditFinding, AuditReport},
+    audit::{Finding, fix::AuditFix, fixable_count},
     cli::Mode,
 };
 
-pub fn print_report(report: &AuditReport, mode: Option<Mode>) -> Result<(), String> {
-    print_report_with_fixes(report, mode, &[])
+pub fn print_report(
+    references: usize,
+    findings: &[Finding],
+    mode: Option<Mode>,
+) -> Result<(), String> {
+    print_report_with_fixes(references, findings, mode, &[])
 }
 
 pub fn print_report_with_fixes(
-    report: &AuditReport,
+    references: usize,
+    findings: &[Finding],
     mode: Option<Mode>,
     fixes: &[AuditFix],
 ) -> Result<(), String> {
     if mode == Some(Mode::Json) {
-        print_json_report(report, fixes)
+        print_json_report(references, findings, fixes)
     } else {
-        print_human_report(report);
+        print_human_report(findings);
         Ok(())
     }
 }
 
-fn print_human_report(report: &AuditReport) {
-    if report.ok() {
+fn print_human_report(findings: &[Finding]) {
+    if findings.is_empty() {
         println!("No audit findings.");
         return;
     }
 
-    for finding in &report.findings {
+    for finding in findings {
         println!(
             "{}:{}: {}: {}@{}",
-            finding.file,
-            finding.line,
-            finding.kind.as_str(),
+            finding.action.file.display(),
+            finding.action.line,
+            finding.kind(),
             finding.action.repo,
             finding.action.ref_name
         );
     }
 }
 
-fn print_json_report(report: &AuditReport, fixes: &[AuditFix]) -> Result<(), String> {
-    let json = AuditReportJson {
-        schema_version: 1,
-        command: "audit",
-        ok: report.ok(),
-        summary: AuditSummaryJson {
-            references: report.references,
-            findings: report.findings.len(),
-            fixable: report.fixable_count(),
+fn print_json_report(
+    references: usize,
+    findings: &[Finding],
+    fixes: &[AuditFix],
+) -> Result<(), String> {
+    let mut report = json!({
+        "schema_version": 1,
+        "command": "audit",
+        "ok": findings.is_empty(),
+        "summary": {
+            "references": references,
+            "findings": findings.len(),
+            "fixable": fixable_count(findings),
         },
-        findings: report
-            .findings
-            .iter()
-            .map(AuditFindingJson::from_finding)
-            .collect(),
-        fixes: fixes.iter().map(AuditFixJson::from_fix).collect(),
-    };
+        "findings": findings.iter().map(finding_json).collect::<Vec<_>>(),
+    });
+
+    if !fixes.is_empty() {
+        report["fixes"] = json!(fixes.iter().map(fix_json).collect::<Vec<_>>());
+    }
 
     println!(
         "{}",
-        serde_json::to_string_pretty(&json)
+        serde_json::to_string_pretty(&report)
             .map_err(|error| format!("failed to render audit JSON: {error}"))?
     );
     Ok(())
 }
 
-#[derive(Debug, Serialize)]
-struct AuditReportJson {
-    schema_version: u8,
-    command: &'static str,
-    ok: bool,
-    summary: AuditSummaryJson,
-    findings: Vec<AuditFindingJson>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    fixes: Vec<AuditFixJson>,
+fn finding_json(finding: &Finding) -> serde_json::Value {
+    json!({
+        "id": finding.id,
+        "kind": finding.kind(),
+        "severity": finding.severity(),
+        "file": finding.action.file.display().to_string(),
+        "line": finding.action.line,
+        "action": {
+            "owner": finding.action.owner,
+            "name": finding.action.name,
+            "repo": finding.action.repo,
+            "path": finding.action.path,
+            "ref": finding.action.ref_name,
+        },
+        "message": finding.message,
+        "recommendation": finding.recommendation,
+        "fixable": finding.fixable,
+        "expected_sha": finding.expected_sha,
+    })
 }
 
-#[derive(Debug, Serialize)]
-struct AuditSummaryJson {
-    references: usize,
-    findings: usize,
-    fixable: usize,
-}
-
-#[derive(Debug, Serialize)]
-struct AuditFindingJson {
-    id: String,
-    kind: &'static str,
-    severity: &'static str,
-    file: String,
-    line: usize,
-    action: AuditActionJson,
-    message: String,
-    recommendation: String,
-    fixable: bool,
-    expected_sha: Option<String>,
-}
-
-impl AuditFindingJson {
-    fn from_finding(finding: &AuditFinding) -> Self {
-        Self {
-            id: finding.id.clone(),
-            kind: finding.kind.as_str(),
-            severity: finding.severity.as_str(),
-            file: finding.file.clone(),
-            line: finding.line,
-            action: AuditActionJson::from_action(&finding.action),
-            message: finding.message.clone(),
-            recommendation: finding.recommendation.clone(),
-            fixable: finding.fixable,
-            expected_sha: finding.expected_sha.clone(),
-        }
-    }
-}
-
-#[derive(Debug, Serialize)]
-struct AuditActionJson {
-    owner: String,
-    name: String,
-    repo: String,
-    path: String,
-    #[serde(rename = "ref")]
-    ref_name: String,
-}
-
-impl AuditActionJson {
-    fn from_action(action: &AuditAction) -> Self {
-        Self {
-            owner: action.owner.clone(),
-            name: action.name.clone(),
-            repo: action.repo.clone(),
-            path: action.path.clone(),
-            ref_name: action.ref_name.clone(),
-        }
-    }
-}
-
-#[derive(Debug, Serialize)]
-struct AuditFixJson {
-    finding_id: String,
-    file: String,
-    line: usize,
-    applied: bool,
-    new_ref: String,
-    new_version_comment: String,
-}
-
-impl AuditFixJson {
-    fn from_fix(fix: &AuditFix) -> Self {
-        Self {
-            finding_id: fix.finding_id.clone(),
-            file: fix.file.clone(),
-            line: fix.line,
-            applied: fix.applied,
-            new_ref: fix.new_ref.clone(),
-            new_version_comment: fix.new_version_comment.clone(),
-        }
-    }
+fn fix_json(fix: &AuditFix) -> serde_json::Value {
+    json!({
+        "finding_id": fix.finding_id,
+        "file": fix.file,
+        "line": fix.line,
+        "applied": fix.applied,
+        "new_ref": fix.new_ref,
+        "new_version_comment": fix.new_version_comment,
+    })
 }

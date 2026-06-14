@@ -32,9 +32,10 @@ fn discovers_external_workflow_uses_and_ignores_local_and_docker_refs() {
         ]
     );
 
-    assert!(refs.iter().all(|action| action.file.ends_with(
-        ".github/workflows/ci.yml"
-    )));
+    assert!(
+        refs.iter()
+            .all(|action| action.file.ends_with(".github/workflows/ci.yml"))
+    );
 }
 
 #[test]

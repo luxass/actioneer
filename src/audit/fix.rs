@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use crate::{
-    audit::AuditReport,
+    audit::Finding,
     github::{GitHubTag, GitHubTags},
 };
 
@@ -17,10 +17,10 @@ pub struct AuditFix {
     new_uses: String,
 }
 
-pub fn plan_fixes(report: &AuditReport, github_tags: &GitHubTags) -> Result<Vec<AuditFix>, String> {
+pub fn plan_fixes(findings: &[Finding], github_tags: &GitHubTags) -> Result<Vec<AuditFix>, String> {
     let mut fixes = Vec::new();
 
-    for finding in &report.findings {
+    for finding in findings {
         if !finding.fixable {
             continue;
         }
@@ -34,8 +34,8 @@ pub fn plan_fixes(report: &AuditReport, github_tags: &GitHubTags) -> Result<Vec<
 
         fixes.push(AuditFix {
             finding_id: finding.id.clone(),
-            file: finding.file.clone(),
-            line: finding.line,
+            file: finding.action.file.display().to_string(),
+            line: finding.action.line,
             applied: false,
             new_ref: tag.sha.clone(),
             new_version_comment: tag.name.clone(),

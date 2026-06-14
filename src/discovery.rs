@@ -3,7 +3,7 @@ use std::{fs, path::Path};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DiscoveredActionRef {
+pub struct ActionRef {
     pub file: std::path::PathBuf,
     pub line: usize,
     pub owner: String,
@@ -13,7 +13,9 @@ pub struct DiscoveredActionRef {
     pub ref_name: String,
 }
 
-pub fn discover_action_refs<I, P>(inputs: I) -> Result<Vec<DiscoveredActionRef>, String>
+pub type DiscoveredActionRef = ActionRef;
+
+pub fn discover_action_refs<I, P>(inputs: I) -> Result<Vec<ActionRef>, String>
 where
     I: IntoIterator<Item = P>,
     P: AsRef<Path>,
@@ -53,7 +55,8 @@ fn collect_yaml_files(path: &Path, files: &mut Vec<std::path::PathBuf>) -> Resul
 
     if path.is_dir() {
         for entry in WalkDir::new(path) {
-            let entry = entry.map_err(|error| format!("failed to scan {}: {error}", path.display()))?;
+            let entry =
+                entry.map_err(|error| format!("failed to scan {}: {error}", path.display()))?;
             let entry_path = entry.path();
             if entry_path.is_file() && is_yaml_file(entry_path) {
                 files.push(entry_path.to_path_buf());
@@ -102,7 +105,7 @@ fn extract_uses_value(line: &str) -> Option<String> {
         .map(|raw| raw.trim_end_matches(',').to_string())
 }
 
-fn parse_action_ref(file: &Path, line: usize, value: &str) -> Option<DiscoveredActionRef> {
+fn parse_action_ref(file: &Path, line: usize, value: &str) -> Option<ActionRef> {
     if value.starts_with("./") || value.starts_with("../") || value.starts_with("docker://") {
         return None;
     }
@@ -118,7 +121,7 @@ fn parse_action_ref(file: &Path, line: usize, value: &str) -> Option<DiscoveredA
     let repo = format!("{owner}/{name}");
     let path = parts.get(2..).unwrap_or_default().join("/");
 
-    Some(DiscoveredActionRef {
+    Some(ActionRef {
         file: file.to_path_buf(),
         line,
         owner,

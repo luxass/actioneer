@@ -3,8 +3,7 @@ use std::{fs, process::Command, time::SystemTime};
 #[test]
 fn config_offline_conflicts_with_cli_no_cache_before_running_command() {
     let workspace = temp_workspace("actioneer-config-conflict");
-    fs::write(workspace.join(".actioneer.toml"), "offline = true\n")
-        .expect("write config");
+    fs::write(workspace.join(".actioneer.toml"), "offline = true\n").expect("write config");
 
     let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
         .current_dir(&workspace)
@@ -15,8 +14,14 @@ fn config_offline_conflicts_with_cli_no_cache_before_running_command() {
     assert!(!output.status.success(), "expected conflict to fail");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("offline"), "stderr should mention offline: {stderr}");
-    assert!(stderr.contains("no-cache"), "stderr should mention no-cache: {stderr}");
+    assert!(
+        stderr.contains("offline"),
+        "stderr should mention offline: {stderr}"
+    );
+    assert!(
+        stderr.contains("no-cache"),
+        "stderr should mention no-cache: {stderr}"
+    );
     assert!(
         !stderr.contains("audit flow is not implemented yet"),
         "conflict should be reported before audit runs: {stderr}"

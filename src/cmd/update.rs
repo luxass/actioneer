@@ -5,22 +5,23 @@ use crate::{
     config::Config,
     discovery::discover_action_refs,
     github::GitHubTags,
-    patch::apply_update_plan,
+    patch::apply_update_candidates,
     update::{output::print_json_plan, plan_update_candidates},
 };
 
 pub fn run(args: &UpdateArgs, config: &Config) -> Result<ExitCode, String> {
     let references = discover_action_refs(update_inputs(args))?;
     let github_tags = github_tags(config);
-    let mut plan = plan_update_candidates(&references, config, &github_tags, args.dry_run || args.yes)?;
+    let mut candidates =
+        plan_update_candidates(&references, config, &github_tags, args.dry_run || args.yes)?;
 
     if args.yes && !args.dry_run {
-        apply_update_plan(&mut plan)?;
+        apply_update_candidates(&mut candidates)?;
     }
 
     match args.shared.mode {
-        Some(Mode::Json) => print_json_plan(&plan)?,
-        _ => print_plain_plan(&plan),
+        Some(Mode::Json) => print_json_plan(references.len(), &candidates)?,
+        _ => print_plain_plan(&candidates),
     }
 
     Ok(ExitCode::SUCCESS)
@@ -49,6 +50,6 @@ fn github_tags(config: &Config) -> GitHubTags {
     github_tags
 }
 
-fn print_plain_plan(plan: &crate::update::UpdatePlan) {
-    println!("{} update candidate(s)", plan.candidates.len());
+fn print_plain_plan(candidates: &[crate::update::Candidate]) {
+    println!("{} update candidate(s)", candidates.len());
 }

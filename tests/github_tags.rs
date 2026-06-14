@@ -116,8 +116,14 @@ fn offline_missing_cache_fails_clearly_without_fetching() {
         .tags_for_repo("actions", "checkout")
         .expect_err("offline mode should fail when required tag cache is missing");
 
-    assert!(error.contains("offline"), "error should mention offline: {error}");
-    assert!(error.contains("cache"), "error should mention cache: {error}");
+    assert!(
+        error.contains("offline"),
+        "error should mention offline: {error}"
+    );
+    assert!(
+        error.contains("cache"),
+        "error should mention cache: {error}"
+    );
     assert!(
         error.contains("actions/checkout"),
         "error should mention repo: {error}"

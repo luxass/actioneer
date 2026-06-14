@@ -17,8 +17,8 @@ fn parses_target_commands_and_mode_overrides() {
         Some(Command::Update(args)) if args.shared.mode == Some(Mode::Plain)
     ));
 
-    let default_update = Cli::try_parse_from(["actioneer", "--mode", "tui"])
-        .expect("parse default update tui mode");
+    let default_update =
+        Cli::try_parse_from(["actioneer", "--mode", "tui"]).expect("parse default update tui mode");
     assert!(default_update.command.is_none());
     assert_eq!(default_update.default_update.shared.mode, Some(Mode::Tui));
 }

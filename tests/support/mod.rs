@@ -55,7 +55,11 @@ pub fn dedent(contents: &str) -> String {
     let indent = lines
         .iter()
         .filter(|line| !line.trim().is_empty())
-        .map(|line| line.chars().take_while(|character| character.is_whitespace()).count())
+        .map(|line| {
+            line.chars()
+                .take_while(|character| character.is_whitespace())
+                .count()
+        })
         .min()
         .unwrap_or(0);
 

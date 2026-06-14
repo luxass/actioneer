@@ -227,7 +227,13 @@ fn apply_rule_field(
 ) -> Result<(), String> {
     match key {
         "name" => rule.name = Some(parse_string(path, line, key, value)?),
-        "when" => rule.condition = Some(parse_condition(path, line, &parse_string(path, line, key, value)?)?),
+        "when" => {
+            rule.condition = Some(parse_condition(
+                path,
+                line,
+                &parse_string(path, line, key, value)?,
+            )?)
+        }
         "pin" => rule.pin = Some(parse_pin(path, line, value)?),
         "offline" | "no_cache" | "mode" => {
             let label = rule
@@ -299,10 +305,16 @@ fn parse_condition(path: &Path, line: usize, value: &str) -> Result<RuleConditio
 }
 
 fn parse_string(path: &Path, line: usize, key: &str, value: &str) -> Result<String, String> {
-    if let Some(value) = value.strip_prefix('"').and_then(|value| value.strip_suffix('"')) {
+    if let Some(value) = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    {
         return Ok(value.to_string());
     }
-    if let Some(value) = value.strip_prefix('\'').and_then(|value| value.strip_suffix('\'')) {
+    if let Some(value) = value
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\''))
+    {
         return Ok(value.to_string());
     }
 

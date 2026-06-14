@@ -56,9 +56,8 @@ async fn audit_fix_pins_mutable_tag_to_sha_without_prompting() {
     let workflow = std::fs::read_to_string(workspace.path().join(".github/workflows/ci.yml"))
         .expect("read patched workflow");
     assert!(
-        workflow.contains(
-            "- uses: actions/checkout@2222222222222222222222222222222222222222 # v4.2.2"
-        ),
+        workflow
+            .contains("- uses: actions/checkout@2222222222222222222222222222222222222222 # v4.2.2"),
         "workflow should be patched with SHA and version comment:\n{workflow}"
     );
 
@@ -69,7 +68,10 @@ async fn audit_fix_pins_mutable_tag_to_sha_without_prompting() {
     assert_eq!(json["summary"]["references"], 1);
     assert_eq!(json["summary"]["findings"], 0);
     assert_eq!(json["summary"]["fixable"], 0);
-    assert_eq!(json["findings"].as_array().expect("findings array").len(), 0);
+    assert_eq!(
+        json["findings"].as_array().expect("findings array").len(),
+        0
+    );
     assert_eq!(json["fixes"][0]["finding_id"], "finding-1");
     assert_eq!(json["fixes"][0]["file"], ".github/workflows/ci.yml");
     assert_eq!(json["fixes"][0]["line"], 10);
@@ -108,7 +110,10 @@ fn audit_json_succeeds_for_secure_full_sha_ref() {
     assert_eq!(json["summary"]["references"], 1);
     assert_eq!(json["summary"]["findings"], 0);
     assert_eq!(json["summary"]["fixable"], 0);
-    assert_eq!(json["findings"].as_array().expect("findings array").len(), 0);
+    assert_eq!(
+        json["findings"].as_array().expect("findings array").len(),
+        0
+    );
 }
 
 #[test]
@@ -119,7 +124,10 @@ fn audit_json_applies_config_globals_and_ordered_rules() {
         .output()
         .expect("run actioneer audit");
 
-    assert!(!output.status.success(), "audit should fail for setup-node only");
+    assert!(
+        !output.status.success(),
+        "audit should fail for setup-node only"
+    );
     assert!(
         output.stderr.is_empty(),
         "expected empty stderr in JSON mode, got:\n{}",

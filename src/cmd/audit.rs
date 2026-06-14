@@ -15,29 +15,34 @@ use crate::{
 pub fn run(args: &AuditArgs, config: &Config) -> Result<ExitCode, String> {
     let inputs = audit_inputs(args);
     let references = discover_action_refs(&inputs)?;
-    let report = audit_references(&references, config);
+    let findings = audit_references(&references, config);
 
     if args.fix {
         let github_tags = github_tags(config);
-        let mut fixes = plan_fixes(&report, &github_tags)?;
+        let mut fixes = plan_fixes(&findings, &github_tags)?;
         if !args.dry_run {
             apply_fixes(&mut fixes)?;
         }
 
         let references_after_fix = discover_action_refs(&inputs)?;
-        let report_after_fix = audit_references(&references_after_fix, config);
-        print_report_with_fixes(&report_after_fix, args.shared.mode, &fixes)?;
+        let findings_after_fix = audit_references(&references_after_fix, config);
+        print_report_with_fixes(
+            references_after_fix.len(),
+            &findings_after_fix,
+            args.shared.mode,
+            &fixes,
+        )?;
 
-        return if report_after_fix.ok() {
+        return if findings_after_fix.is_empty() {
             Ok(ExitCode::SUCCESS)
         } else {
             Ok(ExitCode::FAILURE)
         };
     }
 
-    print_report(&report, args.shared.mode)?;
+    print_report(references.len(), &findings, args.shared.mode)?;
 
-    if report.ok() {
+    if findings.is_empty() {
         Ok(ExitCode::SUCCESS)
     } else {
         Ok(ExitCode::FAILURE)

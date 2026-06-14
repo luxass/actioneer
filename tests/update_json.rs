@@ -67,9 +67,15 @@ async fn update_json_dry_run_reports_sha_pin_candidate_without_writing() {
     assert_eq!(candidate["line"], 10);
     assert_eq!(candidate["action"]["repo"], "actions/checkout");
     assert_eq!(candidate["action"]["current_ref"], "v4");
-    assert_eq!(candidate["target"]["ref"], "2222222222222222222222222222222222222222");
+    assert_eq!(
+        candidate["target"]["ref"],
+        "2222222222222222222222222222222222222222"
+    );
     assert_eq!(candidate["target"]["version"], "v4.2.2");
-    assert_eq!(candidate["target"]["sha"], "2222222222222222222222222222222222222222");
+    assert_eq!(
+        candidate["target"]["sha"],
+        "2222222222222222222222222222222222222222"
+    );
     assert_eq!(candidate["target"]["pin"], "sha");
     assert_eq!(candidate["reason"], "newer_version_available");
     assert_eq!(candidate["notes"], json!(["mutable_ref"]));
@@ -124,9 +130,8 @@ async fn update_yes_patches_sha_ref_and_writes_version_comment() {
     let workflow = std::fs::read_to_string(workspace.path().join(".github/workflows/ci.yml"))
         .expect("read patched workflow");
     assert!(
-        workflow.contains(
-            "- uses: actions/checkout@2222222222222222222222222222222222222222 # v4.2.2"
-        ),
+        workflow
+            .contains("- uses: actions/checkout@2222222222222222222222222222222222222222 # v4.2.2"),
         "workflow should be patched with SHA and version comment:\n{workflow}"
     );
 

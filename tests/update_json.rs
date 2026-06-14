@@ -1,3 +1,5 @@
+mod support;
+
 use std::process::Command;
 
 use serde_json::{Value, json};
@@ -73,6 +75,66 @@ async fn update_json_dry_run_reports_sha_pin_candidate_without_writing() {
     assert_eq!(candidate["notes"], json!(["mutable_ref"]));
     assert_eq!(candidate["selected"], true);
     assert_eq!(candidate["applied"], false);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_yes_patches_sha_ref_and_writes_version_comment() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/actions/checkout/tags"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "name": "v4.2.2", "commit": { "sha": "2222222222222222222222222222222222222222" } }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let workspace = workflow_workspace! {
+        ".github/workflows/ci.yml" => r#"
+            name: ci
+
+            on:
+              push:
+
+            jobs:
+              test:
+                runs-on: ubuntu-latest
+                steps:
+                  - uses: actions/checkout@v4
+        "#,
+    };
+    let cache_dir = temp_dir("actioneer-update-apply-cache");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
+        .current_dir(workspace.path())
+        .env("ACTIONEER_GITHUB_API_BASE_URL", server.uri())
+        .env("ACTIONEER_CACHE_DIR", &cache_dir)
+        .args(["update", "--yes", "--mode", "json", ".github"])
+        .output()
+        .expect("run actioneer update");
+
+    assert!(
+        output.status.success(),
+        "update --yes should succeed; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let workflow = std::fs::read_to_string(workspace.path().join(".github/workflows/ci.yml"))
+        .expect("read patched workflow");
+    assert!(
+        workflow.contains(
+            "- uses: actions/checkout@2222222222222222222222222222222222222222 # v4.2.2"
+        ),
+        "workflow should be patched with SHA and version comment:\n{workflow}"
+    );
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("update stdout is JSON");
+    assert_eq!(json["summary"]["selected"], 1);
+    assert_eq!(json["summary"]["applied"], 1);
+    assert_eq!(json["candidates"][0]["selected"], true);
+    assert_eq!(json["candidates"][0]["applied"], true);
 }
 
 fn temp_dir(prefix: &str) -> std::path::PathBuf {

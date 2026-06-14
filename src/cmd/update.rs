@@ -5,13 +5,18 @@ use crate::{
     config::Config,
     discovery::discover_action_refs,
     github::GitHubTags,
+    patch::apply_update_plan,
     update::{output::print_json_plan, plan_update_candidates},
 };
 
 pub fn run(args: &UpdateArgs, config: &Config) -> Result<ExitCode, String> {
     let references = discover_action_refs(update_inputs(args))?;
     let github_tags = github_tags(config);
-    let plan = plan_update_candidates(&references, config, &github_tags, args.dry_run)?;
+    let mut plan = plan_update_candidates(&references, config, &github_tags, args.dry_run || args.yes)?;
+
+    if args.yes && !args.dry_run {
+        apply_update_plan(&mut plan)?;
+    }
 
     match args.shared.mode {
         Some(Mode::Json) => print_json_plan(&plan)?,

@@ -102,7 +102,7 @@ pub fn plan_update_candidates(
     references: &[DiscoveredActionRef],
     config: &Config,
     github_tags: &GitHubTags,
-    dry_run: bool,
+    select_all: bool,
 ) -> Result<UpdatePlan, String> {
     let mut candidates = Vec::new();
 
@@ -142,7 +142,7 @@ pub fn plan_update_candidates(
             },
             reason: UpdateReason::NewerVersionAvailable,
             notes: update_notes(action_ref),
-            selected: dry_run,
+            selected: select_all,
             applied: false,
         });
     }

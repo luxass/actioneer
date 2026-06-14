@@ -48,6 +48,9 @@ pub struct UpdateArgs {
     #[arg(long)]
     pub dry_run: bool,
 
+    #[arg(short = 'y', long)]
+    pub yes: bool,
+
     #[arg(value_name = "INPUT")]
     pub inputs: Vec<PathBuf>,
 }

@@ -1,6 +1,85 @@
+mod support;
+
 use std::process::Command;
 
-use serde_json::Value;
+use serde_json::{Value, json};
+use wiremock::{
+    Mock, MockServer, ResponseTemplate,
+    matchers::{method, path, query_param},
+};
+
+#[tokio::test(flavor = "multi_thread")]
+async fn audit_fix_pins_mutable_tag_to_sha_without_prompting() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/actions/checkout/tags"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "name": "v4.2.2", "commit": { "sha": "2222222222222222222222222222222222222222" } }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let workspace = workflow_workspace! {
+        ".github/workflows/ci.yml" => r#"
+            name: ci
+
+            on:
+              push:
+
+            jobs:
+              test:
+                runs-on: ubuntu-latest
+                steps:
+                  - uses: actions/checkout@v4
+        "#,
+    };
+    let cache_dir = temp_dir("actioneer-audit-fix-cache");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
+        .current_dir(workspace.path())
+        .env("ACTIONEER_GITHUB_API_BASE_URL", server.uri())
+        .env("ACTIONEER_CACHE_DIR", &cache_dir)
+        .args(["audit", "--fix", "--mode", "json", ".github"])
+        .output()
+        .expect("run actioneer audit --fix");
+
+    assert!(
+        output.status.success(),
+        "audit --fix should succeed when all findings are fixed; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+
+    let workflow = std::fs::read_to_string(workspace.path().join(".github/workflows/ci.yml"))
+        .expect("read patched workflow");
+    assert!(
+        workflow.contains(
+            "- uses: actions/checkout@2222222222222222222222222222222222222222 # v4.2.2"
+        ),
+        "workflow should be patched with SHA and version comment:\n{workflow}"
+    );
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("audit --fix stdout is JSON");
+    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["command"], "audit");
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["summary"]["references"], 1);
+    assert_eq!(json["summary"]["findings"], 0);
+    assert_eq!(json["summary"]["fixable"], 0);
+    assert_eq!(json["findings"].as_array().expect("findings array").len(), 0);
+    assert_eq!(json["fixes"][0]["finding_id"], "finding-1");
+    assert_eq!(json["fixes"][0]["file"], ".github/workflows/ci.yml");
+    assert_eq!(json["fixes"][0]["line"], 10);
+    assert_eq!(json["fixes"][0]["applied"], true);
+    assert_eq!(
+        json["fixes"][0]["new_ref"],
+        "2222222222222222222222222222222222222222"
+    );
+    assert_eq!(json["fixes"][0]["new_version_comment"], "v4.2.2");
+}
 
 #[test]
 fn audit_json_succeeds_for_secure_full_sha_ref() {
@@ -96,4 +175,17 @@ fn audit_json_reports_mutable_ref_finding() {
     assert_eq!(finding["recommendation"], "Pin to a full SHA");
     assert_eq!(finding["fixable"], true);
     assert!(finding["expected_sha"].is_null());
+}
+
+fn temp_dir(prefix: &str) -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(format!(
+        "{prefix}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before Unix epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&path).expect("create temp dir");
+    path
 }

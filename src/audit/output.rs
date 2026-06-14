@@ -1,13 +1,21 @@
 use serde::Serialize;
 
 use crate::{
-    audit::{AuditAction, AuditFinding, AuditReport},
+    audit::{fix::AuditFix, AuditAction, AuditFinding, AuditReport},
     cli::Mode,
 };
 
 pub fn print_report(report: &AuditReport, mode: Option<Mode>) -> Result<(), String> {
+    print_report_with_fixes(report, mode, &[])
+}
+
+pub fn print_report_with_fixes(
+    report: &AuditReport,
+    mode: Option<Mode>,
+    fixes: &[AuditFix],
+) -> Result<(), String> {
     if mode == Some(Mode::Json) {
-        print_json_report(report)
+        print_json_report(report, fixes)
     } else {
         print_human_report(report);
         Ok(())
@@ -32,7 +40,7 @@ fn print_human_report(report: &AuditReport) {
     }
 }
 
-fn print_json_report(report: &AuditReport) -> Result<(), String> {
+fn print_json_report(report: &AuditReport, fixes: &[AuditFix]) -> Result<(), String> {
     let json = AuditReportJson {
         schema_version: 1,
         command: "audit",
@@ -47,6 +55,7 @@ fn print_json_report(report: &AuditReport) -> Result<(), String> {
             .iter()
             .map(AuditFindingJson::from_finding)
             .collect(),
+        fixes: fixes.iter().map(AuditFixJson::from_fix).collect(),
     };
 
     println!(
@@ -64,6 +73,8 @@ struct AuditReportJson {
     ok: bool,
     summary: AuditSummaryJson,
     findings: Vec<AuditFindingJson>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    fixes: Vec<AuditFixJson>,
 }
 
 #[derive(Debug, Serialize)]
@@ -122,6 +133,29 @@ impl AuditActionJson {
             repo: action.repo.clone(),
             path: action.path.clone(),
             ref_name: action.ref_name.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct AuditFixJson {
+    finding_id: String,
+    file: String,
+    line: usize,
+    applied: bool,
+    new_ref: String,
+    new_version_comment: String,
+}
+
+impl AuditFixJson {
+    fn from_fix(fix: &AuditFix) -> Self {
+        Self {
+            finding_id: fix.finding_id.clone(),
+            file: fix.file.clone(),
+            line: fix.line,
+            applied: fix.applied,
+            new_ref: fix.new_ref.clone(),
+            new_version_comment: fix.new_version_comment.clone(),
         }
     }
 }

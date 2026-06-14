@@ -7,8 +7,14 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
 
     match &cli.command {
-        Some(Command::Audit(args)) => report_result(actioneer::cmd::audit::run(args)),
-        Some(Command::Update(args)) => report_result(actioneer::cmd::update::run(args)),
+        Some(Command::Audit(args)) => match actioneer::config::load_for_command(&args.shared) {
+            Ok(_config) => report_result(actioneer::cmd::audit::run(args)),
+            Err(error) => report_result(Err(error)),
+        },
+        Some(Command::Update(args)) => match actioneer::config::load_for_command(&args.shared) {
+            Ok(_config) => report_result(actioneer::cmd::update::run(args)),
+            Err(error) => report_result(Err(error)),
+        },
         Some(Command::Version) => match actioneer::cmd::version::run(std::io::stdout()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
@@ -16,7 +22,10 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        None => report_result(actioneer::cmd::update::run(&cli.default_update)),
+        None => match actioneer::config::load_for_command(&cli.default_update.shared) {
+            Ok(_config) => report_result(actioneer::cmd::update::run(&cli.default_update)),
+            Err(error) => report_result(Err(error)),
+        },
     }
 }
 

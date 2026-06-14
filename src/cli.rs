@@ -19,6 +19,12 @@ pub enum Command {
 
 #[derive(Debug, Clone, Args, Default)]
 pub struct SharedArgs {
+    #[arg(long)]
+    pub offline: bool,
+
+    #[arg(long)]
+    pub no_cache: bool,
+
     #[arg(long, value_enum)]
     pub mode: Option<Mode>,
 }

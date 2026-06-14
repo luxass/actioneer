@@ -33,6 +33,31 @@ fn audit_json_succeeds_for_secure_full_sha_ref() {
 }
 
 #[test]
+fn audit_json_applies_config_globals_and_ordered_rules() {
+    let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
+        .current_dir("testdata/workflows/config/rules-order")
+        .args(["audit", "--mode", "json", ".github"])
+        .output()
+        .expect("run actioneer audit");
+
+    assert!(!output.status.success(), "audit should fail for setup-node only");
+    assert!(
+        output.stderr.is_empty(),
+        "expected empty stderr in JSON mode, got:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("audit stdout is JSON");
+    assert_eq!(json["summary"]["references"], 2);
+    assert_eq!(json["summary"]["findings"], 1);
+
+    let findings = json["findings"].as_array().expect("findings array");
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0]["action"]["repo"], "actions/setup-node");
+    assert_eq!(findings[0]["action"]["ref"], "v4");
+}
+
+#[test]
 fn audit_json_reports_mutable_ref_finding() {
     let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
         .current_dir("testdata/workflows/audit/mutable-tag")

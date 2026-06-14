@@ -8,7 +8,7 @@ fn main() -> ExitCode {
 
     match &cli.command {
         Some(Command::Audit(args)) => match actioneer::config::load_for_command(&args.shared) {
-            Ok(_config) => match actioneer::cmd::audit::run(args) {
+            Ok(config) => match actioneer::cmd::audit::run(args, &config) {
                 Ok(exit_code) => exit_code,
                 Err(error) => report_result(Err(error)),
             },

@@ -1,0 +1,11 @@
+pin = "tag"
+
+[[rules]]
+name = "actions require sha"
+when = 'ActionRepoOwner == "actions"'
+pin = "sha"
+
+[[rules]]
+name = "checkout may use tags"
+when = 'ActionRepo == "actions/checkout"'
+pin = "tag"

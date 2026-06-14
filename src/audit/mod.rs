@@ -1,6 +1,9 @@
 pub mod output;
 
-use crate::discovery::DiscoveredActionRef;
+use crate::{
+    config::{Config, PinStyle},
+    discovery::DiscoveredActionRef,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditReport {
@@ -70,10 +73,10 @@ pub struct AuditAction {
     pub ref_name: String,
 }
 
-pub fn audit_references(references: &[DiscoveredActionRef]) -> AuditReport {
+pub fn audit_references(references: &[DiscoveredActionRef], config: &Config) -> AuditReport {
     let findings = references
         .iter()
-        .filter(|action_ref| !is_full_sha(&action_ref.ref_name))
+        .filter(|action_ref| violates_policy(action_ref, config.effective_pin(action_ref)))
         .enumerate()
         .map(|(index, action_ref)| mutable_ref_finding(index + 1, action_ref))
         .collect();
@@ -105,6 +108,25 @@ fn mutable_ref_finding(id: usize, action_ref: &DiscoveredActionRef) -> AuditFind
     }
 }
 
+fn violates_policy(action_ref: &DiscoveredActionRef, pin: PinStyle) -> bool {
+    match pin {
+        PinStyle::Sha => !is_full_sha(&action_ref.ref_name),
+        PinStyle::Tag => !is_full_sha(&action_ref.ref_name) && !is_version_tag(&action_ref.ref_name),
+    }
+}
+
 fn is_full_sha(ref_name: &str) -> bool {
     ref_name.len() == 40 && ref_name.chars().all(|character| character.is_ascii_hexdigit())
+}
+
+fn is_version_tag(ref_name: &str) -> bool {
+    let Some(version) = ref_name.strip_prefix('v') else {
+        return false;
+    };
+
+    !version.is_empty()
+        && version.chars().any(|character| character.is_ascii_digit())
+        && version
+            .chars()
+            .all(|character| character.is_ascii_digit() || character == '.')
 }

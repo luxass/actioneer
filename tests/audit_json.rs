@@ -3,6 +3,36 @@ use std::process::Command;
 use serde_json::Value;
 
 #[test]
+fn audit_json_succeeds_for_secure_full_sha_ref() {
+    let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
+        .current_dir("testdata/workflows/audit/secure-full-sha")
+        .args(["audit", "--mode", "json", ".github"])
+        .output()
+        .expect("run actioneer audit");
+
+    assert!(
+        output.status.success(),
+        "audit should succeed for secure refs; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "expected empty stderr in JSON mode, got:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("audit stdout is JSON");
+
+    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["command"], "audit");
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["summary"]["references"], 1);
+    assert_eq!(json["summary"]["findings"], 0);
+    assert_eq!(json["summary"]["fixable"], 0);
+    assert_eq!(json["findings"].as_array().expect("findings array").len(), 0);
+}
+
+#[test]
 fn audit_json_reports_mutable_ref_finding() {
     let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
         .current_dir("testdata/workflows/audit/mutable-tag")

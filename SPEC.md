@@ -31,7 +31,9 @@ actioneer update
 actioneer version
 ```
 
-No subcommand should behave like `actioneer update`.
+Running `actioneer` with no subcommand intentionally runs the default update flow.
+Every explicit subcommand has its own behavior and must not accidentally fall
+through to update behavior.
 
 The command entry points should read as straightforward pipelines. A contributor
 should be able to open the command implementation and understand the command
@@ -113,15 +115,16 @@ Acceptance criteria:
 
 Purpose: automatically fix policy violations where a safe fix exists.
 
-`audit --fix` is explicitly mutating. It does not prompt and does not require
-`--yes`.
+`audit --fix` is explicitly mutating. It does not prompt, does not use the TUI,
+and does not require `--yes`.
 
 Conceptual behavior:
 
 ```text
-branch/tag/short-sha ref -> pin to full SHA when target data is available
-SHA/comment mismatch     -> fix SHA and/or version comment when target data is available
-unfixable finding        -> report clearly and leave unchanged
+branch/tag ref       -> pin to full SHA when target data is available
+short-sha ref        -> pin to full SHA only when it uniquely matches known GitHub/cache data
+SHA/comment mismatch -> fix SHA and/or version comment when target data is available
+unfixable finding    -> report clearly and leave unchanged
 ```
 
 Acceptance criteria:
@@ -178,8 +181,9 @@ choose update candidates
 apply min-release-age and update-mode constraints
 if --dry-run: print planned candidates and exit without writing
 if --yes: select all candidates
+if --dry-run and --yes are both set: --dry-run wins and no files are written
+if mode is plain/json and --yes/--dry-run is not set: fail early before GitHub/cache fetching when possible
 if mode is tui and --yes/--dry-run is not set: show simplified TUI selection
-if mode is plain/json and --yes/--dry-run is not set: fail with a clear message
 convert selected candidates to patch edits
 patch files safely
 print summary
@@ -388,13 +392,15 @@ Precedence:
 ```text
 defaults
 -> .actioneer.toml globals
+-> .actioneer.toml rules in order
 -> .github/actioneer.toml globals
--> matching rules from both config files, by priority
+-> .github/actioneer.toml rules in order
 -> CLI overrides
 ```
 
 `.github/actioneer.toml` overrides root `.actioneer.toml` for global config
-values. Rules from both files are kept and evaluated together by priority.
+values. Rules are ordered conditional overrides. Root config rules run before
+`.github` config rules.
 
 Config supports these top-level keys:
 
@@ -408,7 +414,7 @@ no_cache = false
 # default output/interaction mode
 mode = "tui" # "tui" | "plain" | "json"
 
-# output target for update/fix operations
+# pin style for update/fix operations and audit policy
 pin = "sha" # "sha" | "tag"
 
 # allowed update range
@@ -420,8 +426,9 @@ min_release_age = "10h"
 # do not create update candidates for branch-like refs
 skip_branches = false
 
-# allow mutable branch/tag refs as policy-compliant for matching effective config
-allow_mutable_refs = false
+# pin also defines the audit policy for matching refs:
+# sha => full SHA required; tag => version tags are allowed
+# branch-like refs and short SHAs remain findings by default
 ```
 
 These keys are also the configurable values that rules may override unless the
@@ -430,53 +437,50 @@ settings and are not rule-overridable.
 
 ## 6. Config rules
 
-Config supports named rules under `[rules.<name>]`.
+Rules are ordered conditional overrides for the normal configurable values.
 
-Rules are conditional overrides for the normal configurable values.
-
-Example:
+Rules are configured as an array:
 
 ```toml
 min_release_age = "7d"
 pin = "sha"
 update = "major"
 
-[rules.my-fast-actions]
-priority = 10
-condition = '''
-ActionRepoOwner == "luxass"
-'''
-min_release_age = "0d"
+[[rules]]
+name = "my actions update immediately"
+when = 'ActionRepoOwner == "luxass"'
+min_release_age = "0h"
 
-[rules.luxass-defaults]
-condition = '''
-ActionRepoOwner == "luxass"
-'''
-min_release_age = "1d"
-pin = "sha"
+[[rules]]
+name = "internal actions may use version tags"
+when = 'ActionRepoOwner == "my-org"'
+pin = "tag"
 ```
 
 ### Rule fields
 
 A rule has:
 
-- `condition`: required expression
-- `priority`: optional integer, defaults to `0`
+- `name`: optional human label, recommended for diagnostics
+- `when`: required condition expression
 - any subset of normal configurable values, such as:
   - `min_release_age`
   - `pin`
   - `update`
   - `skip_branches`
-  - `allow_mutable_refs`
   - future config fields
 
 `offline`, `no_cache`, and `mode` are not valid rule fields.
 
-Rules apply only to action references whose condition evaluates to true.
+Rules apply only to action references whose `when` expression evaluates to true.
 
-`allow_mutable_refs = true` allows branch-like refs and tag refs for matching
-actions. It does not allow short SHAs and does not suppress SHA/comment mismatch
-findings.
+`pin` defines both update output and audit policy for matching refs:
+
+- `pin = "sha"` means full SHA pins are required.
+- `pin = "tag"` means version tag refs are policy-compliant for matching refs.
+
+Branch-like refs and short SHAs remain findings by default. SHA/comment mismatch
+findings are never suppressed by `pin = "tag"`.
 
 ### Effective config
 
@@ -485,27 +489,14 @@ For each discovered action reference, actioneer computes an effective config:
 ```text
 built-in defaults
 -> .actioneer.toml globals
+-> .actioneer.toml matching rules in file order
 -> .github/actioneer.toml globals
--> matching rules from both config files
+-> .github/actioneer.toml matching rules in file order
 -> CLI overrides
 ```
 
-Matching rules are evaluated by priority:
-
-```text
-higher priority first
-missing priority = 0
-```
-
-Rule merging uses first-wins semantics per field:
-
-```text
-If a higher-priority matching rule sets `min_release_age`, lower-priority
-matching rules cannot override `min_release_age` for that action.
-```
-
-If multiple matching rules have the same priority and set the same field to
-different values, that is a config error.
+When multiple rules match, later matching rules override earlier matching rules.
+This makes broad rules first and specific exceptions later the recommended style.
 
 ### Example result
 
@@ -514,18 +505,15 @@ Given:
 ```toml
 min_release_age = "7d"
 
-[rules.default-luxass]
-condition = '''
-ActionRepoOwner == "luxass"
-'''
+[[rules]]
+name = "luxass defaults"
+when = 'ActionRepoOwner == "luxass"'
 min_release_age = "1d"
 
-[rules.fast-luxass]
-priority = 10
-condition = '''
-ActionRepoOwner == "luxass"
-'''
-min_release_age = "0d"
+[[rules]]
+name = "fast specific action"
+when = 'ActionRepo == "luxass/foo"'
+min_release_age = "0h"
 ```
 
 For:
@@ -537,10 +525,11 @@ For:
 The effective value is:
 
 ```text
-min_release_age = 0d
+min_release_age = 0h
 ```
 
-because `rules.fast-luxass` has higher priority.
+because both rules match and the later, more specific rule overrides the earlier
+broad rule.
 
 ### Rule metadata
 
@@ -560,7 +549,7 @@ Where:
 
 ```text
 ActionRepo = "owner/name"
-CurrentRefKind = branch | tag | short_sha | full_sha
+CurrentRefKind = full_sha | short_sha | version_tag | branch_or_tag
 ```
 
 ### Rule condition language
@@ -603,8 +592,8 @@ Do not add a general-purpose scripting language unless there is a concrete need.
 Acceptance criteria:
 
 - rules are evaluated deterministically
-- rule precedence is documented
-- rule evaluation errors are clear
+- rule precedence is documented as ordered, last matching override wins
+- rule evaluation errors are clear and include the rule name when available
 - policy/rule evaluation is isolated from scanning, GitHub fetching, and patching
 - rules do not make command flow hard to read
 
@@ -633,6 +622,7 @@ Offline mode:
 - never performs network requests
 - uses cached GitHub data only
 - fails clearly when required cache data is missing
+- reports local-only audit findings normally, but fails if required cache data for SHA/comment verification is missing
 - works for audit
 - works for audit `--fix`
 - works for update when required cache data exists
@@ -647,7 +637,7 @@ No-cache mode:
 
 - bypasses cache reads and writes
 - performs fresh network requests when GitHub data is needed
-- conflicts with `--offline`; using both is a CLI/config error
+- conflicts with `--offline`; using both is a CLI/config error after config and CLI overrides are resolved
 
 ## 8. JSON output redesign
 
@@ -662,6 +652,11 @@ Acceptance criteria:
 - Human diagnostics in JSON mode go to stderr.
 
 ### Shared JSON fields
+
+JSON IDs are used only to correlate related objects inside the same command
+result, such as an `audit --fix` fix entry pointing back to its finding. IDs must
+be deterministic within one command run. They do not need to be stable across
+versions.
 
 Every command JSON document includes:
 
@@ -755,7 +750,9 @@ Required shape:
 
 ### Audit fix JSON
 
-`audit --fix --mode json` uses the audit shape and additionally includes:
+`audit --fix --mode json` uses the audit shape and additionally includes fixes.
+`ok` is `true` only when no findings remain after fixes. `ok` is `false` when
+unfixable findings remain or a fix fails.
 
 ```json
 {
@@ -776,7 +773,7 @@ Exact field additions are allowed, but these required fields must exist.
 
 ## 9. Interactive UI
 
-A terminal user interface is required for interactive update/fix selection.
+A terminal user interface is required for interactive update selection.
 
 The rewrite should use `ratatui` + `crossterm` for the TUI. This keeps the project
 on a mature Rust terminal stack and avoids spending rewrite effort on evaluating
@@ -786,7 +783,8 @@ The interactive UI survives, but is simplified.
 
 Acceptance criteria:
 
-- TUI-based interactive selection exists for update/fix flows
+- TUI-based interactive selection exists for update flows
+- audit and `audit --fix` never use the TUI
 - TUI uses `ratatui` + `crossterm` unless there is a documented reason to change
 - UI is understandable and reliable
 - UI does not require complex internal UI-specific models
@@ -1077,7 +1075,7 @@ testdata/workflows/
     github-config/
       .github/actioneer.toml
       .github/workflows/ci.yml
-    rules-priority/
+    rules-order/
       .actioneer.toml
       .github/workflows/ci.yml
     owner-specific-rule/
@@ -1146,7 +1144,7 @@ Tests should cover:
 - default `min_release_age = "10h"`
 - rule-based min-release-age override
 - owner-specific rules
-- rule priority and same-priority conflict errors
+- ordered rules where later matching rules override earlier matching rules
 - rule condition operators: `==`, `!=`, `starts_with`, `&&`, `||`
 - default SHA pinning policy
 - plain/json update requiring `--yes` or `--dry-run`
@@ -1156,7 +1154,7 @@ Tests should cover:
 - filter behavior before GitHub/cache fetching
 - filters plus rules applying together
 - configurable `mode`
-- `allow_mutable_refs` allowing branch/tag refs but not short SHA or SHA/comment mismatch
+- `pin = "tag"` allowing version tag refs as policy-compliant without allowing branch-like refs, short SHAs, or SHA/comment mismatch
 - interactive selection logic at a simplified/unit level
 
 The rewrite is accepted when:

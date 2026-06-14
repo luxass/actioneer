@@ -106,6 +106,28 @@ async fn fetches_paginated_version_tags_and_reuses_cache_unless_disabled() {
     );
 }
 
+#[test]
+fn offline_missing_cache_fails_clearly_without_fetching() {
+    let cache_dir = temp_dir("actioneer-github-tags-offline-miss");
+
+    let error = GitHubTags::new(&cache_dir)
+        .with_api_base_url("http://127.0.0.1:9")
+        .with_offline(true)
+        .tags_for_repo("actions", "checkout")
+        .expect_err("offline mode should fail when required tag cache is missing");
+
+    assert!(error.contains("offline"), "error should mention offline: {error}");
+    assert!(error.contains("cache"), "error should mention cache: {error}");
+    assert!(
+        error.contains("actions/checkout"),
+        "error should mention repo: {error}"
+    );
+    assert!(
+        !error.contains("GitHub tags request failed"),
+        "offline cache miss should fail before network fetching: {error}"
+    );
+}
+
 fn temp_dir(prefix: &str) -> std::path::PathBuf {
     let path = std::env::temp_dir().join(format!(
         "{prefix}-{}-{}",

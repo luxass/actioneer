@@ -14,6 +14,7 @@ pub struct GitHubTags {
     cache_dir: PathBuf,
     api_base_url: String,
     no_cache: bool,
+    offline: bool,
     http: Client,
 }
 
@@ -23,6 +24,7 @@ impl GitHubTags {
             cache_dir: cache_dir.into(),
             api_base_url: "https://api.github.com".to_string(),
             no_cache: false,
+            offline: false,
             http: Client::new(),
         }
     }
@@ -37,11 +39,22 @@ impl GitHubTags {
         self
     }
 
+    pub fn with_offline(mut self, offline: bool) -> Self {
+        self.offline = offline;
+        self
+    }
+
     pub fn tags_for_repo(&self, owner: &str, name: &str) -> Result<Vec<GitHubTag>, String> {
         if !self.no_cache {
             if let Some(tags) = self.read_cache(owner, name)? {
                 return Ok(tags);
             }
+        }
+
+        if self.offline {
+            return Err(format!(
+                "offline mode requires cached GitHub tag data for {owner}/{name}, but no cache entry was found"
+            ));
         }
 
         let tags = self.fetch_tags(owner, name)?;

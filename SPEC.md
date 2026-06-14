@@ -811,7 +811,10 @@ Acceptance criteria:
 
 - `src/main.rs` is a thin binary entry point that parses CLI args and dispatches commands.
 - `src/lib.rs` exposes library modules used by tests and the binary.
-- `src/cmd/` contains command entry points, such as audit/update/version.
+- `src/cmd/` contains command entry points and command orchestration, such as audit/update/version.
+- `src/cmd/` must not become a dumping ground for domain logic.
+- Config loading, rule evaluation, workflow discovery, GitHub/cache access, patching, TUI rendering, and reusable JSON shaping should live outside `src/cmd/` unless the code is trivial and command-specific.
+- Command files should read like linear pipelines that call into small, clearly named modules.
 - The rest of the module layout is up to the implementation.
 - Module layout should serve readability and command flow, not mirror the current code.
 

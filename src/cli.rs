@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
@@ -33,12 +35,18 @@ pub struct SharedArgs {
 pub struct AuditArgs {
     #[command(flatten)]
     pub shared: SharedArgs,
+
+    #[arg(value_name = "INPUT")]
+    pub inputs: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Args, Default)]
 pub struct UpdateArgs {
     #[command(flatten)]
     pub shared: SharedArgs,
+
+    #[arg(value_name = "INPUT")]
+    pub inputs: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

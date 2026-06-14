@@ -13,8 +13,6 @@ pub struct ActionRef {
     pub ref_name: String,
 }
 
-pub type DiscoveredActionRef = ActionRef;
-
 pub fn discover_action_refs<I, P>(inputs: I) -> Result<Vec<ActionRef>, String>
 where
     I: IntoIterator<Item = P>,

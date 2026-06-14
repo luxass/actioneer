@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use crate::{cli::SharedArgs, discovery::DiscoveredActionRef};
+use crate::{cli::SharedArgs, discovery::ActionRef};
 
 #[derive(Debug, Clone, Default)]
 pub struct Config {
@@ -10,7 +10,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn effective_pin(&self, action_ref: &DiscoveredActionRef) -> PinStyle {
+    pub fn effective_pin(&self, action_ref: &ActionRef) -> PinStyle {
         let mut pin = PinStyle::Sha;
 
         for policy_override in &self.policy_overrides {
@@ -39,7 +39,7 @@ impl PolicyOverride {
         }
     }
 
-    fn matches(&self, action_ref: &DiscoveredActionRef) -> bool {
+    fn matches(&self, action_ref: &ActionRef) -> bool {
         self.condition
             .as_ref()
             .is_none_or(|condition| condition.matches(action_ref))
@@ -105,7 +105,7 @@ struct RuleCondition {
 }
 
 impl RuleCondition {
-    fn matches(&self, action_ref: &DiscoveredActionRef) -> bool {
+    fn matches(&self, action_ref: &ActionRef) -> bool {
         let actual = match self.field {
             RuleField::ActionRepoOwner => &action_ref.owner,
             RuleField::ActionRepoName => &action_ref.name,

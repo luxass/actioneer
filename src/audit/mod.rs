@@ -1,3 +1,5 @@
+pub mod output;
+
 use crate::discovery::DiscoveredActionRef;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

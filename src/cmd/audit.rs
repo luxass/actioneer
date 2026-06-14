@@ -1,7 +1,8 @@
 use std::{path::PathBuf, process::ExitCode};
 
 use crate::{
-    audit::audit_references, audit_output::print_report, cli::AuditArgs,
+    audit::{audit_references, output::print_report},
+    cli::AuditArgs,
     discovery::discover_action_refs,
 };
 

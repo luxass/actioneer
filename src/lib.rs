@@ -1,5 +1,4 @@
 pub mod audit;
-pub mod audit_output;
 pub mod cli;
 pub mod cmd;
 pub mod config;

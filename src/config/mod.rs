@@ -88,6 +88,15 @@ pub enum PinStyle {
     Tag,
 }
 
+impl PinStyle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Sha => "sha",
+            Self::Tag => "tag",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct RuleCondition {
     field: RuleField,

@@ -45,6 +45,9 @@ pub struct UpdateArgs {
     #[command(flatten)]
     pub shared: SharedArgs,
 
+    #[arg(long)]
+    pub dry_run: bool,
+
     #[arg(value_name = "INPUT")]
     pub inputs: Vec<PathBuf>,
 }

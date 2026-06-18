@@ -5,7 +5,7 @@ use crate::{
     discovery::ActionRef,
 };
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Config {
     pub offline: bool,
     pub no_cache: bool,
@@ -18,6 +18,24 @@ pub struct Config {
     pub min_release_age: Option<String>,
     pub mode: Option<Mode>,
     policy_overrides: Vec<PolicyOverride>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            offline: false,
+            no_cache: false,
+            recursive: false,
+            filter: Vec::new(),
+            exclude: Vec::new(),
+            pin: None,
+            update_level: None,
+            skip_branches: false,
+            min_release_age: Some("10h".to_string()),
+            mode: Some(Mode::Tui),
+            policy_overrides: Vec::new(),
+        }
+    }
 }
 
 impl Config {

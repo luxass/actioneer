@@ -13,6 +13,7 @@ use crate::{
 };
 
 pub fn run(args: &AuditArgs, config: &Config) -> Result<ExitCode, String> {
+    let mode = args.shared.mode.or(config.mode).unwrap_or(crate::cli::Mode::Plain);
     let inputs = audit_inputs(args, config);
     let references =
         filter_action_refs(discover_action_refs(&inputs)?, &config.filter, &config.exclude);
@@ -34,7 +35,7 @@ pub fn run(args: &AuditArgs, config: &Config) -> Result<ExitCode, String> {
         print_report_with_fixes(
             references_after_fix.len(),
             &findings_after_fix,
-            args.shared.mode,
+            Some(mode),
             &fixes,
         )?;
 
@@ -45,7 +46,7 @@ pub fn run(args: &AuditArgs, config: &Config) -> Result<ExitCode, String> {
         };
     }
 
-    print_report(references.len(), &findings, args.shared.mode)?;
+    print_report(references.len(), &findings, Some(mode))?;
 
     if findings.is_empty() {
         Ok(ExitCode::SUCCESS)

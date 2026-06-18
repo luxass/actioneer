@@ -130,7 +130,7 @@ fn is_full_sha(ref_name: &str) -> bool {
             .all(|character| character.is_ascii_hexdigit())
 }
 
-fn is_version_tag(ref_name: &str) -> bool {
+pub fn is_version_tag(ref_name: &str) -> bool {
     let Some(version) = ref_name.strip_prefix('v') else {
         return false;
     };

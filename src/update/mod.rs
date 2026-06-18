@@ -1,7 +1,7 @@
 pub mod output;
 
 use crate::{
-    config::{Config, PinStyle},
+    config::{Config, PinStyle, UpdateLevel},
     discovery::ActionRef,
     github::{GitHubTag, GitHubTags},
 };
@@ -29,8 +29,16 @@ pub fn plan_update_candidates(
     let mut candidates = Vec::new();
 
     for action_ref in references {
+        if config.skip_branches && is_branch_like_ref(&action_ref.ref_name) {
+            continue;
+        }
+
         let tags = github_tags.tags_for_repo(&action_ref.owner, &action_ref.name)?;
-        let Some(target_tag) = newest_version_tag(&tags) else {
+        let target_tag = match config.update_level {
+            Some(level) => newest_tag_for_level(&tags, &action_ref.ref_name, level),
+            None => newest_version_tag(&tags),
+        };
+        let Some(target_tag) = target_tag else {
             continue;
         };
 
@@ -70,6 +78,31 @@ fn newest_version_tag(tags: &[GitHubTag]) -> Option<&GitHubTag> {
     tags.iter().max_by_key(|tag| version_key(&tag.name))
 }
 
+fn newest_tag_for_level<'tags>(
+    tags: &'tags [GitHubTag],
+    current_ref: &str,
+    level: UpdateLevel,
+) -> Option<&'tags GitHubTag> {
+    let current_key = version_key(current_ref);
+    tags.iter()
+        .filter(|tag| match level {
+            UpdateLevel::Major => true,
+            UpdateLevel::Minor => {
+                let key = version_key(&tag.name);
+                key.first().copied().unwrap_or(0)
+                    == current_key.first().copied().unwrap_or(0)
+            }
+            UpdateLevel::Patch => {
+                let key = version_key(&tag.name);
+                key.get(0).copied().unwrap_or(0)
+                    == current_key.get(0).copied().unwrap_or(0)
+                    && key.get(1).copied().unwrap_or(0)
+                        == current_key.get(1).copied().unwrap_or(0)
+            }
+        })
+        .max_by_key(|tag| version_key(&tag.name))
+}
+
 fn version_key(tag: &str) -> Vec<u64> {
     tag.strip_prefix('v')
         .unwrap_or(tag)
@@ -84,3 +117,14 @@ fn is_full_sha(ref_name: &str) -> bool {
             .chars()
             .all(|character| character.is_ascii_hexdigit())
 }
+
+fn is_branch_like_ref(ref_name: &str) -> bool {
+    !(is_full_sha(ref_name)
+        || crate::audit::is_version_tag(ref_name)
+        || (ref_name.len() < 40
+            && ref_name
+                .chars()
+                .all(|character| character.is_ascii_hexdigit())))
+}
+
+

@@ -11,7 +11,8 @@ use crate::{
 };
 
 pub fn run(args: &UpdateArgs, config: &Config) -> Result<ExitCode, String> {
-    require_non_interactive_confirmation(args)?;
+    let mode = effective_mode(args, config);
+    require_non_interactive_confirmation(mode, args)?;
 
     let references = filter_action_refs(
         discover_action_refs(&update_inputs(args, config))?,
@@ -20,7 +21,7 @@ pub fn run(args: &UpdateArgs, config: &Config) -> Result<ExitCode, String> {
     );
     let github_tags = github_tags(config);
     let candidates = plan_update_candidates(&references, config, &github_tags)?;
-    let selected_indexes = selected_indexes(args, &candidates)?;
+    let selected_indexes = selected_indexes(args, config, &candidates)?;
     let mut applied_indexes = Vec::new();
 
     if args.yes && !args.dry_run {
@@ -29,8 +30,8 @@ pub fn run(args: &UpdateArgs, config: &Config) -> Result<ExitCode, String> {
         applied_indexes = selected_indexes.clone();
     }
 
-    match args.shared.mode {
-        Some(Mode::Json) => print_json_plan(
+    match mode {
+        Mode::Json => print_json_plan(
             references.len(),
             &candidates,
             &selected_indexes,
@@ -42,28 +43,32 @@ pub fn run(args: &UpdateArgs, config: &Config) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn require_non_interactive_confirmation(args: &UpdateArgs) -> Result<(), String> {
-    if matches!(args.shared.mode, Some(Mode::Plain | Mode::Json)) && !args.yes && !args.dry_run {
+fn effective_mode(args: &UpdateArgs, config: &Config) -> Mode {
+    args.shared.mode.or(config.mode).unwrap_or(Mode::Tui)
+}
+
+fn require_non_interactive_confirmation(mode: Mode, args: &UpdateArgs) -> Result<(), String> {
+    if matches!(mode, Mode::Plain | Mode::Json) && !args.yes && !args.dry_run {
         return Err("update --mode plain/json requires --yes or --dry-run".to_string());
     }
 
     Ok(())
 }
 
-fn selected_indexes(args: &UpdateArgs, candidates: &[crate::update::Candidate]) -> Result<Vec<usize>, String> {
+fn selected_indexes(
+    args: &UpdateArgs,
+    config: &Config,
+    candidates: &[crate::update::Candidate],
+) -> Result<Vec<usize>, String> {
     if args.yes || args.dry_run {
         return Ok(all_candidate_indexes(candidates));
     }
 
-    if should_use_tui(args) {
+    if effective_mode(args, config) == Mode::Tui {
         return tui::select(candidates);
     }
 
     Ok(Vec::new())
-}
-
-fn should_use_tui(args: &UpdateArgs) -> bool {
-    matches!(args.shared.mode, None | Some(Mode::Tui))
 }
 
 fn update_inputs(args: &UpdateArgs, config: &Config) -> Vec<PathBuf> {

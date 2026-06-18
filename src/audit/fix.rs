@@ -1,7 +1,8 @@
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use crate::{
-    audit::Finding,
+    audit::{Finding, FindingKind},
+    config::{Config, PinStyle},
     github::{GitHubTag, GitHubTags},
 };
 
@@ -17,7 +18,7 @@ pub struct AuditFix {
     new_uses: String,
 }
 
-pub fn plan_fixes(findings: &[Finding], github_tags: &GitHubTags) -> Result<Vec<AuditFix>, String> {
+pub fn plan_fixes(findings: &[Finding], config: &Config, github_tags: &GitHubTags) -> Result<Vec<AuditFix>, String> {
     let mut fixes = Vec::new();
 
     for finding in findings {
@@ -25,26 +26,78 @@ pub fn plan_fixes(findings: &[Finding], github_tags: &GitHubTags) -> Result<Vec<
             continue;
         }
 
-        let tags = github_tags.tags_for_repo(&finding.action.owner, &finding.action.name)?;
-        let Some(tag) = newest_version_tag(&tags) else {
-            continue;
+        let fix = match &finding.kind {
+            FindingKind::MutableRef => plan_mutable_ref_fix(finding, config, github_tags)?,
+            FindingKind::ShaCommentMismatch => plan_sha_comment_fix(finding),
         };
-        let action_name = action_name(&finding.action.repo, &finding.action.path);
-        let new_uses = format!("{action_name}@{} # {}", tag.sha, tag.name);
 
-        fixes.push(AuditFix {
-            finding_id: finding.id.clone(),
-            file: finding.action.file.display().to_string(),
-            line: finding.action.line,
-            applied: false,
-            new_ref: tag.sha.clone(),
-            new_version_comment: tag.name.clone(),
-            old_uses: format!("{action_name}@{}", finding.action.ref_name),
-            new_uses,
-        });
+        if let Some(fix) = fix {
+            fixes.push(fix);
+        }
     }
 
     Ok(fixes)
+}
+
+fn plan_mutable_ref_fix(
+    finding: &Finding,
+    config: &Config,
+    github_tags: &GitHubTags,
+) -> Result<Option<AuditFix>, String> {
+    let tags = github_tags.tags_for_repo(&finding.action.owner, &finding.action.name)?;
+    let Some(tag) = newest_version_tag(&tags) else {
+        return Ok(None);
+    };
+
+    let pin = config.effective_pin(&finding.action);
+    let action_name = action_name(&finding.action.repo, &finding.action.path);
+
+    let (new_ref, new_version_comment, new_uses) = match pin {
+        PinStyle::Sha => {
+            let new_uses = format!("{action_name}@{} # {}", tag.sha, tag.name);
+            (tag.sha.clone(), tag.name.clone(), new_uses)
+        }
+        PinStyle::Tag => {
+            let new_uses = format!("{action_name}@{}", tag.name);
+            (tag.name.clone(), String::new(), new_uses)
+        }
+    };
+
+    Ok(Some(AuditFix {
+        finding_id: finding.id.clone(),
+        file: finding.action.file.display().to_string(),
+        line: finding.action.line,
+        applied: false,
+        new_ref,
+        new_version_comment,
+        old_uses: format!("{action_name}@{}", finding.action.ref_name),
+        new_uses,
+    }))
+}
+
+fn plan_sha_comment_fix(finding: &Finding) -> Option<AuditFix> {
+    let expected_sha = finding.expected_sha.as_ref()?;
+    let action_name = action_name(&finding.action.repo, &finding.action.path);
+    let comment = finding.action.version_comment.as_deref().unwrap_or("");
+
+    let old_uses = if comment.is_empty() {
+        format!("{action_name}@{}", finding.action.ref_name)
+    } else {
+        format!("{action_name}@{} # {}", finding.action.ref_name, comment)
+    };
+
+    let new_uses = format!("{action_name}@{expected_sha} # {comment}");
+
+    Some(AuditFix {
+        finding_id: finding.id.clone(),
+        file: finding.action.file.display().to_string(),
+        line: finding.action.line,
+        applied: false,
+        new_ref: expected_sha.clone(),
+        new_version_comment: comment.to_string(),
+        old_uses,
+        new_uses,
+    })
 }
 
 pub fn apply_fixes(fixes: &mut [AuditFix]) -> Result<(), String> {

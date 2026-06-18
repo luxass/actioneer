@@ -20,7 +20,7 @@ pub fn run(args: &AuditArgs, config: &Config) -> Result<ExitCode, String> {
     let findings = audit_references(&references, config, &github_tags)?;
 
     if args.fix {
-        let mut fixes = plan_fixes(&findings, &github_tags)?;
+        let mut fixes = plan_fixes(&findings, config, &github_tags)?;
         if !args.dry_run {
             apply_fixes(&mut fixes)?;
         }

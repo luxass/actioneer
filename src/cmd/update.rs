@@ -6,6 +6,7 @@ use crate::{
     discovery::{discover_action_refs, filter_action_refs},
     github::GitHubTags,
     patch::{apply_patch_edits, update_patch_edits},
+    tui,
     update::{all_candidate_indexes, output::print_json_plan, plan_update_candidates},
 };
 
@@ -19,7 +20,7 @@ pub fn run(args: &UpdateArgs, config: &Config) -> Result<ExitCode, String> {
     );
     let github_tags = github_tags(config);
     let candidates = plan_update_candidates(&references, config, &github_tags)?;
-    let selected_indexes = selected_indexes(args, &candidates);
+    let selected_indexes = selected_indexes(args, &candidates)?;
     let mut applied_indexes = Vec::new();
 
     if args.yes && !args.dry_run {
@@ -49,12 +50,20 @@ fn require_non_interactive_confirmation(args: &UpdateArgs) -> Result<(), String>
     Ok(())
 }
 
-fn selected_indexes(args: &UpdateArgs, candidates: &[crate::update::Candidate]) -> Vec<usize> {
+fn selected_indexes(args: &UpdateArgs, candidates: &[crate::update::Candidate]) -> Result<Vec<usize>, String> {
     if args.yes || args.dry_run {
-        all_candidate_indexes(candidates)
-    } else {
-        Vec::new()
+        return Ok(all_candidate_indexes(candidates));
     }
+
+    if should_use_tui(args) {
+        return tui::select(candidates);
+    }
+
+    Ok(Vec::new())
+}
+
+fn should_use_tui(args: &UpdateArgs) -> bool {
+    matches!(args.shared.mode, None | Some(Mode::Tui))
 }
 
 fn update_inputs(args: &UpdateArgs, config: &Config) -> Vec<PathBuf> {

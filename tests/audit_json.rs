@@ -145,6 +145,60 @@ fn audit_json_applies_config_globals_and_ordered_rules() {
 }
 
 #[test]
+fn audit_json_reports_mutable_branch_ref() {
+    let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
+        .current_dir("testdata/workflows/audit/mutable-branch")
+        .args(["audit", "--mode", "json", ".github"])
+        .output()
+        .expect("run actioneer audit");
+
+    assert!(!output.status.success(), "audit should fail with findings");
+    assert!(output.stderr.is_empty());
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("audit stdout is JSON");
+    assert_eq!(json["summary"]["references"], 1);
+    assert_eq!(json["summary"]["findings"], 1);
+    assert_eq!(json["findings"][0]["kind"], "mutable_ref");
+    assert_eq!(json["findings"][0]["action"]["ref"], "main");
+}
+
+#[test]
+fn audit_json_reports_short_sha_ref() {
+    let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
+        .current_dir("testdata/workflows/audit/short-sha")
+        .args(["audit", "--mode", "json", ".github"])
+        .output()
+        .expect("run actioneer audit");
+
+    assert!(!output.status.success(), "audit should fail with findings");
+    assert!(output.stderr.is_empty());
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("audit stdout is JSON");
+    assert_eq!(json["summary"]["findings"], 1);
+    assert_eq!(json["findings"][0]["kind"], "mutable_ref");
+}
+
+#[test]
+fn audit_json_reports_sha_comment_mismatch() {
+    let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
+        .current_dir("testdata/workflows/audit/sha-comment-mismatch")
+        .args(["audit", "--mode", "json", ".github"])
+        .output()
+        .expect("run actioneer audit");
+
+    assert!(!output.status.success(), "audit should fail with findings");
+    assert!(output.stderr.is_empty());
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("audit stdout is JSON");
+    assert_eq!(json["summary"]["findings"], 1);
+    assert_eq!(json["findings"][0]["kind"], "sha_comment_mismatch");
+    assert!(
+        json["findings"][0]["expected_sha"].is_string(),
+        "expected_sha should be set"
+    );
+}
+
+#[test]
 fn audit_json_reports_mutable_ref_finding() {
     let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
         .current_dir("testdata/workflows/audit/mutable-tag")

@@ -108,6 +108,43 @@ fn update_json_requires_yes_or_dry_run_before_fetching() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn update_tag_pin_style_dry_run_targets_tag_not_sha() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/actions/checkout/tags"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "name": "v4.2.2", "commit": { "sha": "2222222222222222222222222222222222222222" } }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let cache_dir = temp_dir("actioneer-update-tag-pin-cache");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
+        .current_dir("testdata/workflows/update/tag-pin-style")
+        .env("ACTIONEER_GITHUB_API_BASE_URL", server.uri())
+        .env("ACTIONEER_CACHE_DIR", &cache_dir)
+        .args(["update", "--dry-run", "--mode", "json", ".github"])
+        .output()
+        .expect("run actioneer update");
+
+    assert!(
+        output.status.success(),
+        "update dry-run should succeed; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("update stdout is JSON");
+    let candidate = &json["candidates"][0];
+    assert_eq!(candidate["action"]["current_ref"], "v4");
+    assert_eq!(candidate["target"]["ref"], "v4.2.2");
+    assert_eq!(candidate["target"]["pin"], "tag");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn update_yes_patches_sha_ref_and_writes_version_comment() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

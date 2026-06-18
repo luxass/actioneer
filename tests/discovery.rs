@@ -84,6 +84,47 @@ fn workflow_workspace_macro_writes_dedented_multiline_files_for_discovery() {
             ("owner/tool", "path", "main", 12),
         ]
     );
+
+    let tool = refs.iter().find(|action| action.repo == "owner/tool").unwrap();
+    assert_eq!(
+        tool.version_comment.as_deref(),
+        Some("keep this user comment")
+    );
+}
+
+#[test]
+fn discovers_reusable_workflow_job_level_uses() {
+    let workspace = workflow_workspace! {
+        ".github/workflows/ci.yml" => r#"
+            name: ci
+
+            on:
+              push:
+
+            jobs:
+              reusable:
+                uses: actions/reusable-workflows/.github/workflows/ci.yml@v1
+              test:
+                runs-on: ubuntu-latest
+                steps:
+                  - uses: actions/checkout@v4
+        "#,
+    };
+
+    let refs = discover_action_refs([workspace.path()]).expect("discover action refs");
+
+    let actions = refs
+        .iter()
+        .map(|action| (action.repo.as_str(), action.path.as_str(), action.ref_name.as_str()))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        actions,
+        vec![
+            ("actions/reusable-workflows", ".github/workflows/ci.yml", "v1"),
+            ("actions/checkout", "", "v4"),
+        ]
+    );
 }
 
 #[test]

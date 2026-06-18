@@ -11,6 +11,7 @@ use crate::{
 pub enum FindingKind {
     MutableRef,
     ShaCommentMismatch,
+    ShortSha,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +30,7 @@ impl Finding {
         match self.kind {
             FindingKind::MutableRef => "mutable_ref",
             FindingKind::ShaCommentMismatch => "sha_comment_mismatch",
+            FindingKind::ShortSha => "short_sha",
         }
     }
 
@@ -51,10 +53,15 @@ pub fn audit_references(
             continue;
         }
 
-        if pin == PinStyle::Sha && is_full_sha(&action_ref.ref_name)
-            && let Some(expected_sha) = verify_sha_comment(action_ref, github_tags)? {
-                findings.push(sha_comment_mismatch_finding(index + 1, action_ref, expected_sha));
+        if pin == PinStyle::Sha {
+            if is_full_sha(&action_ref.ref_name) {
+                if let Some(expected_sha) = verify_sha_comment(action_ref, github_tags)? {
+                    findings.push(sha_comment_mismatch_finding(index + 1, action_ref, expected_sha));
+                }
+            } else if let Some(expected_sha) = verify_short_sha(action_ref, github_tags)? {
+                findings.push(short_sha_finding(index + 1, action_ref, expected_sha));
             }
+        }
     }
 
     Ok(findings)
@@ -92,6 +99,18 @@ fn sha_comment_mismatch_finding(
     }
 }
 
+fn short_sha_finding(id: usize, action_ref: &ActionRef, expected_sha: String) -> Finding {
+    Finding {
+        id: format!("finding-{id}"),
+        kind: FindingKind::ShortSha,
+        action: action_ref.clone(),
+        message: "Action is pinned to a short SHA".to_string(),
+        recommendation: "Pin to the full SHA".to_string(),
+        fixable: true,
+        expected_sha: Some(expected_sha),
+    }
+}
+
 fn verify_sha_comment(
     action_ref: &ActionRef,
     github_tags: &GitHubTags,
@@ -119,6 +138,32 @@ fn violates_policy(action_ref: &ActionRef, pin: PinStyle) -> bool {
         PinStyle::Tag => {
             !is_full_sha(&action_ref.ref_name) && !is_version_tag(&action_ref.ref_name)
         }
+    }
+}
+
+fn verify_short_sha(
+    action_ref: &ActionRef,
+    github_tags: &GitHubTags,
+) -> Result<Option<String>, String> {
+    if action_ref.ref_name.len() >= 40
+        || !action_ref
+            .ref_name
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        return Ok(None);
+    }
+
+    let tags = github_tags.tags_for_repo(&action_ref.owner, &action_ref.name)?;
+    let matching: Vec<&crate::github::GitHubTag> = tags
+        .iter()
+        .filter(|tag| tag.sha.starts_with(&action_ref.ref_name))
+        .collect();
+
+    if matching.len() == 1 {
+        Ok(Some(matching[0].sha.clone()))
+    } else {
+        Ok(None)
     }
 }
 

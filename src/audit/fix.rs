@@ -28,7 +28,7 @@ pub fn plan_fixes(findings: &[Finding], config: &Config, github_tags: &GitHubTag
 
         let fix = match &finding.kind {
             FindingKind::MutableRef => plan_mutable_ref_fix(finding, config, github_tags)?,
-            FindingKind::ShaCommentMismatch => plan_sha_comment_fix(finding),
+            FindingKind::ShaCommentMismatch | FindingKind::ShortSha => plan_sha_comment_fix(finding),
         };
 
         if let Some(fix) = fix {

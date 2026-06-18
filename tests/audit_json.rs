@@ -145,6 +145,67 @@ fn audit_json_applies_config_globals_and_ordered_rules() {
 }
 
 #[test]
+fn audit_json_uses_root_config_global_pin() {
+    let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
+        .current_dir("testdata/workflows/config/root-config")
+        .args(["audit", "--mode", "json", ".github"])
+        .output()
+        .expect("run actioneer audit");
+
+    assert!(
+        output.status.success(),
+        "root config pin=tag should allow branch refs as compliant; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("audit stdout is JSON");
+    assert_eq!(json["summary"]["references"], 1);
+    assert_eq!(json["summary"]["findings"], 0);
+}
+
+#[test]
+fn audit_json_uses_github_config_global_pin() {
+    let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
+        .current_dir("testdata/workflows/config/github-config")
+        .args(["audit", "--mode", "json", ".github"])
+        .output()
+        .expect("run actioneer audit");
+
+    assert!(
+        output.status.success(),
+        ".github/actioneer.toml pin=tag should allow branch refs as compliant; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("audit stdout is JSON");
+    assert_eq!(json["summary"]["references"], 1);
+    assert_eq!(json["summary"]["findings"], 0);
+}
+
+#[test]
+fn audit_json_applies_owner_specific_rule() {
+    let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
+        .current_dir("testdata/workflows/config/owner-specific-rule")
+        .args(["audit", "--mode", "json", ".github"])
+        .output()
+        .expect("run actioneer audit");
+
+    assert!(!output.status.success(), "audit should fail for docker/login-action");
+    assert!(output.stderr.is_empty());
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("audit stdout is JSON");
+    assert_eq!(json["summary"]["references"], 2);
+    assert_eq!(json["summary"]["findings"], 1);
+
+    let findings = json["findings"].as_array().expect("findings array");
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0]["action"]["repo"], "docker/login-action");
+    assert_eq!(findings[0]["action"]["ref"], "main");
+}
+
+#[test]
 fn audit_json_reports_mutable_branch_ref() {
     let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
         .current_dir("testdata/workflows/audit/mutable-branch")

@@ -302,11 +302,36 @@ trait RequestBuilderExt {
 
 impl RequestBuilderExt for reqwest::blocking::RequestBuilder {
     fn bearer_auth_token_from_env(self) -> Self {
-        match std::env::var("GITHUB_TOKEN") {
-            Ok(token) if !token.trim().is_empty() => self.bearer_auth(token),
-            _ => self,
+        if let Ok(token) = std::env::var("GITHUB_TOKEN")
+            && !token.trim().is_empty() {
+                return self.bearer_auth(token);
+            }
+
+        if let Some(token) = gh_auth_token() {
+            return self.bearer_auth(token);
         }
+
+        self
     }
+}
+
+fn gh_auth_token() -> Option<String> {
+    let output = std::process::Command::new("gh")
+        .args(["auth", "token"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let token = String::from_utf8_lossy(&output.stdout);
+    let token = token.trim();
+    if token.is_empty() {
+        return None;
+    }
+
+    Some(token.to_string())
 }
 
 #[derive(Debug, Serialize, Deserialize)]

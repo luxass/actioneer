@@ -53,7 +53,7 @@ impl Config {
 
 #[derive(Debug, Clone)]
 struct PolicyOverride {
-    condition: Option<RuleCondition>,
+    condition: Option<Expression>,
     pin: Option<PinStyle>,
 }
 
@@ -68,7 +68,7 @@ impl PolicyOverride {
 #[derive(Debug, Clone)]
 struct PendingRule {
     name: Option<String>,
-    condition: Option<RuleCondition>,
+    condition: Option<Expression>,
     pin: Option<PinStyle>,
 }
 
@@ -125,23 +125,33 @@ pub enum UpdateLevel {
 }
 
 #[derive(Debug, Clone)]
-struct RuleCondition {
-    field: RuleField,
-    operator: RuleOperator,
-    expected: String,
+enum Expression {
+    And(Vec<Expression>),
+    Or(Vec<Expression>),
+    Compare {
+        field: RuleField,
+        op: RuleOperator,
+        expected: String,
+    },
 }
 
-impl RuleCondition {
+impl Expression {
     fn matches(&self, action_ref: &ActionRef) -> bool {
-        let actual = match self.field {
-            RuleField::ActionRepoOwner => &action_ref.owner,
-            RuleField::ActionRepoName => &action_ref.name,
-            RuleField::ActionRepo => &action_ref.repo,
-        };
-
-        match self.operator {
-            RuleOperator::Equals => actual == &self.expected,
-            RuleOperator::NotEquals => actual != &self.expected,
+        match self {
+            Self::And(parts) => parts.iter().all(|part| part.matches(action_ref)),
+            Self::Or(parts) => parts.iter().any(|part| part.matches(action_ref)),
+            Self::Compare {
+                field,
+                op,
+                expected,
+            } => {
+                let actual = field_value(action_ref, *field);
+                match op {
+                    RuleOperator::Equals => actual == *expected,
+                    RuleOperator::NotEquals => actual != *expected,
+                    RuleOperator::StartsWith => actual.starts_with(expected),
+                }
+            }
         }
     }
 }
@@ -151,12 +161,62 @@ enum RuleField {
     ActionRepoOwner,
     ActionRepoName,
     ActionRepo,
+    ActionPath,
+    WorkflowFile,
+    CurrentRef,
+    CurrentRefKind,
 }
 
 #[derive(Debug, Clone, Copy)]
 enum RuleOperator {
     Equals,
     NotEquals,
+    StartsWith,
+}
+
+fn field_value(action_ref: &ActionRef, field: RuleField) -> String {
+    match field {
+        RuleField::ActionRepoOwner => action_ref.owner.clone(),
+        RuleField::ActionRepoName => action_ref.name.clone(),
+        RuleField::ActionRepo => action_ref.repo.clone(),
+        RuleField::ActionPath => action_ref.path.clone(),
+        RuleField::WorkflowFile => action_ref.file.display().to_string(),
+        RuleField::CurrentRef => action_ref.ref_name.clone(),
+        RuleField::CurrentRefKind => current_ref_kind(action_ref),
+    }
+}
+
+fn current_ref_kind(action_ref: &ActionRef) -> String {
+    if action_ref.ref_name.len() == 40
+        && action_ref
+            .ref_name
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        "sha".to_string()
+    } else if action_ref.ref_name.starts_with("v")
+        && action_ref
+            .ref_name
+            .chars()
+            .skip(1)
+            .any(|character| character.is_ascii_digit())
+        && action_ref
+            .ref_name
+            .chars()
+            .skip(1)
+            .all(|character| character.is_ascii_digit() || character == '.')
+    {
+        "tag".to_string()
+    } else if action_ref.ref_name.len() < 40
+        && action_ref
+            .ref_name
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        "short_sha".to_string()
+    } else {
+        "branch".to_string()
+    }
 }
 
 pub fn load_for_command(shared: &SharedArgs) -> Result<Config, String> {
@@ -342,35 +402,114 @@ fn parse_pin(path: &Path, line: usize, value: &str) -> Result<PinStyle, String> 
     }
 }
 
-fn parse_condition(path: &Path, line: usize, value: &str) -> Result<RuleCondition, String> {
-    let (operator, left, right) = if let Some((left, right)) = value.split_once("==") {
+fn parse_condition(path: &Path, line: usize, value: &str) -> Result<Expression, String> {
+    let value = value.trim();
+    parse_or_expr(path, line, value)
+}
+
+fn parse_or_expr(path: &Path, line: usize, value: &str) -> Result<Expression, String> {
+    let parts = split_top_level(value, "||");
+    if parts.len() == 1 {
+        return parse_and_expr(path, line, parts[0]);
+    }
+
+    let mut parsed = Vec::new();
+    for part in parts {
+        parsed.push(parse_and_expr(path, line, part)?);
+    }
+    Ok(Expression::Or(parsed))
+}
+
+fn parse_and_expr(path: &Path, line: usize, value: &str) -> Result<Expression, String> {
+    let parts = split_top_level(value, "&&");
+    if parts.len() == 1 {
+        return parse_primary(path, line, parts[0]);
+    }
+
+    let mut parsed = Vec::new();
+    for part in parts {
+        parsed.push(parse_primary(path, line, part)?);
+    }
+    Ok(Expression::And(parsed))
+}
+
+fn parse_primary(path: &Path, line: usize, value: &str) -> Result<Expression, String> {
+    let value = value.trim();
+    if value.starts_with('(') && value.ends_with(')') {
+        return parse_condition(path, line, &value[1..value.len() - 1]);
+    }
+
+    if let Some(args) = value
+        .strip_prefix("starts_with(")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        let (left, right) = args.split_once(',').ok_or_else(|| {
+            format!(
+                "failed to parse config {}:{line}: starts_with expects two arguments",
+                path.display()
+            )
+        })?;
+        return Ok(Expression::Compare {
+            field: parse_field(path, line, left.trim())?,
+            op: RuleOperator::StartsWith,
+            expected: parse_string(path, line, "when", right.trim())?,
+        });
+    }
+
+    let (op, left, right) = if let Some((left, right)) = value.split_once("==") {
         (RuleOperator::Equals, left, right)
     } else if let Some((left, right)) = value.split_once("!=") {
         (RuleOperator::NotEquals, left, right)
     } else {
         return Err(format!(
-            "failed to parse config {}:{line}: rule condition must use == or !=",
+            "failed to parse config {}:{line}: rule condition must use ==, !=, or starts_with(...)",
             path.display()
         ));
     };
 
-    let field = match left.trim() {
-        "ActionRepoOwner" => RuleField::ActionRepoOwner,
-        "ActionRepoName" => RuleField::ActionRepoName,
-        "ActionRepo" => RuleField::ActionRepo,
-        other => {
-            return Err(format!(
-                "failed to parse config {}:{line}: unsupported rule field {other:?}",
-                path.display()
-            ));
-        }
-    };
-
-    Ok(RuleCondition {
-        field,
-        operator,
+    Ok(Expression::Compare {
+        field: parse_field(path, line, left.trim())?,
+        op,
         expected: parse_string(path, line, "when", right.trim())?,
     })
+}
+
+fn parse_field(path: &Path, line: usize, value: &str) -> Result<RuleField, String> {
+    match value {
+        "ActionRepoOwner" => Ok(RuleField::ActionRepoOwner),
+        "ActionRepoName" => Ok(RuleField::ActionRepoName),
+        "ActionRepo" => Ok(RuleField::ActionRepo),
+        "ActionPath" => Ok(RuleField::ActionPath),
+        "WorkflowFile" => Ok(RuleField::WorkflowFile),
+        "CurrentRef" => Ok(RuleField::CurrentRef),
+        "CurrentRefKind" => Ok(RuleField::CurrentRefKind),
+        other => Err(format!(
+            "failed to parse config {}:{line}: unsupported rule field {other:?}",
+            path.display()
+        )),
+    }
+}
+
+fn split_top_level<'source>(value: &'source str, delimiter: &str) -> Vec<&'source str> {
+    let mut depth = 0;
+    let mut start = 0;
+    let mut parts = Vec::new();
+
+    for (index, character) in value.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ => {
+                if depth == 0 && value[index..].starts_with(delimiter) {
+                    parts.push(value[start..index].trim());
+                    start = index + delimiter.len();
+                }
+            }
+        }
+    }
+
+    parts.push(value[start..].trim());
+    parts
 }
 
 fn parse_string(path: &Path, line: usize, key: &str, value: &str) -> Result<String, String> {
@@ -391,4 +530,146 @@ fn parse_string(path: &Path, line: usize, key: &str, value: &str) -> Result<Stri
         "failed to parse config {}:{line}: {key} must be a quoted string",
         path.display()
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn parse(value: &str) -> Expression {
+        parse_condition(Path::new("test.toml"), 1, value).expect("parse condition")
+    }
+
+    fn matches(condition: &Expression, owner: &str, name: &str, path: &str, file: &str, current_ref: &str) -> bool {
+        condition.matches(&ActionRef {
+            file: PathBuf::from(file),
+            line: 1,
+            owner: owner.to_string(),
+            name: name.to_string(),
+            repo: format!("{owner}/{name}"),
+            path: path.to_string(),
+            ref_name: current_ref.to_string(),
+        })
+    }
+
+    #[test]
+    fn equality_operator_matches_exact_value() {
+        let condition = parse("ActionRepo == \"actions/checkout\"");
+        assert!(matches(
+            &condition,
+            "actions",
+            "checkout",
+            "",
+            ".github/workflows/ci.yml",
+            "v4"
+        ));
+        assert!(!matches(
+            &condition,
+            "actions",
+            "setup-node",
+            "",
+            ".github/workflows/ci.yml",
+            "v4"
+        ));
+    }
+
+    #[test]
+    fn not_equals_operator_rejects_value() {
+        let condition = parse("ActionRepoName != \"checkout\"");
+        assert!(matches(
+            &condition,
+            "actions",
+            "setup-node",
+            "",
+            ".github/workflows/ci.yml",
+            "v4"
+        ));
+        assert!(!matches(
+            &condition,
+            "actions",
+            "checkout",
+            "",
+            ".github/workflows/ci.yml",
+            "v4"
+        ));
+    }
+
+    #[test]
+    fn starts_with_operator_matches_prefix() {
+        let condition = parse("starts_with(ActionRepo, \"actions/\")");
+        assert!(matches(
+            &condition,
+            "actions",
+            "checkout",
+            "",
+            ".github/workflows/ci.yml",
+            "v4"
+        ));
+        assert!(!matches(
+            &condition,
+            "github",
+            "codeql",
+            "",
+            ".github/workflows/ci.yml",
+            "v4"
+        ));
+    }
+
+    #[test]
+    fn and_operator_requires_both_sides() {
+        let condition = parse("ActionRepo == \"actions/checkout\" && CurrentRefKind == \"tag\"");
+        assert!(matches(
+            &condition,
+            "actions",
+            "checkout",
+            "",
+            ".github/workflows/ci.yml",
+            "v4"
+        ));
+        assert!(!matches(
+            &condition,
+            "actions",
+            "checkout",
+            "",
+            ".github/workflows/ci.yml",
+            "abc123"
+        ));
+    }
+
+    #[test]
+    fn or_operator_allows_either_side() {
+        let condition = parse("ActionRepo == \"actions/checkout\" || ActionRepo == \"actions/setup-node\"");
+        assert!(matches(
+            &condition,
+            "actions",
+            "setup-node",
+            "",
+            ".github/workflows/ci.yml",
+            "v4"
+        ));
+        assert!(!matches(
+            &condition,
+            "actions",
+            "upload-artifact",
+            "",
+            ".github/workflows/ci.yml",
+            "v4"
+        ));
+    }
+
+    #[test]
+    fn parentheses_override_precedence() {
+        let condition = parse("(ActionRepo == \"a/b\" || ActionRepo == \"c/d\") && CurrentRefKind == \"sha\"");
+        assert!(matches(&condition, "a", "b", "", ".github/workflows/ci.yml", "0123456789012345678901234567890123456789"));
+        assert!(!matches(&condition, "a", "b", "", ".github/workflows/ci.yml", "v4"));
+        assert!(!matches(&condition, "x", "y", "", ".github/workflows/ci.yml", "0123456789012345678901234567890123456789"));
+    }
+
+    #[test]
+    fn unsupported_field_fails() {
+        let result = parse_condition(Path::new("test.toml"), 1, "UnknownField == \"x\"");
+        assert!(result.is_err());
+    }
 }

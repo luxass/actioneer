@@ -92,21 +92,17 @@ fn filter_by_release_age<'tags>(
 
     if let Some(date) =
         github_tags.release_date_for_tag(&action_ref.owner, &action_ref.name, &preferred.name, &preferred.sha)?
-    {
-        if parse_datetime(&date)? <= cutoff {
+        && parse_datetime(&date)? <= cutoff {
             return Ok(preferred);
         }
-    }
 
     let mut allowed: Vec<&GitHubTag> = Vec::new();
     for tag in tags {
         if let Some(date) =
             github_tags.release_date_for_tag(&action_ref.owner, &action_ref.name, &tag.name, &tag.sha)?
-        {
-            if parse_datetime(&date)? <= cutoff {
+            && parse_datetime(&date)? <= cutoff {
                 allowed.push(tag);
             }
-        }
     }
 
     Ok(allowed
@@ -155,8 +151,8 @@ fn newest_tag_for_level<'tags>(
             }
             UpdateLevel::Patch => {
                 let key = version_key(&tag.name);
-                key.get(0).copied().unwrap_or(0)
-                    == current_key.get(0).copied().unwrap_or(0)
+                key.first().copied().unwrap_or(0)
+                    == current_key.first().copied().unwrap_or(0)
                     && key.get(1).copied().unwrap_or(0)
                         == current_key.get(1).copied().unwrap_or(0)
             }

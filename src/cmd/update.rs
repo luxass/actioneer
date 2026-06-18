@@ -15,7 +15,7 @@ pub fn run(args: &UpdateArgs, config: &Config) -> Result<ExitCode, String> {
     require_non_interactive_confirmation(mode, args)?;
 
     let references = filter_action_refs(
-        discover_action_refs(&update_inputs(args, config))?,
+        discover_action_refs(update_inputs(args, config))?,
         &config.filter,
         &config.exclude,
     );

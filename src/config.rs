@@ -58,11 +58,10 @@ impl Config {
         let mut pin = self.pin.unwrap_or(PinStyle::Sha);
 
         for policy_override in &self.policy_overrides {
-            if policy_override.matches(action_ref) {
-                if let Some(next_pin) = policy_override.pin {
+            if policy_override.matches(action_ref)
+                && let Some(next_pin) = policy_override.pin {
                     pin = next_pin;
                 }
-            }
         }
 
         pin

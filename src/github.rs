@@ -45,11 +45,10 @@ impl GitHubTags {
     }
 
     pub fn tags_for_repo(&self, owner: &str, name: &str) -> Result<Vec<GitHubTag>, String> {
-        if !self.no_cache {
-            if let Some(tags) = self.read_cache(owner, name)? {
+        if !self.no_cache
+            && let Some(tags) = self.read_cache(owner, name)? {
                 return Ok(tags);
             }
-        }
 
         if self.offline {
             return Err(format!(
@@ -73,13 +72,11 @@ impl GitHubTags {
         tag_name: &str,
         sha: &str,
     ) -> Result<Option<String>, String> {
-        if !self.no_cache {
-            if let Some(dates) = self.read_release_date_cache(owner, name)? {
-                if let Some(date) = dates.get(tag_name) {
+        if !self.no_cache
+            && let Some(dates) = self.read_release_date_cache(owner, name)?
+                && let Some(date) = dates.get(tag_name) {
                     return Ok(Some(date.clone()));
                 }
-            }
-        }
 
         if self.offline {
             return Err(format!(

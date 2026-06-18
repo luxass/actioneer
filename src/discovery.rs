@@ -101,11 +101,7 @@ fn extract_uses(line: &str) -> Option<(String, Option<String>)> {
     let trimmed = line.trim_start();
     let rest = if let Some(rest) = trimmed.strip_prefix("uses:") {
         rest
-    } else if let Some(rest) = trimmed.strip_prefix("- uses:") {
-        rest
-    } else {
-        return None;
-    };
+    } else { trimmed.strip_prefix("- uses:")? };
 
     let rest = rest.trim_start();
     if rest.is_empty() {

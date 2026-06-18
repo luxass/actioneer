@@ -51,11 +51,10 @@ pub fn audit_references(
             continue;
         }
 
-        if pin == PinStyle::Sha && is_full_sha(&action_ref.ref_name) {
-            if let Some(expected_sha) = verify_sha_comment(action_ref, github_tags)? {
+        if pin == PinStyle::Sha && is_full_sha(&action_ref.ref_name)
+            && let Some(expected_sha) = verify_sha_comment(action_ref, github_tags)? {
                 findings.push(sha_comment_mismatch_finding(index + 1, action_ref, expected_sha));
             }
-        }
     }
 
     Ok(findings)

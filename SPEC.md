@@ -818,21 +818,32 @@ Acceptance criteria:
 - The rest of the module layout is up to the implementation.
 - Module layout should serve readability and command flow, not mirror the current code.
 
-## 11. Simple architecture
+## 11. Simple architecture and data model
 
 The rewrite should use simple, command-shaped data structures.
 
-Likely concepts:
+The internal model should stay smaller than the output model. JSON shape, TUI
+shape, and command output shape must not force the internal data shape.
+
+### Preferred internal concepts
+
+Use the fewest internal structs that make behavior clear.
+
+Preferred concepts:
 
 ```text
-DiscoveredActionRef
-GitHubTag
-AuditFinding
-UpdateCandidate
-PatchEdit
-Rule
-Policy
+ActionRef       # discovered workflow ref + source location
+GitHubTag       # tag/version/SHA data from GitHub/cache
+Finding         # audit issue for one action ref
+Candidate       # possible update/fix for one action ref
+PatchEdit       # minimal file rewrite instruction
+Config          # effective/global configuration
+Rule            # ordered conditional config override
 ```
+
+Names may differ slightly, but the model should stay this small in spirit.
+
+### Data model constraints
 
 Avoid:
 
@@ -841,20 +852,70 @@ central god models
 Option-heavy structs
 shared structs where one command ignores half the fields
 generic “assessment” layers
+one struct per JSON nesting level
+duplicate audit/update versions of the same action/ref concept
+report/plan wrapper structs unless they simplify command flow
+enums with only one real variant
 vague functions like resolve/assess unless truly precise
 ```
 
-Command independence:
+Examples of suspicious names:
+
+```text
+AuditAction
+UpdateAction
+UpdateTarget
+UpdatePlan
+AuditReport
+UpdateNote
+UpdateReason
+```
+
+These names are not banned, but they must earn their existence. If they only
+mirror JSON or add a suffix to an existing concept, prefer a simpler model.
+
+### Boundary shaping
+
+Command-independent data should be plain and boring. Output-specific shaping
+should happen at the boundary:
+
+```text
+internal structs -> JSON renderer
+internal structs -> plain renderer
+internal structs -> TUI renderer
+internal structs -> patch edits
+```
+
+It is acceptable, and often preferred, to build JSON with output-only code in an
+output module instead of creating public/internal structs for every nested JSON
+object.
+
+### Command independence
 
 ```text
 audit does not generate update candidates unless --fix is used
 update does not generate audit output wrappers
 patching only receives patch edits
 JSON structs are created at command boundaries
+TUI state is local UI state, not a second update domain model
 ```
 
 A reader should be able to open `audit::run` or `update::run` and understand the
 command without first learning a web of internal abstractions.
+
+### Pre-TUI refactor gate
+
+Before implementing the TUI, the current rewrite must be checked against this
+section.
+
+Acceptance criteria for the pre-TUI refactor:
+
+- reduce duplicate audit/update action structs where practical
+- remove one-variant enums unless a second variant is implemented now
+- keep JSON shaping inside output modules
+- keep TUI-facing data derived from update candidates, not copied into a new domain model
+- keep `src/cmd/` as orchestration only
+- keep tests green
 
 ## 12. Required behavior and edge cases
 

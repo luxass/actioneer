@@ -15,39 +15,16 @@ pub struct Candidate {
     pub sha: String,
     pub pin: PinStyle,
     pub notes: Vec<&'static str>,
-    pub selected: bool,
-    pub applied: bool,
 }
 
-impl Candidate {
-    pub fn kind(&self) -> &'static str {
-        "version_update"
-    }
-
-    pub fn reason(&self) -> &'static str {
-        "newer_version_available"
-    }
-}
-
-pub fn selected_count(candidates: &[Candidate]) -> usize {
-    candidates
-        .iter()
-        .filter(|candidate| candidate.selected)
-        .count()
-}
-
-pub fn applied_count(candidates: &[Candidate]) -> usize {
-    candidates
-        .iter()
-        .filter(|candidate| candidate.applied)
-        .count()
+pub fn all_candidate_indexes(candidates: &[Candidate]) -> Vec<usize> {
+    (0..candidates.len()).collect()
 }
 
 pub fn plan_update_candidates(
     references: &[ActionRef],
     config: &Config,
     github_tags: &GitHubTags,
-    select_all: bool,
 ) -> Result<Vec<Candidate>, String> {
     let mut candidates = Vec::new();
 
@@ -75,8 +52,6 @@ pub fn plan_update_candidates(
             sha: target_tag.sha.clone(),
             pin,
             notes: update_notes(action_ref),
-            selected: select_all,
-            applied: false,
         });
     }
 

@@ -83,6 +83,30 @@ async fn update_json_dry_run_reports_sha_pin_candidate_without_writing() {
     assert_eq!(candidate["applied"], false);
 }
 
+#[test]
+fn update_json_requires_yes_or_dry_run_before_fetching() {
+    let output = Command::new(env!("CARGO_BIN_EXE_actioneer"))
+        .current_dir("testdata/workflows/update/tag-to-sha")
+        .env("ACTIONEER_GITHUB_API_BASE_URL", "http://127.0.0.1:9")
+        .args(["update", "--mode", "json", ".github"])
+        .output()
+        .expect("run actioneer update");
+
+    assert!(!output.status.success(), "update should fail before fetching");
+    assert!(output.stdout.is_empty(), "stdout should be empty");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--yes"), "stderr should mention --yes: {stderr}");
+    assert!(
+        stderr.contains("--dry-run"),
+        "stderr should mention --dry-run: {stderr}"
+    );
+    assert!(
+        !stderr.contains("GitHub tags request failed"),
+        "should fail before GitHub fetching: {stderr}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn update_yes_patches_sha_ref_and_writes_version_comment() {
     let server = MockServer::start().await;

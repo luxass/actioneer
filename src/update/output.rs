@@ -1,8 +1,13 @@
 use serde_json::json;
 
-use crate::update::{Candidate, applied_count, selected_count};
+use crate::update::Candidate;
 
-pub fn print_json_plan(references: usize, candidates: &[Candidate]) -> Result<(), String> {
+pub fn print_json_plan(
+    references: usize,
+    candidates: &[Candidate],
+    selected_indexes: &[usize],
+    applied_indexes: &[usize],
+) -> Result<(), String> {
     let report = json!({
         "schema_version": 1,
         "command": "update",
@@ -10,10 +15,18 @@ pub fn print_json_plan(references: usize, candidates: &[Candidate]) -> Result<()
         "summary": {
             "references": references,
             "candidates": candidates.len(),
-            "selected": selected_count(candidates),
-            "applied": applied_count(candidates),
+            "selected": selected_indexes.len(),
+            "applied": applied_indexes.len(),
         },
-        "candidates": candidates.iter().map(candidate_json).collect::<Vec<_>>(),
+        "candidates": candidates
+            .iter()
+            .enumerate()
+            .map(|(index, candidate)| candidate_json(
+                candidate,
+                selected_indexes.contains(&index),
+                applied_indexes.contains(&index),
+            ))
+            .collect::<Vec<_>>(),
     });
 
     println!(
@@ -24,10 +37,10 @@ pub fn print_json_plan(references: usize, candidates: &[Candidate]) -> Result<()
     Ok(())
 }
 
-fn candidate_json(candidate: &Candidate) -> serde_json::Value {
+fn candidate_json(candidate: &Candidate, selected: bool, applied: bool) -> serde_json::Value {
     json!({
         "id": candidate.id,
-        "kind": candidate.kind(),
+        "kind": "version_update",
         "file": candidate.action.file.display().to_string(),
         "line": candidate.action.line,
         "action": {
@@ -43,9 +56,9 @@ fn candidate_json(candidate: &Candidate) -> serde_json::Value {
             "sha": candidate.sha,
             "pin": candidate.pin.as_str(),
         },
-        "reason": candidate.reason(),
+        "reason": "newer_version_available",
         "notes": candidate.notes,
-        "selected": candidate.selected,
-        "applied": candidate.applied,
+        "selected": selected,
+        "applied": applied,
     })
 }

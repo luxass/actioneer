@@ -5,26 +5,52 @@ use crate::{
     config::Config,
     discovery::discover_action_refs,
     github::GitHubTags,
-    patch::apply_update_candidates,
-    update::{output::print_json_plan, plan_update_candidates},
+    patch::{apply_patch_edits, update_patch_edits},
+    update::{all_candidate_indexes, output::print_json_plan, plan_update_candidates},
 };
 
 pub fn run(args: &UpdateArgs, config: &Config) -> Result<ExitCode, String> {
+    require_non_interactive_confirmation(args)?;
+
     let references = discover_action_refs(update_inputs(args))?;
     let github_tags = github_tags(config);
-    let mut candidates =
-        plan_update_candidates(&references, config, &github_tags, args.dry_run || args.yes)?;
+    let candidates = plan_update_candidates(&references, config, &github_tags)?;
+    let selected_indexes = selected_indexes(args, &candidates);
+    let mut applied_indexes = Vec::new();
 
     if args.yes && !args.dry_run {
-        apply_update_candidates(&mut candidates)?;
+        let edits = update_patch_edits(&candidates, &selected_indexes);
+        apply_patch_edits(&edits)?;
+        applied_indexes = selected_indexes.clone();
     }
 
     match args.shared.mode {
-        Some(Mode::Json) => print_json_plan(references.len(), &candidates)?,
+        Some(Mode::Json) => print_json_plan(
+            references.len(),
+            &candidates,
+            &selected_indexes,
+            &applied_indexes,
+        )?,
         _ => print_plain_plan(&candidates),
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+fn require_non_interactive_confirmation(args: &UpdateArgs) -> Result<(), String> {
+    if matches!(args.shared.mode, Some(Mode::Plain | Mode::Json)) && !args.yes && !args.dry_run {
+        return Err("update --mode plain/json requires --yes or --dry-run".to_string());
+    }
+
+    Ok(())
+}
+
+fn selected_indexes(args: &UpdateArgs, candidates: &[crate::update::Candidate]) -> Vec<usize> {
+    if args.yes || args.dry_run {
+        all_candidate_indexes(candidates)
+    } else {
+        Vec::new()
+    }
 }
 
 fn update_inputs(args: &UpdateArgs) -> Vec<PathBuf> {

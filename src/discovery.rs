@@ -13,6 +13,27 @@ pub struct ActionRef {
     pub ref_name: String,
 }
 
+pub fn filter_action_refs(
+    references: Vec<ActionRef>,
+    include: &[String],
+    exclude: &[String],
+) -> Vec<ActionRef> {
+    references
+        .into_iter()
+        .filter(|action_ref| {
+            if !include.is_empty() && !include.contains(&action_ref.repo) {
+                return false;
+            }
+            let full_name = if action_ref.path.is_empty() {
+                action_ref.repo.clone()
+            } else {
+                format!("{}/{}", action_ref.repo, action_ref.path)
+            };
+            !exclude.iter().any(|pattern| full_name.contains(pattern))
+        })
+        .collect()
+}
+
 pub fn discover_action_refs<I, P>(inputs: I) -> Result<Vec<ActionRef>, String>
 where
     I: IntoIterator<Item = P>,

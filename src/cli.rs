@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+pub use crate::config::{PinStyle, UpdateLevel};
+
 #[derive(Debug, Parser)]
 #[command(name = "actioneer", version, about)]
 pub struct Cli {
@@ -21,6 +23,15 @@ pub enum Command {
 
 #[derive(Debug, Clone, Args, Default)]
 pub struct SharedArgs {
+    #[arg(short = 'r', long)]
+    pub recursive: bool,
+
+    #[arg(long, value_name = "OWNER/NAME")]
+    pub filter: Vec<String>,
+
+    #[arg(long, value_name = "PATTERN")]
+    pub exclude: Vec<String>,
+
     #[arg(long)]
     pub offline: bool,
 
@@ -56,6 +67,18 @@ pub struct UpdateArgs {
 
     #[arg(short = 'y', long)]
     pub yes: bool,
+
+    #[arg(long, value_enum)]
+    pub pin: Option<PinStyle>,
+
+    #[arg(long, value_enum)]
+    pub update: Option<UpdateLevel>,
+
+    #[arg(long)]
+    pub skip_branches: bool,
+
+    #[arg(long, value_name = "DURATION")]
+    pub min_release_age: Option<String>,
 
     #[arg(value_name = "INPUT")]
     pub inputs: Vec<PathBuf>,

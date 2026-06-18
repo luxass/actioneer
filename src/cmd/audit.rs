@@ -8,13 +8,13 @@ use crate::{
     },
     cli::AuditArgs,
     config::Config,
-    discovery::discover_action_refs,
+    discovery::{discover_action_refs, filter_action_refs},
     github::GitHubTags,
 };
 
 pub fn run(args: &AuditArgs, config: &Config) -> Result<ExitCode, String> {
-    let inputs = audit_inputs(args);
-    let references = discover_action_refs(&inputs)?;
+    let inputs = audit_inputs(args, config);
+    let references = filter_action_refs(discover_action_refs(&inputs)?, &config.filter, &config.exclude);
     let findings = audit_references(&references, config);
 
     if args.fix {
@@ -49,9 +49,13 @@ pub fn run(args: &AuditArgs, config: &Config) -> Result<ExitCode, String> {
     }
 }
 
-fn audit_inputs(args: &AuditArgs) -> Vec<PathBuf> {
+fn audit_inputs(args: &AuditArgs, config: &Config) -> Vec<PathBuf> {
     if args.inputs.is_empty() {
-        vec![PathBuf::from(".github")]
+        if config.recursive {
+            vec![PathBuf::from(".")]
+        } else {
+            vec![PathBuf::from(".github")]
+        }
     } else {
         args.inputs.clone()
     }

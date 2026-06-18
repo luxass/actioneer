@@ -3,7 +3,7 @@ use std::{path::PathBuf, process::ExitCode};
 use crate::{
     cli::{Mode, UpdateArgs},
     config::Config,
-    discovery::discover_action_refs,
+    discovery::{discover_action_refs, filter_action_refs},
     github::GitHubTags,
     patch::{apply_patch_edits, update_patch_edits},
     update::{all_candidate_indexes, output::print_json_plan, plan_update_candidates},
@@ -12,7 +12,11 @@ use crate::{
 pub fn run(args: &UpdateArgs, config: &Config) -> Result<ExitCode, String> {
     require_non_interactive_confirmation(args)?;
 
-    let references = discover_action_refs(update_inputs(args))?;
+    let references = filter_action_refs(
+        discover_action_refs(&update_inputs(args, config))?,
+        &config.filter,
+        &config.exclude,
+    );
     let github_tags = github_tags(config);
     let candidates = plan_update_candidates(&references, config, &github_tags)?;
     let selected_indexes = selected_indexes(args, &candidates);
@@ -53,9 +57,13 @@ fn selected_indexes(args: &UpdateArgs, candidates: &[crate::update::Candidate]) 
     }
 }
 
-fn update_inputs(args: &UpdateArgs) -> Vec<PathBuf> {
+fn update_inputs(args: &UpdateArgs, config: &Config) -> Vec<PathBuf> {
     if args.inputs.is_empty() {
-        vec![PathBuf::from(".github")]
+        if config.recursive {
+            vec![PathBuf::from(".")]
+        } else {
+            vec![PathBuf::from(".github")]
+        }
     } else {
         args.inputs.clone()
     }

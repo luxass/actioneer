@@ -1,17 +1,43 @@
 use std::{fs, path::Path};
 
-use crate::{cli::SharedArgs, discovery::ActionRef};
+use crate::{
+    cli::{Mode, SharedArgs, UpdateArgs},
+    discovery::ActionRef,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct Config {
     pub offline: bool,
     pub no_cache: bool,
+    pub recursive: bool,
+    pub filter: Vec<String>,
+    pub exclude: Vec<String>,
+    pub pin: Option<PinStyle>,
+    pub update_level: Option<UpdateLevel>,
+    pub skip_branches: bool,
+    pub min_release_age: Option<String>,
+    pub mode: Option<Mode>,
     policy_overrides: Vec<PolicyOverride>,
 }
 
 impl Config {
+    pub fn apply_update_args(&mut self, args: &UpdateArgs) {
+        if let Some(pin) = args.pin {
+            self.pin = Some(pin);
+        }
+        if let Some(level) = args.update {
+            self.update_level = Some(level);
+        }
+        if args.skip_branches {
+            self.skip_branches = true;
+        }
+        if let Some(age) = &args.min_release_age {
+            self.min_release_age = Some(age.clone());
+        }
+    }
+
     pub fn effective_pin(&self, action_ref: &ActionRef) -> PinStyle {
-        let mut pin = PinStyle::Sha;
+        let mut pin = self.pin.unwrap_or(PinStyle::Sha);
 
         for policy_override in &self.policy_overrides {
             if policy_override.matches(action_ref) {
@@ -32,13 +58,6 @@ struct PolicyOverride {
 }
 
 impl PolicyOverride {
-    fn global(pin: PinStyle) -> Self {
-        Self {
-            condition: None,
-            pin: Some(pin),
-        }
-    }
-
     fn matches(&self, action_ref: &ActionRef) -> bool {
         self.condition
             .as_ref()
@@ -82,7 +101,7 @@ impl PendingRule {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum PinStyle {
     Sha,
     Tag,
@@ -95,6 +114,14 @@ impl PinStyle {
             Self::Tag => "tag",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum UpdateLevel {
+    #[default]
+    Patch,
+    Minor,
+    Major,
 }
 
 #[derive(Debug, Clone)]
@@ -138,11 +165,23 @@ pub fn load_for_command(shared: &SharedArgs) -> Result<Config, String> {
     apply_config_file(Path::new(".actioneer.toml"), &mut config)?;
     apply_config_file(Path::new(".github/actioneer.toml"), &mut config)?;
 
+    if shared.recursive {
+        config.recursive = true;
+    }
+    for filter in &shared.filter {
+        config.filter.push(filter.clone());
+    }
+    for exclude in &shared.exclude {
+        config.exclude.push(exclude.clone());
+    }
     if shared.offline {
         config.offline = true;
     }
     if shared.no_cache {
         config.no_cache = true;
+    }
+    if let Some(mode) = shared.mode {
+        config.mode = Some(mode);
     }
 
     if config.offline && config.no_cache {
@@ -210,9 +249,14 @@ fn apply_global_field(
     match key {
         "offline" => config.offline = parse_bool(path, line, key, value)?,
         "no_cache" => config.no_cache = parse_bool(path, line, key, value)?,
-        "pin" => config
-            .policy_overrides
-            .push(PolicyOverride::global(parse_pin(path, line, value)?)),
+        "recursive" => config.recursive = parse_bool(path, line, key, value)?,
+        "filter" => config.filter.push(parse_string(path, line, key, value)?),
+        "exclude" => config.exclude.push(parse_string(path, line, key, value)?),
+        "pin" => config.pin = Some(parse_pin(path, line, value)?),
+        "update" => config.update_level = Some(parse_update_level(path, line, value)?),
+        "skip_branches" => config.skip_branches = parse_bool(path, line, key, value)?,
+        "min_release_age" => config.min_release_age = Some(parse_string(path, line, key, value)?),
+        "mode" => config.mode = Some(parse_mode(path, line, value)?),
         _ => {}
     }
     Ok(())
@@ -235,7 +279,8 @@ fn apply_rule_field(
             )?)
         }
         "pin" => rule.pin = Some(parse_pin(path, line, value)?),
-        "offline" | "no_cache" | "mode" => {
+        "offline" | "no_cache" | "mode" | "recursive" | "filter" | "exclude"
+        | "update" | "skip_branches" | "min_release_age" => {
             let label = rule
                 .name
                 .as_deref()
@@ -257,6 +302,30 @@ fn parse_bool(path: &Path, line: usize, key: &str, value: &str) -> Result<bool, 
         "false" => Ok(false),
         _ => Err(format!(
             "failed to parse config {}:{line}: {key} must be true or false",
+            path.display()
+        )),
+    }
+}
+
+fn parse_update_level(path: &Path, line: usize, value: &str) -> Result<UpdateLevel, String> {
+    match parse_string(path, line, "update", value)?.as_str() {
+        "major" => Ok(UpdateLevel::Major),
+        "minor" => Ok(UpdateLevel::Minor),
+        "patch" => Ok(UpdateLevel::Patch),
+        other => Err(format!(
+            "failed to parse config {}:{line}: update must be \"major\", \"minor\", or \"patch\", got {other:?}",
+            path.display()
+        )),
+    }
+}
+
+fn parse_mode(path: &Path, line: usize, value: &str) -> Result<Mode, String> {
+    match parse_string(path, line, "mode", value)?.as_str() {
+        "tui" => Ok(Mode::Tui),
+        "plain" => Ok(Mode::Plain),
+        "json" => Ok(Mode::Json),
+        other => Err(format!(
+            "failed to parse config {}:{line}: mode must be \"tui\", \"plain\", or \"json\", got {other:?}",
             path.display()
         )),
     }

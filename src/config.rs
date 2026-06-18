@@ -551,6 +551,7 @@ mod tests {
             repo: format!("{owner}/{name}"),
             path: path.to_string(),
             ref_name: current_ref.to_string(),
+            version_comment: None,
         })
     }
 

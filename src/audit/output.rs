@@ -38,7 +38,7 @@ fn print_human_report(findings: &[Finding]) {
             "{}:{}: {}: {}@{}",
             finding.action.file.display(),
             finding.action.line,
-            finding.kind(),
+            finding.kind_str(),
             finding.action.repo,
             finding.action.ref_name
         );
@@ -77,7 +77,7 @@ fn print_json_report(
 fn finding_json(finding: &Finding) -> serde_json::Value {
     json!({
         "id": finding.id,
-        "kind": finding.kind(),
+        "kind": finding.kind_str(),
         "severity": finding.severity(),
         "file": finding.action.file.display().to_string(),
         "line": finding.action.line,

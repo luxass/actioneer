@@ -11,6 +11,7 @@ pub struct ActionRef {
     pub repo: String,
     pub path: String,
     pub ref_name: String,
+    pub version_comment: Option<String>,
 }
 
 pub fn filter_action_refs(
@@ -51,10 +52,10 @@ where
             .map_err(|error| format!("failed to read {}: {error}", file.display()))?;
 
         for (index, line) in contents.lines().enumerate() {
-            let Some(uses_value) = extract_uses_value(line) else {
+            let Some((uses_value, version_comment)) = extract_uses(line) else {
                 continue;
             };
-            let Some(action_ref) = parse_action_ref(&file, index + 1, &uses_value) else {
+            let Some(action_ref) = parse_action_ref(&file, index + 1, &uses_value, version_comment) else {
                 continue;
             };
             refs.push(action_ref);
@@ -96,9 +97,9 @@ fn is_yaml_file(path: &Path) -> bool {
     )
 }
 
-fn extract_uses_value(line: &str) -> Option<String> {
+fn extract_uses(line: &str) -> Option<(String, Option<String>)> {
     let trimmed = line.trim_start();
-    let value = if let Some(rest) = trimmed.strip_prefix("uses:") {
+    let rest = if let Some(rest) = trimmed.strip_prefix("uses:") {
         rest
     } else if let Some(rest) = trimmed.strip_prefix("- uses:") {
         rest
@@ -106,25 +107,48 @@ fn extract_uses_value(line: &str) -> Option<String> {
         return None;
     };
 
-    let value = value.trim_start();
-    if value.is_empty() {
+    let rest = rest.trim_start();
+    if rest.is_empty() {
         return None;
     }
 
-    if let Some(quoted) = value.strip_prefix('"') {
-        return quoted.split('"').next().map(str::to_string);
-    }
-    if let Some(quoted) = value.strip_prefix('\'') {
-        return quoted.split('\'').next().map(str::to_string);
-    }
+    let (uses_value, tail) = if let Some(quoted) = rest.strip_prefix('"') {
+        let value = quoted.split('"').next().map(str::to_string)?;
+        let tail = quoted
+            .split_once('"')
+            .map(|(_, tail)| tail)
+            .unwrap_or(quoted);
+        (value, tail)
+    } else if let Some(quoted) = rest.strip_prefix('\'') {
+        let value = quoted.split('\'').next().map(str::to_string)?;
+        let tail = quoted
+            .split_once('\'')
+            .map(|(_, tail)| tail)
+            .unwrap_or(quoted);
+        (value, tail)
+    } else {
+        let value = rest
+            .split_whitespace()
+            .next()
+            .map(|raw| raw.trim_end_matches(',').to_string())?;
+        let tail = rest[value.len()..].trim_start();
+        (value, tail)
+    };
 
-    value
-        .split_whitespace()
-        .next()
-        .map(|raw| raw.trim_end_matches(',').to_string())
+    let version_comment = tail
+        .split_once('#')
+        .map(|(_, comment)| comment.trim().to_string())
+        .filter(|comment| !comment.is_empty());
+
+    Some((uses_value, version_comment))
 }
 
-fn parse_action_ref(file: &Path, line: usize, value: &str) -> Option<ActionRef> {
+fn parse_action_ref(
+    file: &Path,
+    line: usize,
+    value: &str,
+    version_comment: Option<String>,
+) -> Option<ActionRef> {
     if value.starts_with("./") || value.starts_with("../") || value.starts_with("docker://") {
         return None;
     }
@@ -148,5 +172,6 @@ fn parse_action_ref(file: &Path, line: usize, value: &str) -> Option<ActionRef> 
         repo,
         path,
         ref_name: ref_name.to_string(),
+        version_comment,
     })
 }

@@ -14,18 +14,23 @@ use crate::{
 
 pub fn run(args: &AuditArgs, config: &Config) -> Result<ExitCode, String> {
     let inputs = audit_inputs(args, config);
-    let references = filter_action_refs(discover_action_refs(&inputs)?, &config.filter, &config.exclude);
-    let findings = audit_references(&references, config);
+    let references =
+        filter_action_refs(discover_action_refs(&inputs)?, &config.filter, &config.exclude);
+    let github_tags = github_tags(config);
+    let findings = audit_references(&references, config, &github_tags)?;
 
     if args.fix {
-        let github_tags = github_tags(config);
         let mut fixes = plan_fixes(&findings, &github_tags)?;
         if !args.dry_run {
             apply_fixes(&mut fixes)?;
         }
 
         let references_after_fix = discover_action_refs(&inputs)?;
-        let findings_after_fix = audit_references(&references_after_fix, config);
+        let findings_after_fix = audit_references(
+            &references_after_fix,
+            config,
+            &github_tags,
+        )?;
         print_report_with_fixes(
             references_after_fix.len(),
             &findings_after_fix,

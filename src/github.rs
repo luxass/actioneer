@@ -66,6 +66,69 @@ impl GitHubTags {
         Ok(tags)
     }
 
+    pub fn release_date_for_tag(
+        &self,
+        owner: &str,
+        name: &str,
+        tag_name: &str,
+        sha: &str,
+    ) -> Result<Option<String>, String> {
+        if !self.no_cache {
+            if let Some(dates) = self.read_release_date_cache(owner, name)? {
+                if let Some(date) = dates.get(tag_name) {
+                    return Ok(Some(date.clone()));
+                }
+            }
+        }
+
+        if self.offline {
+            return Err(format!(
+                "offline mode requires cached release date for {owner}/{name}#{tag_name}, but no cache entry was found"
+            ));
+        }
+
+        let date = self.fetch_commit_date(owner, name, sha)?;
+
+        if !self.no_cache {
+            self.write_release_date_cache(owner, name, tag_name, &date)?;
+        }
+
+        Ok(Some(date))
+    }
+
+    fn fetch_commit_date(&self, owner: &str, name: &str, sha: &str) -> Result<String, String> {
+        let url = format!(
+            "{}/repos/{owner}/{name}/commits/{sha}",
+            self.api_base_url.trim_end_matches('/')
+        );
+
+        let response = self
+            .http
+            .get(&url)
+            .header(
+                "user-agent",
+                concat!("actioneer/", env!("CARGO_PKG_VERSION")),
+            )
+            .bearer_auth_token_from_env()
+            .send()
+            .map_err(|error| {
+                format!("GitHub commit request failed for {owner}/{name}@{sha}: {error}")
+            })?;
+
+        if !response.status().is_success() {
+            return Err(format!(
+                "GitHub commit request failed for {owner}/{name}@{sha}: HTTP {}",
+                response.status()
+            ));
+        }
+
+        let commit = response.json::<GitHubCommit>().map_err(|error| {
+            format!("failed to parse GitHub commit for {owner}/{name}@{sha}: {error}")
+        })?;
+
+        Ok(commit.commit.committer.date)
+    }
+
     fn fetch_tags(&self, owner: &str, name: &str) -> Result<Vec<GitHubTag>, String> {
         let mut next_url = Some(format!(
             "{}/repos/{owner}/{name}/tags?per_page=100&page=1",
@@ -165,6 +228,75 @@ impl GitHubTags {
             sanitize(name)
         ))
     }
+
+    fn read_release_date_cache(
+        &self,
+        owner: &str,
+        name: &str,
+    ) -> Result<Option<std::collections::HashMap<String, String>>, String> {
+        let path = self.release_date_cache_path(owner, name);
+        if !path.exists() {
+            return Ok(None);
+        }
+
+        let contents = fs::read_to_string(&path).map_err(|error| {
+            format!(
+                "failed to read release date cache {}: {error}",
+                path.display()
+            )
+        })?;
+        let cache = serde_json::from_str::<CachedReleaseDates>(&contents).map_err(|error| {
+            format!(
+                "failed to parse release date cache {}: {error}",
+                path.display()
+            )
+        })?;
+
+        Ok(Some(cache.dates))
+    }
+
+    fn write_release_date_cache(
+        &self,
+        owner: &str,
+        name: &str,
+        tag_name: &str,
+        date: &str,
+    ) -> Result<(), String> {
+        let path = self.release_date_cache_path(owner, name);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "failed to create release date cache {}: {error}",
+                    parent.display()
+                )
+            })?;
+        }
+
+        let mut dates = self
+            .read_release_date_cache(owner, name)?
+            .unwrap_or_default();
+        dates.insert(tag_name.to_string(), date.to_string());
+
+        let contents = serde_json::to_string_pretty(&CachedReleaseDates {
+            schema_version: 1,
+            dates,
+        })
+        .map_err(|error| format!("failed to serialize release date cache: {error}"))?;
+        fs::write(&path, contents).map_err(|error| {
+            format!(
+                "failed to write release date cache {}: {error}",
+                path.display()
+            )
+        })
+    }
+
+    fn release_date_cache_path(&self, owner: &str, name: &str) -> PathBuf {
+        self.cache_dir.join("github-release-dates").join(format!(
+            "{}--{}.json",
+            sanitize(owner),
+            sanitize(name)
+        ))
+    }
 }
 
 trait RequestBuilderExt {
@@ -184,6 +316,27 @@ impl RequestBuilderExt for reqwest::blocking::RequestBuilder {
 struct CachedTags {
     schema_version: u8,
     tags: Vec<GitHubTag>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CachedReleaseDates {
+    schema_version: u8,
+    dates: std::collections::HashMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubCommit {
+    commit: GitHubCommitDetail,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubCommitDetail {
+    committer: GitHubCommitter,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubCommitter {
+    date: String,
 }
 
 #[derive(Debug, Deserialize)]

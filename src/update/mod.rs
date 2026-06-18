@@ -27,6 +27,7 @@ pub fn plan_update_candidates(
     github_tags: &GitHubTags,
 ) -> Result<Vec<Candidate>, String> {
     let mut candidates = Vec::new();
+    let min_age = config.min_release_age.as_deref().and_then(parse_duration);
 
     for action_ref in references {
         if config.skip_branches && is_branch_like_ref(&action_ref.ref_name) {
@@ -40,6 +41,12 @@ pub fn plan_update_candidates(
         };
         let Some(target_tag) = target_tag else {
             continue;
+        };
+
+        let target_tag = if let Some(duration) = min_age {
+            filter_by_release_age(github_tags, action_ref, &tags, target_tag, duration)?
+        } else {
+            target_tag
         };
 
         let pin = config.effective_pin(action_ref);
@@ -72,6 +79,60 @@ fn update_notes(action_ref: &ActionRef) -> Vec<&'static str> {
     } else {
         vec!["mutable_ref"]
     }
+}
+
+fn filter_by_release_age<'tags>(
+    github_tags: &GitHubTags,
+    action_ref: &ActionRef,
+    tags: &'tags [GitHubTag],
+    preferred: &'tags GitHubTag,
+    min_age: std::time::Duration,
+) -> Result<&'tags GitHubTag, String> {
+    let cutoff = std::time::SystemTime::now() - min_age;
+
+    if let Some(date) =
+        github_tags.release_date_for_tag(&action_ref.owner, &action_ref.name, &preferred.name, &preferred.sha)?
+    {
+        if parse_datetime(&date)? <= cutoff {
+            return Ok(preferred);
+        }
+    }
+
+    let mut allowed: Vec<&GitHubTag> = Vec::new();
+    for tag in tags {
+        if let Some(date) =
+            github_tags.release_date_for_tag(&action_ref.owner, &action_ref.name, &tag.name, &tag.sha)?
+        {
+            if parse_datetime(&date)? <= cutoff {
+                allowed.push(tag);
+            }
+        }
+    }
+
+    Ok(allowed
+        .into_iter()
+        .max_by_key(|tag| version_key(&tag.name))
+        .unwrap_or(preferred))
+}
+
+fn parse_duration(value: &str) -> Option<std::time::Duration> {
+    let value = value.trim();
+    let (number, unit) = value.split_at(value.len().checked_sub(1)?);
+    let number = number.parse::<u64>().ok()?;
+
+    match unit {
+        "m" => Some(std::time::Duration::from_secs(number * 60)),
+        "h" => Some(std::time::Duration::from_secs(number * 60 * 60)),
+        "d" => Some(std::time::Duration::from_secs(number * 60 * 60 * 24)),
+        _ => None,
+    }
+}
+
+fn parse_datetime(value: &str) -> Result<std::time::SystemTime, String> {
+    use time::format_description::well_known::Rfc3339;
+    time::OffsetDateTime::parse(value, &Rfc3339)
+        .map(|datetime| std::time::UNIX_EPOCH + std::time::Duration::from_secs(datetime.unix_timestamp() as u64))
+        .map_err(|error| format!("failed to parse release date {value:?}: {error}"))
 }
 
 fn newest_version_tag(tags: &[GitHubTag]) -> Option<&GitHubTag> {

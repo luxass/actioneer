@@ -8,6 +8,16 @@ use wiremock::{
     matchers::{method, path, query_param},
 };
 
+async fn mock_commit_date(server: &MockServer, sha: &str) {
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/actions/checkout/commits/{sha}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "commit": { "committer": { "date": "2024-01-01T00:00:00Z" } }
+        })))
+        .mount(server)
+        .await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn update_json_dry_run_reports_sha_pin_candidate_without_writing() {
     let server = MockServer::start().await;
@@ -21,6 +31,7 @@ async fn update_json_dry_run_reports_sha_pin_candidate_without_writing() {
         .expect(1)
         .mount(&server)
         .await;
+    mock_commit_date(&server, "2222222222222222222222222222222222222222").await;
 
     let workspace = "testdata/workflows/update/tag-to-sha";
     let workflow = format!("{workspace}/.github/workflows/ci.yml");
@@ -120,6 +131,7 @@ async fn update_tag_pin_style_dry_run_targets_tag_not_sha() {
         .expect(1)
         .mount(&server)
         .await;
+    mock_commit_date(&server, "2222222222222222222222222222222222222222").await;
 
     let cache_dir = temp_dir("actioneer-update-tag-pin-cache");
 
@@ -157,6 +169,7 @@ async fn update_yes_patches_sha_ref_and_writes_version_comment() {
         .expect(1)
         .mount(&server)
         .await;
+    mock_commit_date(&server, "2222222222222222222222222222222222222222").await;
 
     let workspace = workflow_workspace! {
         ".github/workflows/ci.yml" => r#"

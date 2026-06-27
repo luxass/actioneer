@@ -1,5 +1,5 @@
-use std::io::{self, Write};
+use crate::VERSION;
 
-pub fn run(mut out: impl Write) -> io::Result<()> {
-    writeln!(out, "actioneer {}", crate::VERSION)
+pub fn run() {
+    println!("actioneer {VERSION}");
 }

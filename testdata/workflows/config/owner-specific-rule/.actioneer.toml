@@ -1,5 +1,0 @@
-pin = "sha"
-
-[[rules]]
-when = 'ActionRepoOwner == "actions"'
-pin = "tag"

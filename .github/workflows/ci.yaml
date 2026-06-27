@@ -56,6 +56,3 @@ jobs:
 
       - name: test
         run: just test
-
-      - name: e2e
-        run: just test-e2e

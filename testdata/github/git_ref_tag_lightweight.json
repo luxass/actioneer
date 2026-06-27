@@ -1,0 +1,10 @@
+{
+  "ref": "refs/tags/v4",
+  "node_id": "MDM6UmVmNDMwNzI1NTI6cmVmcy90YWdzL3Y0",
+  "url": "https://api.github.com/repos/actions/checkout/git/refs/tags/v4",
+  "object": {
+    "sha": "a81bbbf8298c0fa03ea29cdc473d45769f953675",
+    "type": "commit",
+    "url": "https://api.github.com/repos/actions/checkout/git/commits/a81bbbf8298c0fa03ea29cdc473d45769f953675"
+  }
+}

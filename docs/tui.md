@@ -10,14 +10,14 @@ src/tui/
 ├── app.rs        App state, scan worker, selection navigation
 ├── selection.rs  SelectableUpdate rows from ScanReport
 ├── event.rs      EventHandler (background thread, channel-based)
-├── theme.rs      colour palette + Style constructors
+├── theme.rs      semantic colour palette + Style constructors
 └── ui.rs         update screen rendering
 ```
 
 ### Entry points
 
 ```rust
-actioneer::tui::run_app(ActioneerConfig) -> Result<(), TuiError>
+actioneer::tui::run_app(ActioneerConfig) -> Result<TuiOutcome, TuiError>
 ```
 
 `actioneer update` (and bare `actioneer`) launches the TUI unless `--mode plain` or
@@ -29,7 +29,26 @@ actioneer::tui::run_app(ActioneerConfig) -> Result<(), TuiError>
 
 1. TUI renders immediately with a spinner while `scan_workspace` runs on a background thread.
 2. When the scan completes, planned updates appear in an interactive table.
-3. User selects rows, confirms — file patching is not yet implemented.
+3. User selects rows (Space / `a`) and presses Enter to apply — the TUI closes and a coloured summary is printed to stdout (plain text when piped).
+
+## Colour palette
+
+Semantic roles in `theme.rs` — tuned for dark terminals, inspired by modern CLIs (cargo, gh):
+
+| Role | Use |
+|------|-----|
+| Brand (violet) | `actioneer` header |
+| Accent (sky) | subcommand name, info icons, spinner |
+| Workflow (cyan) | workflow file column |
+| Action (amber) | action reference column |
+| From (muted gray) | current pin |
+| To (green) | target pin |
+| Key (soft blue) | footer bindings |
+| Success / warn / error | status lines and checkmarks |
+
+Selected table rows get a subtle blue-gray background band (buffer patch in `ui.rs`).
+
+Post-TUI apply output uses the same semantics via `src/ansi.rs` when stdout is a TTY.
 
 ## Interactive selection
 
@@ -42,18 +61,10 @@ When planned updates exist:
 | `Space` | Toggle `[x]` on current row |
 | `a` | Select all |
 | `n` | Deselect all |
-| `Enter` | Open confirm screen |
-| `q` / `Esc` | Quit (select view) |
+| `Enter` | Apply selected updates |
+| `q` / `Esc` | Quit |
 
-### Confirm screen
-
-| Key | Action |
-|-----|--------|
-| `Enter` | Confirm selection (apply stub — patching not implemented) |
-| `Esc` | Back to selection |
-| `q` | Quit |
-
-All rows are selected by default. Footer shows `N selected`.
+Rows start unselected; use Space or `a` to choose updates. Footer shows `N selected`.
 
 ## Terminal safety
 
@@ -62,7 +73,6 @@ All rows are selected by default. Footer shows `N selected`.
 
 ## Future work
 
-- [ ] File patching / apply selected updates
 - [ ] Scrollbar for long tables
 - [ ] `?` help overlay
 - [ ] Mouse support

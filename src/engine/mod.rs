@@ -25,8 +25,10 @@
 
 mod parse;
 mod reference;
+mod uses_line;
 
 pub use parse::parse_workflow;
+pub use uses_line::{join as join_uses_line, split as split_uses_line, uses_value_start, UsesLine};
 
 use std::fmt;
 

@@ -56,7 +56,7 @@ pub enum PlanReason {
     AlreadyUpToDate,
 }
 
-/// A proposed update for one reference (plan-only; no file writes).
+/// A proposed update for one reference.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PlannedChange {
     /// Pin as written in the workflow today (SHA, tag, or branch).
@@ -104,6 +104,38 @@ pub struct ScanStats {
 pub struct ScanReport {
     pub workflows: Vec<WorkflowReport>,
     pub stats: ScanStats,
+}
+
+/// Identifies one planned row to apply (workflow file + source line).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ApplyTarget {
+    pub workflow_path: PathBuf,
+    pub line: u32,
+}
+
+/// One successfully applied update.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AppliedChange {
+    pub workflow_path: PathBuf,
+    pub line: u32,
+    pub action: String,
+    pub from: String,
+    pub to: String,
+}
+
+/// A single apply failure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ApplyFailure {
+    pub workflow_path: PathBuf,
+    pub line: u32,
+    pub message: String,
+}
+
+/// Result of applying planned updates.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ApplyReport {
+    pub applied: Vec<AppliedChange>,
+    pub failures: Vec<ApplyFailure>,
 }
 
 impl ScanReport {

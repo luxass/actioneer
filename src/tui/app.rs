@@ -7,7 +7,7 @@ use ratatui::widgets::TableState;
 use crate::cache::cache_dir;
 use crate::config::ActioneerConfig;
 use crate::github::GitHubClient;
-use crate::scan::{scan_workspace, ScanError, ScanReport};
+use crate::scan::{apply, scan_workspace, ApplyReport, ScanError, ScanReport};
 
 use super::selection::{from_report, SelectableUpdate};
 
@@ -16,12 +16,6 @@ pub enum ScanPhase {
     Scanning,
     Ready,
     Failed,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ViewMode {
-    Select,
-    Confirm,
 }
 
 enum ScanOutcome {
@@ -34,7 +28,6 @@ pub struct App {
     pub should_quit: bool,
     pub tick: u64,
     pub phase: ScanPhase,
-    pub view: ViewMode,
     pub report: Option<ScanReport>,
     pub error: Option<String>,
     pub selections: Vec<SelectableUpdate>,
@@ -42,6 +35,8 @@ pub struct App {
     pub status_banner: Option<String>,
     /// Updated each frame for scroll calculations.
     pub viewport_rows: usize,
+    pub apply_report: Option<ApplyReport>,
+    pub apply_error: Option<String>,
     scan_rx: Option<mpsc::Receiver<ScanOutcome>>,
 }
 
@@ -65,13 +60,14 @@ impl App {
             should_quit: false,
             tick: 0,
             phase: ScanPhase::Scanning,
-            view: ViewMode::Select,
             report: None,
             error: None,
             selections: Vec::new(),
             table_state: TableState::default(),
             status_banner: None,
             viewport_rows: 20,
+            apply_report: None,
+            apply_error: None,
             scan_rx: Some(rx),
         }
     }
@@ -149,25 +145,34 @@ impl App {
         }
     }
 
-    pub fn open_confirm(&mut self) -> bool {
+    pub fn apply_selected(&mut self) {
         if self.selected_count() == 0 {
             self.status_banner = Some("Select at least one update (Space to toggle).".into());
-            return false;
+            return;
         }
-        self.view = ViewMode::Confirm;
-        true
-    }
 
-    pub fn cancel_confirm(&mut self) {
-        self.view = ViewMode::Select;
-    }
+        let Some(report) = self.report.as_ref() else {
+            return;
+        };
 
-    pub fn confirm_apply(&mut self) {
-        let count = self.selected_count();
-        self.status_banner = Some(format!(
-            "{count} update(s) selected — file patching is not implemented yet."
-        ));
-        self.view = ViewMode::Select;
+        let targets: Vec<_> = self
+            .selections
+            .iter()
+            .filter(|item| item.selected)
+            .map(|item| item.apply_target())
+            .collect();
+
+        let root = Path::new(".");
+        match apply(root, report, &targets, &self.config, false) {
+            Ok(result) => {
+                self.apply_report = Some(result);
+                self.quit();
+            }
+            Err(error) => {
+                self.apply_error = Some(error.to_string());
+                self.quit();
+            }
+        }
     }
 
     pub fn on_tick(&mut self) {
@@ -213,6 +218,7 @@ mod tests {
         app.selections = vec![
             SelectableUpdate {
                 workflow_path: "ci.yml".into(),
+                line: 10,
                 action: "actions/checkout@v4".into(),
                 from_label: "v4".into(),
                 to_label: "v4.2.0".into(),
@@ -220,6 +226,7 @@ mod tests {
             },
             SelectableUpdate {
                 workflow_path: "ci.yml".into(),
+                line: 11,
                 action: "actions/setup-node@v4".into(),
                 from_label: "v4".into(),
                 to_label: "v4.1.0".into(),
@@ -235,6 +242,10 @@ mod tests {
 
         app.select_none();
         assert_eq!(app.selected_count(), 0);
-        assert!(!app.open_confirm());
+        app.apply_selected();
+        assert_eq!(
+            app.status_banner.as_deref(),
+            Some("Select at least one update (Space to toggle).")
+        );
     }
 }

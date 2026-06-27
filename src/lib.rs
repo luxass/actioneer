@@ -1,3 +1,4 @@
+pub mod ansi;
 pub mod cache;
 pub mod cli;
 pub mod cmd;

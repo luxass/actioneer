@@ -188,6 +188,10 @@ pub struct ActioneerConfig {
     pub offline: bool,
     pub no_cache: bool,
     pub mode: Option<OutputMode>,
+    #[serde(default)]
+    pub apply: bool,
+    #[serde(default)]
+    pub dry_run: bool,
 }
 
 impl ActioneerConfig {
@@ -215,6 +219,12 @@ impl ActioneerConfig {
         }
         if args.mode.is_some() {
             self.mode = args.mode;
+        }
+        if let Some(apply) = args.apply {
+            self.apply = apply;
+        }
+        if let Some(dry_run) = args.dry_run {
+            self.dry_run = dry_run;
         }
     }
 

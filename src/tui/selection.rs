@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 
 use crate::config::ActioneerConfig;
-use crate::scan::{plan_from_label, plan_to_label, ScanReport};
+use crate::scan::{plan_from_label, plan_to_label, ApplyTarget, ScanReport};
 
 /// One planned update row in the interactive TUI list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectableUpdate {
     pub workflow_path: PathBuf,
+    pub line: u32,
     pub action: String,
     pub from_label: String,
     pub to_label: String,
@@ -20,9 +21,16 @@ impl SelectableUpdate {
             .and_then(|s| s.to_str())
             .unwrap_or("?")
     }
+
+    pub fn apply_target(&self) -> ApplyTarget {
+        ApplyTarget {
+            workflow_path: self.workflow_path.clone(),
+            line: self.line,
+        }
+    }
 }
 
-/// Build the selectable list from a scan report (all planned rows, selected by default).
+/// Build the selectable list from a scan report (rows start unselected).
 pub fn from_report(report: &ScanReport, config: &ActioneerConfig) -> Vec<SelectableUpdate> {
     report
         .planned_changes()
@@ -30,10 +38,11 @@ pub fn from_report(report: &ScanReport, config: &ActioneerConfig) -> Vec<Selecta
             let planned = reference.planned.as_ref().unwrap();
             SelectableUpdate {
                 workflow_path: path.clone(),
+                line: reference.resolved.located.reference.line.unwrap_or(0),
                 action: reference.resolved.located.reference.raw.clone(),
                 from_label: plan_from_label(&reference.resolved, planned),
                 to_label: plan_to_label(planned, config.pin),
-                selected: true,
+                selected: false,
             }
         })
         .collect()
@@ -109,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn from_report_defaults_selected() {
+    fn from_report_starts_unselected() {
         let items = from_report(
             &sample_report(),
             &ActioneerConfig {
@@ -118,7 +127,7 @@ mod tests {
             },
         );
         assert_eq!(items.len(), 1);
-        assert!(items[0].selected);
+        assert!(!items[0].selected);
         assert_eq!(items[0].to_label, "v4.2.0");
     }
 }

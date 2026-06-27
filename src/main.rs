@@ -26,13 +26,7 @@ fn main() -> ExitCode {
     match cli.command {
         Some(Command::Update) => match cfg.mode {
             Some(OutputMode::Plain) | Some(OutputMode::Json) => cmd::update::run(&cfg),
-            None => {
-                if let Err(e) = tui::run_app(cfg) {
-                    eprintln!("error: {e}");
-                    return ExitCode::FAILURE;
-                }
-                ExitCode::SUCCESS
-            }
+            None => run_tui_update(&cfg),
         },
         Some(Command::Audit) => cmd::audit::run(&cfg),
         Some(Command::Version) => {
@@ -41,13 +35,32 @@ fn main() -> ExitCode {
         }
         None => match cfg.mode {
             Some(OutputMode::Plain) | Some(OutputMode::Json) => cmd::update::run(&cfg),
-            None => {
-                if let Err(e) = tui::run_app(cfg) {
-                    eprintln!("error: {e}");
-                    return ExitCode::FAILURE;
+            None => run_tui_update(&cfg),
+        },
+    }
+}
+
+fn run_tui_update(cfg: &config::ActioneerConfig) -> ExitCode {
+    match tui::run_app(cfg.clone()) {
+        Ok(outcome) => {
+            if let Some(error) = outcome.apply_error {
+                eprintln!("error: {error}");
+                return ExitCode::FAILURE;
+            }
+            if let Some(report) = outcome.apply_report {
+                cmd::update::print_apply_plain(&report, false);
+                if report.failures.is_empty() {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::FAILURE
                 }
+            } else {
                 ExitCode::SUCCESS
             }
-        },
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
+        }
     }
 }

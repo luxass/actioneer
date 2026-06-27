@@ -24,6 +24,7 @@ GitHubClient::list_releases()   → candidate versions (update planner)
     ▼
 audit::evaluate()             → Vec<AuditIssue>
 plan::propose()               → Option<PlannedChange>
+apply()                       → ApplyReport (when requested)
     │
     ▼
 ScanReport
@@ -40,6 +41,8 @@ ScanReport
 | `src/scan/types.rs` | `ScanReport`, `ReferenceReport`, `AuditIssue`, `PlannedChange` |
 | `src/scan/audit.rs` | Audit rules (pure) |
 | `src/scan/plan.rs` | Update planner (pure + GitHub resolve for target SHA) |
+| `src/scan/apply.rs` | Write planned changes to workflow files |
+| `src/engine/uses_line.rs` | Parse and rebuild `uses:` source lines |
 
 ## Public API
 
@@ -81,20 +84,26 @@ One row per `uses:` reference:
 - Only `ReferenceKind::Action` with `is_updatable() == true`
 - Uses GitHub **Releases API** (`list_releases`) + semver filtering by `config.update`
 - Respects `min_release_age`, `skip_branches`, `pin` (sha vs tag output)
-- v1 is **plan-only** — no workflow file writes
+
+### Apply
+
+- `scan::apply(root, report, targets, config, dry_run)` rewrites `uses:` lines in place
+- Verifies the on-disk line still matches what was scanned before writing
+- SHA mode writes `@<sha> # <version>`; tag mode writes `@<tag>` (updates comment only if one existed)
+- CLI: `--apply` writes all planned rows; `--dry-run` previews without writing
+- TUI: Enter applies selected rows and exits; summary printed to stdout
 
 ## Command wiring
 
 | Command | Input | Output |
 |---------|-------|--------|
 | `audit` | `ScanReport` | Issues grouped by workflow (plain/json) |
-| `update` | `ScanReport` | Planned changes table (plain/json/tui) |
+| `update` | `ScanReport` | Planned changes (plain/json/tui) or apply report (`--apply`) |
 
 Exit code: `audit` returns non-zero when `stats.issues > 0`.
 
 ## Deferred
 
-- File patching / apply
 - Reusable-workflow updates
 - Async parallel GitHub fetches
 - Release list cache TTL enforcement

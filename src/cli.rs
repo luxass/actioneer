@@ -51,4 +51,12 @@ pub struct ConfigArgs {
     /// Output mode: "plain" or "json" (update uses TUI unless overridden)
     #[arg(long, global = true, value_name = "MODE")]
     pub mode: Option<OutputMode>,
+
+    /// Write planned updates to workflow files
+    #[arg(long, global = true, num_args = 0..=1, default_missing_value = "true")]
+    pub apply: Option<bool>,
+
+    /// Preview file writes without modifying workflows (implies --apply)
+    #[arg(long, global = true, num_args = 0..=1, default_missing_value = "true")]
+    pub dry_run: Option<bool>,
 }

@@ -1,5 +1,6 @@
 //! Workspace scan pipeline shared by audit and update commands.
 
+mod apply;
 mod audit;
 mod display;
 mod plan;
@@ -15,10 +16,12 @@ use crate::engine::{comment_matches_ref, parse_workflow, ParseError};
 use crate::github::{GitHubClient, GitHubError, Release, ResolvedRef};
 
 pub use types::{
-    AuditIssue, LocatedReference, PlannedChange, PlanReason, ReferenceReport, ResolvedReference,
-    ScanReport, ScanStats, WorkflowReport,
+    AppliedChange, ApplyFailure, ApplyReport, ApplyTarget, AuditIssue, LocatedReference,
+    PlannedChange, PlanReason, ReferenceReport, ResolvedReference, ScanReport, ScanStats,
+    WorkflowReport,
 };
 
+pub use apply::{all_planned_targets, apply};
 pub use display::{plan_from_label, plan_to_label, truncate_label};
 
 /// Errors during workspace scanning.

@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table},
 };
 
-use super::app::{App, ScanPhase, ViewMode};
+use super::app::{App, ScanPhase};
 use super::theme;
 use crate::scan::truncate_label;
 
@@ -82,42 +82,26 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(" quit", theme::key_label()),
         ])
     } else {
-        match app.view {
-            ViewMode::Select => Line::from(vec![
-                Span::raw(" "),
-                Span::styled("↑↓", theme::key()),
-                Span::styled("/jk ", theme::key_label()),
-                Span::styled("Space", theme::key()),
-                Span::styled(" toggle  ", theme::key_label()),
-                Span::styled("a", theme::key()),
-                Span::styled(" all  ", theme::key_label()),
-                Span::styled("n", theme::key()),
-                Span::styled(" none  ", theme::key_label()),
-                Span::styled("Enter", theme::key()),
-                Span::styled(" confirm  ", theme::key_label()),
-                Span::styled(
-                    format!("{} ", app.selected_count()),
-                    theme::success(),
-                ),
-                Span::styled("selected  ", theme::key_label()),
-                Span::styled("q", theme::key()),
-                Span::styled(" quit", theme::key_label()),
-            ]),
-            ViewMode::Confirm => Line::from(vec![
-                Span::raw(" "),
-                Span::styled("Enter", theme::key()),
-                Span::styled(" apply ", theme::key_label()),
-                Span::styled(
-                    format!("{}", app.selected_count()),
-                    theme::success(),
-                ),
-                Span::styled("  ", theme::key_label()),
-                Span::styled("Esc", theme::key()),
-                Span::styled(" back  ", theme::key_label()),
-                Span::styled("q", theme::key()),
-                Span::styled(" quit", theme::key_label()),
-            ]),
-        }
+        Line::from(vec![
+            Span::raw(" "),
+            Span::styled("↑↓", theme::key()),
+            Span::styled("/jk ", theme::key_label()),
+            Span::styled("Space", theme::key()),
+            Span::styled(" toggle  ", theme::key_label()),
+            Span::styled("a", theme::key()),
+            Span::styled(" all  ", theme::key_label()),
+            Span::styled("n", theme::key()),
+            Span::styled(" none  ", theme::key_label()),
+            Span::styled("Enter", theme::key()),
+            Span::styled(" apply  ", theme::key_label()),
+            Span::styled(
+                format!("{} ", app.selected_count()),
+                theme::success(),
+            ),
+            Span::styled("selected  ", theme::key_label()),
+            Span::styled("q", theme::key()),
+            Span::styled(" quit", theme::key_label()),
+        ])
     };
 
     frame.render_widget(Paragraph::new(line), inner);
@@ -138,17 +122,14 @@ fn render_update(frame: &mut Frame, area: Rect, app: &mut App) {
             let msg = app.error.as_deref().unwrap_or("scan failed");
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
-                    Span::styled(" ✗ ", theme::warn()),
-                    Span::styled("error: ", theme::warn()),
+                    Span::styled(" ✗ ", theme::error()),
+                    Span::styled("error: ", theme::error()),
                     Span::styled(msg, theme::value()),
                 ])),
                 content,
             );
         }
-        ScanPhase::Ready => match app.view {
-            ViewMode::Select => render_select_table(frame, content, app),
-            ViewMode::Confirm => render_confirm_panel(frame, content, app),
-        },
+        ScanPhase::Ready => render_select_table(frame, content, app),
     }
 }
 
@@ -255,12 +236,11 @@ fn render_select_table_rows(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let header = Row::new(vec![
         Cell::from(""),
-        Cell::from("Workflow"),
-        Cell::from("Action"),
-        Cell::from("From"),
-        Cell::from("To"),
-    ])
-    .style(theme::label());
+        Cell::from("Workflow").style(theme::column_workflow()),
+        Cell::from("Action").style(theme::column_action()),
+        Cell::from("From").style(theme::column_from()),
+        Cell::from("To").style(theme::column_to()),
+    ]);
 
     let rows: Vec<Row> = app
         .selections
@@ -324,43 +304,4 @@ fn paint_selection_highlight(frame: &mut Frame, area: Rect, app: &App) {
 
 fn short_action(raw: &str) -> String {
     raw.split('@').next().unwrap_or(raw).to_string()
-}
-
-fn render_confirm_panel(frame: &mut Frame, area: Rect, app: &App) {
-    let block = panel_block("confirm");
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let count = app.selected_count();
-    let total = app.selections.len();
-
-    let lines = vec![
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("  "),
-            Span::styled("Apply ", theme::value()),
-            Span::styled(format!("{count}"), theme::bold_accent()),
-            Span::styled(format!(" of {total} planned "), theme::value()),
-            Span::styled("update(s)", theme::success()),
-            Span::styled("?", theme::value()),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("  "),
-            Span::styled("⚠ ", theme::warn()),
-            Span::styled(
-                "File patching is not implemented yet — selection only.",
-                theme::muted(),
-            ),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("  "),
-            Span::styled("Enter", theme::key()),
-            Span::styled(" confirm   ", theme::key_label()),
-            Span::styled("Esc", theme::key()),
-            Span::styled(" back", theme::key_label()),
-        ]),
-    ];
-    frame.render_widget(Paragraph::new(lines), inner);
 }

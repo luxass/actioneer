@@ -11,8 +11,9 @@ use crossterm::event::KeyCode;
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 use crate::config::ActioneerConfig;
+use crate::scan::ApplyReport;
 
-use self::app::{App, ScanPhase, ViewMode};
+use self::app::{App, ScanPhase};
 
 pub mod app;
 pub mod event;
@@ -47,11 +48,18 @@ impl From<io::Error> for TuiError {
     }
 }
 
-/// Enter the update TUI, run until the user quits, then restore the terminal.
+/// Outcome after the TUI closes.
+#[derive(Debug, Default)]
+pub struct TuiOutcome {
+    pub apply_report: Option<ApplyReport>,
+    pub apply_error: Option<String>,
+}
+
+/// Enter the update TUI, run until the user quits or applies, then restore the terminal.
 ///
 /// Terminal state (raw mode + alternate screen) is always restored on exit —
-/// including panics.
-pub fn run_app(config: ActioneerConfig) -> Result<(), TuiError> {
+/// including panics. Callers should print [`TuiOutcome::apply_report`] after return.
+pub fn run_app(config: ActioneerConfig) -> Result<TuiOutcome, TuiError> {
     install_panic_hook();
 
     enable_raw_mode()?;
@@ -61,16 +69,16 @@ pub fn run_app(config: ActioneerConfig) -> Result<(), TuiError> {
     let backend = CrosstermBackend::new(out);
     let mut terminal: Terminal<CrosstermBackend<Stdout>> = Terminal::new(backend)?;
 
-    let result = event_loop(&mut terminal, config);
+    let outcome = event_loop(&mut terminal, config);
 
     restore_terminal()?;
-    result
+    outcome
 }
 
 fn event_loop(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     config: ActioneerConfig,
-) -> Result<(), TuiError> {
+) -> Result<TuiOutcome, TuiError> {
     use crossterm::event::KeyModifiers;
 
     use self::event::{Event, EventHandler};
@@ -105,29 +113,22 @@ fn event_loop(
         }
     }
 
-    Ok(())
+    Ok(TuiOutcome {
+        apply_report: app.apply_report,
+        apply_error: app.apply_error,
+    })
 }
 
 fn handle_ready_key(app: &mut App, code: KeyCode) {
-    match app.view {
-        ViewMode::Select => match code {
-            KeyCode::Up | KeyCode::Char('k') => app.move_selection(-1),
-            KeyCode::Down | KeyCode::Char('j') => app.move_selection(1),
-            KeyCode::Char(' ') => app.toggle_current(),
-            KeyCode::Char('a') => app.select_all(),
-            KeyCode::Char('n') => app.select_none(),
-            KeyCode::Enter => {
-                app.open_confirm();
-            }
-            KeyCode::Char('q') | KeyCode::Esc => app.quit(),
-            _ => {}
-        },
-        ViewMode::Confirm => match code {
-            KeyCode::Enter => app.confirm_apply(),
-            KeyCode::Esc => app.cancel_confirm(),
-            KeyCode::Char('q') => app.quit(),
-            _ => {}
-        },
+    match code {
+        KeyCode::Up | KeyCode::Char('k') => app.move_selection(-1),
+        KeyCode::Down | KeyCode::Char('j') => app.move_selection(1),
+        KeyCode::Char(' ') => app.toggle_current(),
+        KeyCode::Char('a') => app.select_all(),
+        KeyCode::Char('n') => app.select_none(),
+        KeyCode::Enter => app.apply_selected(),
+        KeyCode::Char('q') | KeyCode::Esc => app.quit(),
+        _ => {}
     }
 }
 

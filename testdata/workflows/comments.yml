@@ -1,0 +1,26 @@
+name: Renovate pinned workflow
+
+on: [push]
+
+jobs:
+  pinned:
+    name: Pinned actions
+    runs-on: ubuntu-latest
+    steps:
+      - name: SHA pin with tag comment
+        uses: actions/checkout@a81bbbf8298c0fa03ea29cdc473d45769f953675 # v4.2.0
+
+      - name: Tag pin with matching comment
+        uses: actions/setup-node@v4 # v4
+
+      - name: Tag pin with mismatched comment
+        uses: actions/setup-python@v5 # v4
+
+      - name: SHA pin with SHA as comment
+        uses: actions/cache@3624ceb22c1c005a02ab054990a4879e89888bcd # 3624ceb22c1c005a02ab054990a4879e89888bcd
+
+      - name: No comment
+        uses: actions/upload-artifact@v4
+
+      - name: Empty comment
+        uses: actions/download-artifact@v4 #

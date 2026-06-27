@@ -34,7 +34,7 @@ use std::fmt;
 ///
 /// This classifies **what** is being referenced - separate from how it is pinned
 /// ([`PinKind`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum ReferenceKind {
     /// A GitHub-hosted action: `owner/repo@ref` or `owner/repo/sub/path@ref`.
     Action,
@@ -62,7 +62,7 @@ impl fmt::Display for ReferenceKind {
 ///
 /// The engine always parses every reference regardless of tier; filtering belongs
 /// in the audit/update layer, not here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum AuditTier {
     /// Full pin checks; automatic updates supported (where implemented).
     Primary,
@@ -110,7 +110,7 @@ impl ReferenceKind {
 /// Full SHA is 40 hex characters (SHA-1). Short SHA is detected as 7–39 all-hex
 /// characters. The lower bound of 7 follows `git`'s default abbreviation length.
 /// See `docs/engine.md` § "Open questions" for the open debate on this threshold.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum PinKind {
     /// Exactly 40 lowercase or uppercase hex characters - a full SHA-1 commit hash.
     FullSha,
@@ -141,7 +141,7 @@ impl fmt::Display for PinKind {
 /// Carries both the parsed components (owner, repo, ref, ...) and the surrounding
 /// context needed for future audit and patching operations (job ID, step index,
 /// source line number).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ActionReference {
     /// The raw string exactly as it appears in the `uses:` field.
     pub raw: String,
@@ -226,7 +226,7 @@ pub struct WorkflowDocument {
 ///
 /// Used by [`comment_matches_ref`] to express whether a Renovate-style comment is
 /// consistent with the `@ref` the action is currently pinned to.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum CommentMatch {
     /// No trailing comment is present on the `uses:` line.
     NoComment,

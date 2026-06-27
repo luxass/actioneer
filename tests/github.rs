@@ -370,6 +370,39 @@ fn fixture_release_published_at() {
     assert_eq!(resp.published_at.as_deref(), Some("2023-10-16T17:17:35Z"));
 }
 
+// --- Releases list cache ---
+
+#[test]
+fn list_releases_offline_cache_hit() {
+    use std::fs;
+
+    let dir = TempDir::new().unwrap();
+    let cache = resolve_cache_dir_with(Some(dir.path().to_str().unwrap())).unwrap();
+    let path = cache
+        .path()
+        .join("github")
+        .join("actions")
+        .join("checkout")
+        .join("releases")
+        .join("index.json");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+
+    let index = actioneer::github::ReleasesIndex {
+        releases: vec![actioneer::github::Release {
+            tag_name: "v4.2.0".into(),
+            published_at: "2021-06-01T00:00:00Z".into(),
+            prerelease: false,
+        }],
+        fetched_at: 1_700_000_000,
+    };
+    fs::write(&path, serde_json::to_vec_pretty(&index).unwrap()).unwrap();
+
+    let client = offline_client(&dir);
+    let releases = client.list_releases("actions", "checkout").unwrap();
+    assert_eq!(releases.len(), 1);
+    assert_eq!(releases[0].tag_name, "v4.2.0");
+}
+
 // --- Live network test (ignored in CI) ---
 
 #[test]

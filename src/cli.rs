@@ -48,7 +48,7 @@ pub struct ConfigArgs {
     #[arg(long = "no-cache", global = true, num_args = 0..=1, default_missing_value = "true")]
     pub no_cache: Option<bool>,
 
-    /// Output mode: "tui", "plain", or "json"
+    /// Output mode: "plain" or "json" (update uses TUI unless overridden)
     #[arg(long, global = true, value_name = "MODE")]
     pub mode: Option<OutputMode>,
 }

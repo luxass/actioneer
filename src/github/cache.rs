@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cache::CacheDir;
 
-use super::{GitHubError, RefKind};
+use super::{GitHubError, RefKind, ReleasesIndex};
 
 /// A single on-disk cache entry for a resolved GitHub ref.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,6 +70,29 @@ pub(super) fn ref_path(cache: &CacheDir, owner: &str, repo: &str, kind: &str, gi
         .join("refs")
         .join(kind)
         .join(format!("{encoded}.json"))
+}
+
+/// Compute the cache path for a repository releases index.
+pub(super) fn releases_index_path(cache: &CacheDir, owner: &str, repo: &str) -> PathBuf {
+    cache
+        .path()
+        .join("github")
+        .join(owner)
+        .join(repo)
+        .join("releases")
+        .join("index.json")
+}
+
+/// Write a [`ReleasesIndex`] to `path` atomically.
+pub(super) fn write_releases_index(path: &Path, index: &ReleasesIndex) -> Result<(), GitHubError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(GitHubError::CacheWrite)?;
+    }
+    let json = serde_json::to_vec_pretty(index).map_err(GitHubError::Json)?;
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, &json).map_err(GitHubError::CacheWrite)?;
+    fs::rename(&tmp, path).map_err(GitHubError::CacheWrite)?;
+    Ok(())
 }
 
 /// Read a [`CacheEntry`] from `path`.

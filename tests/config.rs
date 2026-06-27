@@ -25,7 +25,7 @@ fn defaults_when_no_config_file() {
     assert!(cfg.min_release_age.is_none());
     assert!(!cfg.offline);
     assert!(!cfg.no_cache);
-    assert_eq!(cfg.mode, OutputMode::Tui);
+    assert!(cfg.mode.is_none());
 }
 
 #[test]
@@ -235,7 +235,7 @@ mode = "plain"
     let cfg = load(dir.path()).unwrap();
     assert!(cfg.offline);
     assert!(!cfg.no_cache);
-    assert_eq!(cfg.mode, OutputMode::Plain);
+    assert_eq!(cfg.mode, Some(OutputMode::Plain));
 }
 
 #[test]
@@ -243,15 +243,15 @@ fn load_config_mode_json() {
     let dir = tempfile::tempdir().unwrap();
     write_github_config(dir.path(), r#"mode = "json""#);
     let cfg = load(dir.path()).unwrap();
-    assert_eq!(cfg.mode, OutputMode::Json);
+    assert_eq!(cfg.mode, Some(OutputMode::Json));
 }
 
 #[test]
-fn load_config_mode_tui_is_default() {
+fn load_config_mode_defaults_to_none() {
     let dir = tempfile::tempdir().unwrap();
     write_github_config(dir.path(), "");
     let cfg = load(dir.path()).unwrap();
-    assert_eq!(cfg.mode, OutputMode::Tui);
+    assert!(cfg.mode.is_none());
 }
 
 #[test]
@@ -319,12 +319,11 @@ fn apply_overrides_new_fields() {
     cfg.apply_overrides(&args);
     assert!(cfg.offline);
     assert!(!cfg.no_cache);
-    assert_eq!(cfg.mode, OutputMode::Json);
+    assert_eq!(cfg.mode, Some(OutputMode::Json));
 }
 
 #[test]
 fn parse_output_mode_valid() {
-    assert_eq!("tui".parse::<OutputMode>().unwrap(), OutputMode::Tui);
     assert_eq!("plain".parse::<OutputMode>().unwrap(), OutputMode::Plain);
     assert_eq!("json".parse::<OutputMode>().unwrap(), OutputMode::Json);
 }
@@ -332,11 +331,12 @@ fn parse_output_mode_valid() {
 #[test]
 fn parse_output_mode_invalid() {
     assert!("fancy".parse::<OutputMode>().is_err());
+    assert!("tui".parse::<OutputMode>().is_err());
 }
 
 #[test]
 fn output_mode_display_roundtrip() {
-    for mode in [OutputMode::Tui, OutputMode::Plain, OutputMode::Json] {
+    for mode in [OutputMode::Plain, OutputMode::Json] {
         let s = mode.to_string();
         let parsed: OutputMode = s.parse().unwrap();
         assert_eq!(parsed, mode);

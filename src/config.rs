@@ -141,11 +141,12 @@ impl<'de> Deserialize<'de> for RelativeDuration {
 }
 
 /// Output format for actioneer commands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+///
+/// When absent, `update` launches the TUI. Set to `plain` or `json` to use
+/// non-interactive output instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OutputMode {
-    #[default]
-    Tui,
     Plain,
     Json,
 }
@@ -153,7 +154,6 @@ pub enum OutputMode {
 impl fmt::Display for OutputMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Tui => write!(f, "tui"),
             Self::Plain => write!(f, "plain"),
             Self::Json => write!(f, "json"),
         }
@@ -165,11 +165,10 @@ impl FromStr for OutputMode {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "tui" => Ok(Self::Tui),
             "plain" => Ok(Self::Plain),
             "json" => Ok(Self::Json),
             _ => Err(format!(
-                "unknown output mode {s:?}; expected \"tui\", \"plain\", or \"json\""
+                "unknown output mode {s:?}; expected \"plain\" or \"json\""
             )),
         }
     }
@@ -188,7 +187,7 @@ pub struct ActioneerConfig {
     pub min_release_age: Option<RelativeDuration>,
     pub offline: bool,
     pub no_cache: bool,
-    pub mode: OutputMode,
+    pub mode: Option<OutputMode>,
 }
 
 impl ActioneerConfig {
@@ -214,8 +213,8 @@ impl ActioneerConfig {
         if let Some(no_cache) = args.no_cache {
             self.no_cache = no_cache;
         }
-        if let Some(mode) = args.mode {
-            self.mode = mode;
+        if args.mode.is_some() {
+            self.mode = args.mode;
         }
     }
 

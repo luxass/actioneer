@@ -2,8 +2,9 @@ use std::{path::Path, process::ExitCode};
 
 use actioneer::cli::{Cli, Command};
 use actioneer::cmd;
-use actioneer::config;
-use clap::{CommandFactory, Parser};
+use actioneer::config::{self, OutputMode};
+use actioneer::tui;
+use clap::Parser;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -23,15 +24,30 @@ fn main() -> ExitCode {
     }
 
     match cli.command {
-        Some(Command::Audit) => cmd::audit::run(),
-        Some(Command::Update) => cmd::update::run(),
-        Some(Command::Version) => cmd::version::run(),
-        None => {
-            let mut help_cmd = Cli::command();
-            let _ = help_cmd.print_help();
-            println!();
+        Some(Command::Update) => match cfg.mode {
+            Some(OutputMode::Plain) | Some(OutputMode::Json) => cmd::update::run(&cfg),
+            None => {
+                if let Err(e) = tui::run_app(cfg) {
+                    eprintln!("error: {e}");
+                    return ExitCode::FAILURE;
+                }
+                ExitCode::SUCCESS
+            }
+        },
+        Some(Command::Audit) => cmd::audit::run(&cfg),
+        Some(Command::Version) => {
+            cmd::version::run();
+            ExitCode::SUCCESS
         }
+        None => match cfg.mode {
+            Some(OutputMode::Plain) | Some(OutputMode::Json) => cmd::update::run(&cfg),
+            None => {
+                if let Err(e) = tui::run_app(cfg) {
+                    eprintln!("error: {e}");
+                    return ExitCode::FAILURE;
+                }
+                ExitCode::SUCCESS
+            }
+        },
     }
-
-    ExitCode::SUCCESS
 }

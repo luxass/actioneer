@@ -29,7 +29,7 @@ mod cache;
 
 use std::{fmt, io};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::cache::CacheDir;
 use crate::config::ActioneerConfig;
@@ -37,7 +37,7 @@ use crate::config::ActioneerConfig;
 pub use cache::CacheEntry;
 
 /// The kind of git reference that was resolved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum RefKind {
     /// A version tag (e.g. `v4`, `v1.2.3`).
     Tag,
@@ -57,8 +57,23 @@ impl fmt::Display for RefKind {
     }
 }
 
+/// A GitHub release entry used for update planning.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Release {
+    pub tag_name: String,
+    pub published_at: String,
+    pub prerelease: bool,
+}
+
+/// Cached list of releases for a repository.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleasesIndex {
+    pub releases: Vec<Release>,
+    pub fetched_at: u64,
+}
+
 /// A resolved git reference.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ResolvedRef {
     /// Full 40-character commit SHA.
     pub sha: String,
@@ -167,6 +182,14 @@ struct GitTagResponse {
 struct GitTagInner {
     /// The commit SHA that the annotated tag points to.
     sha: String,
+}
+
+/// `GET /repos/{owner}/{repo}/releases` response (partial).
+#[derive(Deserialize)]
+struct ReleaseListItem {
+    tag_name: String,
+    published_at: Option<String>,
+    prerelease: bool,
 }
 
 /// `GET /repos/{owner}/{repo}/releases/tags/{tag}` response (partial).
@@ -289,6 +312,107 @@ impl GitHubClient {
             ref_kind,
             published_at,
         })
+    }
+
+    /// List GitHub releases for `owner/repo`, newest first.
+    ///
+    /// Results are cached at `{cache}/github/{owner}/{repo}/releases/index.json`
+    /// using the same offline/no_cache policy as [`Self::resolve_ref`].
+    pub fn list_releases(&self, owner: &str, repo: &str) -> Result<Vec<Release>, GitHubError> {
+        if !self.no_cache
+            && let Some(index) = self.read_releases_cache(owner, repo)?
+        {
+            return Ok(index.releases);
+        }
+
+        if self.offline {
+            return Err(GitHubError::Offline);
+        }
+
+        let releases = self.api_list_releases(owner, repo)?;
+
+        if !self.no_cache {
+            self.write_releases_cache(owner, repo, &releases)?;
+        }
+
+        Ok(releases)
+    }
+
+    fn read_releases_cache(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Option<ReleasesIndex>, GitHubError> {
+        let Some(cache) = &self.cache else {
+            return Ok(None);
+        };
+        let path = cache::releases_index_path(cache, owner, repo);
+        let data = match std::fs::read(&path) {
+            Ok(d) => d,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(GitHubError::CacheRead(e)),
+        };
+        let index: ReleasesIndex = serde_json::from_slice(&data).map_err(GitHubError::Json)?;
+        Ok(Some(index))
+    }
+
+    fn write_releases_cache(
+        &self,
+        owner: &str,
+        repo: &str,
+        releases: &[Release],
+    ) -> Result<(), GitHubError> {
+        let Some(cache) = &self.cache else {
+            return Ok(());
+        };
+        let path = cache::releases_index_path(cache, owner, repo);
+        let index = ReleasesIndex {
+            releases: releases.to_vec(),
+            fetched_at: cache::now_secs(),
+        };
+        cache::write_releases_index(&path, &index)
+    }
+
+    fn api_list_releases(&self, owner: &str, repo: &str) -> Result<Vec<Release>, GitHubError> {
+        let mut all = Vec::new();
+        let mut page = 1u32;
+
+        loop {
+            let url = format!(
+                "{}/repos/{owner}/{repo}/releases?per_page=100&page={page}",
+                self.base_url
+            );
+            let batch: Vec<ReleaseListItem> = self.get_json(&url, || GitHubError::NotFound {
+                owner: owner.to_string(),
+                repo: repo.to_string(),
+                git_ref: String::new(),
+            })?;
+
+            if batch.is_empty() {
+                break;
+            }
+
+            let batch_len = batch.len();
+            for item in batch {
+                if let Some(published_at) = item.published_at {
+                    all.push(Release {
+                        tag_name: item.tag_name,
+                        published_at,
+                        prerelease: item.prerelease,
+                    });
+                }
+            }
+
+            if batch_len < 100 {
+                break;
+            }
+            page += 1;
+            if page > 10 {
+                break;
+            }
+        }
+
+        Ok(all)
     }
 
     // --- Private: cache helpers ---

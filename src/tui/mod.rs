@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::{
     io::{self, Stdout, stdout},
     panic,
@@ -15,11 +16,14 @@ use crate::scan::ApplyReport;
 
 use self::app::{App, ScanPhase};
 
+use self::view::DisplayRow;
+
 pub mod app;
 pub mod event;
 pub mod selection;
 pub mod theme;
 pub mod ui;
+pub mod view;
 
 #[derive(Debug)]
 pub enum TuiError {
@@ -59,7 +63,7 @@ pub struct TuiOutcome {
 ///
 /// Terminal state (raw mode + alternate screen) is always restored on exit —
 /// including panics. Callers should print [`TuiOutcome::apply_report`] after return.
-pub fn run_app(config: ActioneerConfig) -> Result<TuiOutcome, TuiError> {
+pub fn run_app(config: ActioneerConfig, workflow_paths: Vec<PathBuf>) -> Result<TuiOutcome, TuiError> {
     install_panic_hook();
 
     enable_raw_mode()?;
@@ -69,7 +73,7 @@ pub fn run_app(config: ActioneerConfig) -> Result<TuiOutcome, TuiError> {
     let backend = CrosstermBackend::new(out);
     let mut terminal: Terminal<CrosstermBackend<Stdout>> = Terminal::new(backend)?;
 
-    let outcome = event_loop(&mut terminal, config);
+    let outcome = event_loop(&mut terminal, config, workflow_paths);
 
     restore_terminal()?;
     outcome
@@ -78,12 +82,13 @@ pub fn run_app(config: ActioneerConfig) -> Result<TuiOutcome, TuiError> {
 fn event_loop(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     config: ActioneerConfig,
+    workflow_paths: Vec<PathBuf>,
 ) -> Result<TuiOutcome, TuiError> {
     use crossterm::event::KeyModifiers;
 
     use self::event::{Event, EventHandler};
 
-    let mut app = App::new(config);
+    let mut app = App::new(config, workflow_paths);
     let events = EventHandler::new(100);
 
     loop {
@@ -126,7 +131,17 @@ fn handle_ready_key(app: &mut App, code: KeyCode) {
         KeyCode::Char(' ') => app.toggle_current(),
         KeyCode::Char('a') => app.select_all(),
         KeyCode::Char('n') => app.select_none(),
-        KeyCode::Enter => app.apply_selected(),
+        KeyCode::Enter => {
+            if app
+                .focused_display_row()
+                .and_then(|idx| app.list_view.row(idx))
+                .is_some_and(|row| matches!(row, DisplayRow::GroupHeader(_)))
+            {
+                app.toggle_current();
+            } else {
+                app.apply_selected();
+            }
+        }
         KeyCode::Char('q') | KeyCode::Esc => app.quit(),
         _ => {}
     }

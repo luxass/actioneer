@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use crate::ansi::Colors;
@@ -10,11 +10,11 @@ use crate::scan::{
     ScanReport,
 };
 
-pub fn run(config: &ActioneerConfig) -> ExitCode {
+pub fn run(config: &ActioneerConfig, workflow_paths: &[PathBuf]) -> ExitCode {
     let root = Path::new(".");
     let client = GitHubClient::new(config, cache_dir());
 
-    let report = match scan_workspace(root, config, &client) {
+    let report = match scan_workspace(root, workflow_paths, config, &client) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: {e}");
@@ -94,6 +94,12 @@ fn render_plan_plain(report: &ScanReport, config: &ActioneerConfig) {
         if report.stats.blocked > 0 {
             println!("{} reference(s) blocked by audit rules.", report.stats.blocked);
         }
+        if report.stats.config_blocked > 0 {
+            println!(
+                "{} update(s) blocked by {} level.",
+                report.stats.config_blocked, config.update
+            );
+        }
         return;
     }
 
@@ -102,8 +108,8 @@ fn render_plan_plain(report: &ScanReport, config: &ActioneerConfig) {
         report.stats.planned, report.stats.workflows
     );
     println!(
-        "{:<40} {:<35} {:<28} {}",
-        "Workflow", "Action", "From", "To"
+        "{:<40} {:<35} {:<28} To",
+        "Workflow", "Action", "From"
     );
     println!("{}", "-".repeat(115));
 
@@ -118,6 +124,12 @@ fn render_plan_plain(report: &ScanReport, config: &ActioneerConfig) {
 
     if report.stats.blocked > 0 {
         println!("\n{} reference(s) blocked by audit rules.", report.stats.blocked);
+    }
+    if report.stats.config_blocked > 0 {
+        println!(
+            "\n{} update(s) blocked by {} level.",
+            report.stats.config_blocked, config.update
+        );
     }
 }
 

@@ -192,12 +192,6 @@ struct ReleaseListItem {
     prerelease: bool,
 }
 
-/// `GET /repos/{owner}/{repo}/releases/tags/{tag}` response (partial).
-#[derive(Deserialize)]
-struct ReleaseResponse {
-    published_at: Option<String>,
-}
-
 // --- Client ---
 
 /// A GitHub API client with configurable caching behaviour.
@@ -205,8 +199,13 @@ struct ReleaseResponse {
 /// Construct via [`GitHubClient::new`]. The underlying HTTP agent pools
 /// connections across calls and can be cheaply cloned.
 ///
-/// Authentication is read from the `GITHUB_TOKEN` environment variable when
-/// the client is constructed; the token is sent as a `Bearer` credential.
+/// Authentication is resolved at construction time, in order:
+///
+/// 1. `GITHUB_TOKEN` environment variable (always preferred when set)
+/// 2. `gh auth token` when the GitHub CLI is installed and logged in
+/// 3. No token — requests proceed unauthenticated (60 req/hr GitHub limit)
+///
+/// The token, when present, is sent as a `Bearer` credential on API requests.
 #[derive(Clone)]
 pub struct GitHubClient {
     agent: ureq::Agent,
@@ -220,7 +219,7 @@ pub struct GitHubClient {
 impl GitHubClient {
     /// Create a new client from `config` and an optional cache directory.
     ///
-    /// `GITHUB_TOKEN` is read from the process environment.
+    /// See type-level docs for authentication resolution order.
     pub fn new(config: &ActioneerConfig, cache: Option<CacheDir>) -> Self {
         Self::build(
             config.offline,
@@ -244,7 +243,7 @@ impl GitHubClient {
             offline,
             no_cache,
             cache,
-            token: std::env::var("GITHUB_TOKEN").ok(),
+            token: resolve_github_token(),
             base_url,
         }
     }
@@ -297,11 +296,9 @@ impl GitHubClient {
 
         let sha = self.api_resolve_sha(owner, repo, git_ref, ref_kind)?;
 
-        let published_at = if ref_kind == RefKind::Tag {
-            self.api_release_date(owner, repo, git_ref).unwrap_or(None)
-        } else {
-            None
-        };
+        // published_at is enriched from list_releases in the scan layer when needed.
+        // Avoiding a per-tag releases/tags/{tag} API call here (was doubling network I/O).
+        let published_at = None;
 
         if !self.no_cache {
             self.write_cached(owner, repo, git_ref, ref_kind, &sha, published_at.as_deref())?;
@@ -493,30 +490,6 @@ impl GitHubClient {
         Ok(resp.object.sha)
     }
 
-    /// Fetch the release `published_at` for `tag`.
-    ///
-    /// Returns `Ok(None)` when the tag has no GitHub Release entry (HTTP 404).
-    fn api_release_date(
-        &self,
-        owner: &str,
-        repo: &str,
-        tag: &str,
-    ) -> Result<Option<String>, GitHubError> {
-        let url = format!(
-            "{}/repos/{owner}/{repo}/releases/tags/{tag}",
-            self.base_url
-        );
-        match self.get_json::<ReleaseResponse>(&url, || GitHubError::NotFound {
-            owner: owner.to_string(),
-            repo: repo.to_string(),
-            git_ref: tag.to_string(),
-        }) {
-            Ok(r) => Ok(r.published_at),
-            Err(GitHubError::NotFound { .. }) => Ok(None),
-            Err(e) => Err(e),
-        }
-    }
-
     /// Perform a `GET` request to `url` and deserialize the JSON response body.
     ///
     /// `not_found_err` is called to construct the error when the server responds
@@ -558,6 +531,51 @@ impl GitHubClient {
     }
 }
 
+/// Resolve a GitHub API token for authenticated requests.
+///
+/// 1. `GITHUB_TOKEN` env (preferred)
+/// 2. `gh auth token` fallback
+/// 3. `None` — caller proceeds without auth
+pub fn resolve_github_token() -> Option<String> {
+    resolve_github_token_from(|key| std::env::var(key).ok())
+}
+
+fn resolve_github_token_from<F>(env: F) -> Option<String>
+where
+    F: FnOnce(&str) -> Option<String>,
+{
+    if let Some(token) = env("GITHUB_TOKEN") {
+        let token = token.trim();
+        if !token.is_empty() {
+            return Some(token.to_string());
+        }
+    }
+    gh_auth_token()
+}
+
+/// Read a token from `gh auth token` when the GitHub CLI is available.
+fn gh_auth_token() -> Option<String> {
+    let output = std::process::Command::new("gh")
+        .args(["auth", "token"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let token = String::from_utf8(output.stdout).ok()?;
+    let token = token.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
+}
+
 /// Map a body-read [`ureq::Error`] to a [`GitHubError`].
 fn map_body_error(e: ureq::Error) -> GitHubError {
     match e {
@@ -592,5 +610,31 @@ fn ref_kind_dir(kind: RefKind) -> &'static str {
     match kind {
         RefKind::Tag => "tags",
         RefKind::Branch | RefKind::Sha => "heads",
+    }
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::resolve_github_token_from;
+
+    #[test]
+    fn resolve_github_token_reads_env() {
+        let token = resolve_github_token_from(|key| {
+            assert_eq!(key, "GITHUB_TOKEN");
+            Some("ghp_from_env".into())
+        });
+        assert_eq!(token.as_deref(), Some("ghp_from_env"));
+    }
+
+    #[test]
+    fn resolve_github_token_trims_env() {
+        let token = resolve_github_token_from(|_| Some("  ghp_trimmed  \n".into()));
+        assert_eq!(token.as_deref(), Some("ghp_trimmed"));
+    }
+
+    #[test]
+    fn resolve_github_token_ignores_empty_env() {
+        let token = resolve_github_token_from(|_| Some("   ".into()));
+        assert!(token.is_none() || token.as_deref() != Some("   "));
     }
 }

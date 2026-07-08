@@ -12,7 +12,7 @@
 repo root
     │
     ▼
-discover_workflows()          → .github/workflows/*.{yml,yaml}
+resolve_workflow_paths()      → .github/workflows/* or explicit PATH args
     │
     ▼
 parse_workflow()              → ActionReference (engine)
@@ -32,13 +32,41 @@ ScanReport
     └─► actioneer update (plain / json / tui)
 ```
 
+## Pin semantics
+
+**Same SHA ≠ same pin.** `@v4`, `@v4.2.0`, and `@abc123… # v4.2.0` can resolve to the same
+commit but represent different pinning intent. Audit and plan share helpers in `src/scan/pin.rs`:
+
+- `classify_tag` / `version_baseline` — major-line (`v4`) vs full semver (`v4.2.0`) from the written pin
+- `build_target_value` / `would_change` — skip planning when the on-disk line would not change
+
+### GitHub API budget (per unique owner/repo)
+
+| Call | When |
+|------|------|
+| `list_releases` | Once per repo (cached) |
+| `resolve_ref` on current pin | Once per unique `uses:` ref (cached) |
+| `resolve_ref` on comment tag | Once for SHA pins with semver comments |
+| `resolve_ref` on plan target | Once when an update is proposed |
+| `resolve_ref` during major-line infer | Only when `@v4` needs effective semver; newest releases first, stops on match |
+
+Release tag names supply semver for candidate selection — **no bulk resolve of every release tag**.
+
+Major-line tags (`@v4`) are never mapped to invented semver (e.g. `4.0.0`). When needed, the planner
+walks release tags newest-first until the resolved SHA matches, and may still plan `@v4` → `@v4.2.0`
+when both resolve to the same commit (pin normalization).
+
+Unreleased SHAs (not matching any official release tag) fail audit with `UnreleasedCommit` but do
+not block updates — the planner remediates toward the latest official release.
+
 ## Module layout
 
 | Path | Role |
 |------|------|
-| `src/discovery.rs` | Locate workflow files |
+| `src/discovery.rs` | Locate workflow files (default or explicit PATH) |
 | `src/scan/mod.rs` | `scan_workspace` orchestration |
 | `src/scan/types.rs` | `ScanReport`, `ReferenceReport`, `AuditIssue`, `PlannedChange` |
+| `src/scan/pin.rs` | Shared pin classification and target-line construction |
 | `src/scan/audit.rs` | Audit rules (pure) |
 | `src/scan/plan.rs` | Update planner (pure + GitHub resolve for target SHA) |
 | `src/scan/apply.rs` | Write planned changes to workflow files |
@@ -49,10 +77,24 @@ ScanReport
 ```rust
 pub fn scan_workspace(
     root: &Path,
+    workflow_paths: &[PathBuf],  // empty = .github/workflows/
     config: &ActioneerConfig,
     client: &GitHubClient,
 ) -> Result<ScanReport, ScanError>
 ```
+
+### CLI workflow targets
+
+Optional positional `PATH` arguments (after flags/subcommand):
+
+| Invocation | Scans |
+|------------|-------|
+| `actioneer` | `root/.github/workflows/*.{yml,yaml}` |
+| `actioneer testdata/workflows/advanced.yml` | that file |
+| `actioneer testdata/workflows` | `*.{yml,yaml}` directly in that directory (flat) |
+| `actioneer audit PATH` / `actioneer update PATH` | same semantics |
+
+Paths are relative to cwd (`root`). Apply writes back using the same relative paths.
 
 ## Shared types
 
@@ -74,6 +116,10 @@ One row per `uses:` reference:
 | `ShortSha` | No |
 | `NotShaPinned` | No |
 | `CommentMismatch` | No |
+| `CommentMajorLineMismatch` | No |
+| `FloatingMajorPin` | No |
+| `UnreleasedCommit` | No (audit fails; update remediates) |
+| `UpdateBlockedByConfig` | No |
 | `ReleaseTooYoung` | **Yes** |
 | `SkippedBranch` | **Yes** |
 | `SecondaryReference` | No (docker/local inventory) |
@@ -83,6 +129,9 @@ One row per `uses:` reference:
 
 - Only `ReferenceKind::Action` with `is_updatable() == true`
 - Uses GitHub **Releases API** (`list_releases`) + semver filtering by `config.update`
+- Major-line tags: infer semver from SHA; never look up a tag named `v4` as a candidate
+- Skips when `would_change` is false (pin string unchanged after apply)
+- Unreleased SHAs: remediation mode (ignores update level when targeting official releases)
 - Respects `min_release_age`, `skip_branches`, `pin` (sha vs tag output)
 
 ### Apply

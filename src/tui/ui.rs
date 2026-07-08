@@ -7,10 +7,18 @@ use ratatui::{
 
 use super::app::{App, ScanPhase};
 use super::theme;
+use super::view::{self, DisplayRow};
 use crate::scan::truncate_label;
 
 const MIN_WIDTH: u16 = 60;
 const MIN_HEIGHT: u16 = 24;
+
+const TABLE_COLUMNS: [Constraint; 4] = [
+    Constraint::Length(3),
+    Constraint::Min(20),
+    Constraint::Length(28),
+    Constraint::Length(28),
+];
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
@@ -82,26 +90,40 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(" quit", theme::key_label()),
         ])
     } else {
-        Line::from(vec![
+        let mut spans = vec![
             Span::raw(" "),
             Span::styled("↑↓", theme::key()),
             Span::styled("/jk ", theme::key_label()),
             Span::styled("Space", theme::key()),
             Span::styled(" toggle  ", theme::key_label()),
+            Span::styled("Enter", theme::key()),
+            Span::styled(" apply/group  ", theme::key_label()),
             Span::styled("a", theme::key()),
             Span::styled(" all  ", theme::key_label()),
             Span::styled("n", theme::key()),
             Span::styled(" none  ", theme::key_label()),
-            Span::styled("Enter", theme::key()),
-            Span::styled(" apply  ", theme::key_label()),
             Span::styled(
                 format!("{} ", app.selected_count()),
                 theme::success(),
             ),
-            Span::styled("selected  ", theme::key_label()),
-            Span::styled("q", theme::key()),
-            Span::styled(" quit", theme::key_label()),
-        ])
+            Span::styled("selected", theme::key_label()),
+        ];
+
+        if let Some(report) = app.report.as_ref()
+            && report.stats.config_blocked > 0
+        {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                format!("{} blocked by {} level", report.stats.config_blocked, app.config.update),
+                theme::warn(),
+            ));
+        }
+
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled("q", theme::key()));
+        spans.push(Span::styled(" quit", theme::key_label()));
+
+        Line::from(spans)
     };
 
     frame.render_widget(Paragraph::new(line), inner);
@@ -129,7 +151,7 @@ fn render_update(frame: &mut Frame, area: Rect, app: &mut App) {
                 content,
             );
         }
-        ScanPhase::Ready => render_select_table(frame, content, app),
+        ScanPhase::Ready => render_select_list(frame, content, app),
     }
 }
 
@@ -171,31 +193,30 @@ fn render_scanning_panel(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-fn render_select_table(frame: &mut Frame, area: Rect, app: &mut App) {
+fn render_select_list(frame: &mut Frame, area: Rect, app: &mut App) {
     let report = app.report.as_ref().unwrap();
 
     let block = panel_block("planned changes");
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    app.viewport_rows = inner.height.saturating_sub(2) as usize;
 
-    let mut lines: Vec<Line> = Vec::new();
+    let mut banner_lines: Vec<Line> = Vec::new();
     if let Some(banner) = &app.status_banner {
-        lines.push(Line::from(vec![
+        banner_lines.push(Line::from(vec![
             Span::raw("  "),
             Span::styled("ℹ ", theme::accent()),
             Span::styled(banner.as_str(), theme::info()),
         ]));
-        lines.push(Line::from(""));
+        banner_lines.push(Line::from(""));
     }
 
-    if app.selections.is_empty() {
-        lines.push(Line::from(vec![
+    if app.total_planned_items() == 0 {
+        banner_lines.push(Line::from(vec![
             Span::raw("  "),
             Span::styled("✓ ", theme::success()),
             Span::styled("No updates planned.", theme::success()),
         ]));
-        lines.push(Line::from(vec![
+        banner_lines.push(Line::from(vec![
             Span::raw("  "),
             Span::styled(
                 format!(
@@ -205,99 +226,123 @@ fn render_select_table(frame: &mut Frame, area: Rect, app: &mut App) {
                 theme::muted(),
             ),
         ]));
-        frame.render_widget(Paragraph::new(lines), inner);
+        frame.render_widget(Paragraph::new(banner_lines), inner);
         return;
     }
 
-    if !lines.is_empty() {
-        let banner_height = lines.len() as u16;
-        let banner_area = Rect {
+    let mut list_area = inner;
+    if !banner_lines.is_empty() {
+        let banner_height = banner_lines.len() as u16;
+        frame.render_widget(Paragraph::new(banner_lines), Rect {
             height: banner_height.min(inner.height),
             ..inner
-        };
-        frame.render_widget(Paragraph::new(lines), banner_area);
+        });
         if inner.height <= banner_height {
             return;
         }
-        let table_area = Rect {
+        list_area = Rect {
             y: inner.y + banner_height,
             height: inner.height - banner_height,
             ..inner
         };
-        render_select_table_rows(frame, table_area, app);
-        return;
     }
 
-    render_select_table_rows(frame, inner, app);
+    render_grouped_rows(frame, list_area, app);
 }
 
-fn render_select_table_rows(frame: &mut Frame, area: Rect, app: &mut App) {
-    app.viewport_rows = area.height.saturating_sub(2) as usize;
+fn render_grouped_rows(frame: &mut Frame, area: Rect, app: &mut App) {
+    app.viewport_rows = area.height.saturating_sub(1) as usize;
+    let focused_row = app.focused_display_row();
 
     let header = Row::new(vec![
         Cell::from(""),
-        Cell::from("Workflow").style(theme::column_workflow()),
-        Cell::from("Action").style(theme::column_action()),
+        Cell::from(""),
         Cell::from("From").style(theme::column_from()),
         Cell::from("To").style(theme::column_to()),
     ]);
 
+    let visible = app.viewport_rows.max(1);
     let rows: Vec<Row> = app
-        .selections
+        .list_view
+        .rows
         .iter()
-        .map(|item| {
-            let mark = if item.selected { "✓" } else { "·" };
-            Row::new(vec![
-                Cell::from(mark).style(theme::checkbox(item.selected)),
-                Cell::from(item.workflow_name()).style(theme::workflow()),
-                Cell::from(short_action(&item.action)).style(theme::action_ref()),
-                Cell::from(truncate_label(&item.from_label, 26)).style(theme::from_ref()),
-                Cell::from(truncate_label(&item.to_label, 26)).style(theme::to_ref()),
-            ])
-        })
+        .enumerate()
+        .skip(app.scroll_offset)
+        .take(visible)
+        .map(|(row_idx, row)| table_row(row, app, focused_row == Some(row_idx)))
         .collect();
 
-    let table = Table::new(rows, [
-        Constraint::Length(3),
-        Constraint::Length(18),
-        Constraint::Min(14),
-        Constraint::Length(28),
-        Constraint::Length(28),
-    ])
-    .header(header)
-    .column_spacing(1);
+    let table = Table::new(rows, TABLE_COLUMNS)
+        .header(header)
+        .column_spacing(1);
 
-    frame.render_stateful_widget(table, area, &mut app.table_state);
-    paint_selection_highlight(frame, area, app);
+    frame.render_widget(table, area);
+    paint_selection_highlight(area, app, frame);
 }
 
-/// Extend the selection background across the full row width. Per-cell styles only
-/// paint behind text, leaving gaps that look like dashes; patching the buffer row
-/// after the table fills those gaps while preserving foreground colours.
-fn paint_selection_highlight(frame: &mut Frame, area: Rect, app: &App) {
-    let Some(selected) = app.table_state.selected() else {
+fn table_row(row: &DisplayRow, app: &App, focused: bool) -> Row<'static> {
+    match row {
+        DisplayRow::Spacer => Row::new(vec![
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from(""),
+        ]),
+        DisplayRow::GroupHeader(group_idx) => {
+            let group = &app.groups[*group_idx];
+            let label = view::group_header_label(group);
+            let style = if focused {
+                theme::workflow().add_modifier(ratatui::style::Modifier::BOLD)
+            } else {
+                theme::workflow()
+            };
+            Row::new(vec![
+                Cell::from(""),
+                Cell::from(label).style(style),
+                Cell::from(""),
+                Cell::from(""),
+            ])
+        }
+        DisplayRow::Action { group, item } => {
+            let entry = &app.groups[*group].items[*item];
+            let mark = if entry.selected { "✓" } else { "" };
+            Row::new(vec![
+                Cell::from(mark).style(theme::checkbox(entry.selected)),
+                Cell::from(truncate_label(
+                    &short_action(&entry.action),
+                    40,
+                ))
+                .style(theme::action_ref()),
+                Cell::from(truncate_label(&entry.from_label, 26)).style(theme::from_ref()),
+                Cell::from(truncate_label(&entry.to_label, 26)).style(theme::to_ref()),
+            ])
+        }
+    }
+}
+
+fn paint_selection_highlight(area: Rect, app: &App, frame: &mut Frame) {
+    let Some(focused_row) = app.focused_display_row() else {
         return;
     };
-    let offset = app.table_state.offset();
-    if selected < offset {
+    if focused_row < app.scroll_offset {
         return;
     }
-    let visible = selected - offset;
-    let data_rows = area.height.saturating_sub(1);
-    if data_rows == 0 || visible >= data_rows as usize {
+    let visible = app.viewport_rows.max(1);
+    let relative = focused_row - app.scroll_offset;
+    if relative >= visible {
         return;
     }
 
-    let row_rect = Rect {
-        x: area.x,
-        y: area.y + 1 + visible as u16,
-        width: area.width,
-        height: 1,
-    };
+    // +1 for table header row
+    let row_y = area.y + 1 + relative as u16;
+    if row_y >= area.y + area.height {
+        return;
+    }
+
     let bg = theme::selection_row();
     let buf = frame.buffer_mut();
-    for x in row_rect.x..row_rect.x.saturating_add(row_rect.width) {
-        let cell = &mut buf[(x, row_rect.y)];
+    for x in area.x..area.x.saturating_add(area.width) {
+        let cell = &mut buf[(x, row_y)];
         cell.set_style(cell.style().patch(bg));
     }
 }

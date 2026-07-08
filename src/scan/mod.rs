@@ -3,6 +3,7 @@
 mod apply;
 mod audit;
 mod display;
+mod pin;
 mod plan;
 pub mod types;
 
@@ -12,8 +13,10 @@ use std::{fmt, io};
 
 use crate::config::ActioneerConfig;
 use crate::discovery::{self, DiscoveryError};
-use crate::engine::{comment_matches_ref, parse_workflow, ParseError};
+use crate::engine::{comment_matches_ref, parse_workflow, ParseError, PinKind};
 use crate::github::{GitHubClient, GitHubError, Release, ResolvedRef};
+
+use pin::{classify_tag, TagShape};
 
 pub use types::{
     AppliedChange, ApplyFailure, ApplyReport, ApplyTarget, AuditIssue, LocatedReference,
@@ -74,20 +77,30 @@ impl From<GitHubError> for ScanError {
 }
 
 /// Discover workflows, resolve references, audit, and plan updates.
+///
+/// GitHub API calls per unique remote action:
+/// - one `list_releases` per owner/repo
+/// - one `resolve_ref` per unique pin (cached)
+/// - at most one `resolve_ref` for the planned target tag
+/// - for SHA pins with semver comments: one `resolve_ref` for that comment tag
 pub fn scan_workspace(
     root: &Path,
+    workflow_paths: &[PathBuf],
     config: &ActioneerConfig,
     client: &GitHubClient,
 ) -> Result<ScanReport, ScanError> {
-    let paths = discovery::discover_workflows(root)?;
+    let paths = discovery::resolve_workflow_paths(root, workflow_paths)?;
     let mut workflows = Vec::new();
     let mut stats = ScanStats::default();
 
     let mut resolve_cache: HashMap<(String, String, String), ResolvedRef> = HashMap::new();
     let mut releases_cache: HashMap<(String, String), Vec<Release>> = HashMap::new();
+    let mut sha_version_cache: HashMap<(String, String), HashMap<String, Option<semver::Version>>> =
+        HashMap::new();
 
     for path in paths {
-        let content = std::fs::read_to_string(&path)?;
+        let file_path = root.join(&path);
+        let content = std::fs::read_to_string(&file_path)?;
         let document = parse_workflow(&content).map_err(|error| ScanError::Parse {
             path: path.clone(),
             error,
@@ -108,18 +121,7 @@ pub fn scan_workspace(
                 reference: reference.clone(),
             };
 
-            let (resolved, resolution_failed) =
-                resolve_reference(&located, client, &mut resolve_cache)?;
-
-            let mut issues = audit::evaluate(&resolved, config);
-            if resolution_failed {
-                issues.push(AuditIssue::ResolutionFailed {
-                    message: "failed to resolve reference on GitHub".into(),
-                });
-            }
-            stats.issues += issues.len();
-
-            let releases_vec = if reference.kind.is_updatable() {
+            let releases = if reference.kind.audit_tier() == crate::engine::AuditTier::Primary {
                 if let (Some(owner), Some(repo)) = (&reference.owner, &reference.repo) {
                     fetch_releases(client, owner, repo, &mut releases_cache)?
                 } else {
@@ -129,10 +131,59 @@ pub fn scan_workspace(
                 Vec::new()
             };
 
-            let planned = plan::propose(&resolved, &releases_vec, config, client, &issues)?;
+            let (mut resolved, resolution_failed) =
+                resolve_reference(&located, client, &mut resolve_cache)?;
+
+            enrich_published_at(&mut resolved, &releases);
+
+            let comment_tag_sha = if let (Some(owner), Some(repo)) = (&reference.owner, &reference.repo) {
+                resolve_comment_tag_sha(&reference, client, owner, repo, &mut resolve_cache)?
+            } else {
+                None
+            };
+
+            let mut issues = audit::evaluate(
+                &resolved,
+                &releases,
+                config,
+                comment_tag_sha
+                    .as_ref()
+                    .map(|(tag, sha)| (tag.as_str(), sha.as_str())),
+            );
+
+            if resolution_failed {
+                issues.push(AuditIssue::ResolutionFailed {
+                    message: "failed to resolve reference on GitHub".into(),
+                });
+            }
+            stats.issues += issues.len();
+            stats.config_blocked += issues
+                .iter()
+                .filter(|i| matches!(i, AuditIssue::UpdateBlockedByConfig { .. }))
+                .count();
+
+            let planned = if let (Some(owner), Some(repo)) = (&reference.owner, &reference.repo) {
+                let repo_sha_cache = sha_version_cache
+                    .entry((owner.clone(), repo.clone()))
+                    .or_default();
+                let mut plan_ctx = plan::PlanContext {
+                    client,
+                    owner,
+                    repo,
+                    resolve_cache: &mut resolve_cache,
+                    sha_version_cache: repo_sha_cache,
+                };
+                plan::propose(&resolved, &releases, config, &mut plan_ctx, &issues)?
+            } else {
+                None
+            };
+
             if planned.is_some() {
                 stats.planned += 1;
-            } else if reference.kind.is_updatable() && !issues.is_empty() && audit::blocks_update(&issues) {
+            } else if reference.kind.is_updatable()
+                && !issues.is_empty()
+                && audit::blocks_update(&issues)
+            {
                 stats.blocked += 1;
             }
 
@@ -152,6 +203,19 @@ pub fn scan_workspace(
     }
 
     Ok(ScanReport { workflows, stats })
+}
+
+fn enrich_published_at(resolved: &mut ResolvedReference, releases: &[Release]) {
+    if resolved.current.published_at.is_some() {
+        return;
+    }
+    let Some(git_ref) = resolved.located.reference.git_ref.as_deref() else {
+        return;
+    };
+    resolved.current.published_at = releases
+        .iter()
+        .find(|r| r.tag_name == git_ref)
+        .map(|r| r.published_at.clone());
 }
 
 fn resolve_reference(
@@ -201,30 +265,15 @@ fn resolve_reference(
         }
     };
 
-    let key = (owner.to_string(), repo.to_string(), git_ref.to_string());
-    if let Some(cached) = cache.get(&key) {
-        return Ok((
+    match cached_resolve(client, owner, repo, git_ref, cache) {
+        Ok(current) => Ok((
             ResolvedReference {
                 located: located.clone(),
-                current: cached.clone(),
+                current,
                 comment_match,
             },
             false,
-        ));
-    }
-
-    match client.resolve_ref(owner, repo, git_ref) {
-        Ok(current) => {
-            cache.insert(key, current.clone());
-            Ok((
-                ResolvedReference {
-                    located: located.clone(),
-                    current,
-                    comment_match,
-                },
-                false,
-            ))
-        }
+        )),
         Err(_) => {
             let placeholder = ResolvedRef {
                 sha: String::new(),
@@ -241,6 +290,47 @@ fn resolve_reference(
             ))
         }
     }
+}
+
+/// For SHA pins with a semver comment, resolve that tag once to verify the official release SHA.
+fn resolve_comment_tag_sha(
+    reference: &crate::engine::ActionReference,
+    client: &GitHubClient,
+    owner: &str,
+    repo: &str,
+    cache: &mut HashMap<(String, String, String), ResolvedRef>,
+) -> Result<Option<(String, String)>, ScanError> {
+    if !matches!(reference.pin_kind, PinKind::FullSha | PinKind::ShortSha) {
+        return Ok(None);
+    }
+    let Some(comment) = reference.line_comment.as_deref() else {
+        return Ok(None);
+    };
+    if !matches!(
+        classify_tag(comment),
+        TagShape::FullSemver(_) | TagShape::MajorOnly(_)
+    ) {
+        return Ok(None);
+    }
+
+    let resolved = cached_resolve(client, owner, repo, comment, cache);
+    Ok(resolved.ok().map(|r| (comment.to_string(), r.sha)))
+}
+
+fn cached_resolve(
+    client: &GitHubClient,
+    owner: &str,
+    repo: &str,
+    git_ref: &str,
+    cache: &mut HashMap<(String, String, String), ResolvedRef>,
+) -> Result<ResolvedRef, GitHubError> {
+    let key = (owner.to_string(), repo.to_string(), git_ref.to_string());
+    if let Some(cached) = cache.get(&key) {
+        return Ok(cached.clone());
+    }
+    let resolved = client.resolve_ref(owner, repo, git_ref)?;
+    cache.insert(key, resolved.clone());
+    Ok(resolved)
 }
 
 fn fetch_releases(

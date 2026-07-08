@@ -171,7 +171,23 @@ HTTP 404 means the tag has no corresponding GitHub Release — this is treated a
 | `Accept` | `application/vnd.github+json` |
 | `User-Agent` | `actioneer/<version>` |
 | `X-GitHub-Api-Version` | `2022-11-28` |
-| `Authorization` | `Bearer <GITHUB_TOKEN>` (only when `GITHUB_TOKEN` is set) |
+| `Authorization` | `Bearer <token>` when a token is resolved (see Authentication) |
+
+## Authentication
+
+Tokens are resolved once when [`GitHubClient::new`] is called:
+
+| Priority | Source |
+|----------|--------|
+| 1 | `GITHUB_TOKEN` environment variable (**always preferred** when set) |
+| 2 | `gh auth token` (GitHub CLI, when installed and logged in) |
+| 3 | No token — proceed unauthenticated |
+
+Without a token, requests still go out but are limited to **60 requests/hour**.
+Authenticated requests get **5,000 requests/hour**.
+
+Set `GITHUB_TOKEN` explicitly in CI. Locally, `gh auth login` is enough if the
+CLI is on your `PATH`.
 
 ## Error handling
 
@@ -192,8 +208,6 @@ Uses [`ureq`](https://crates.io/crates/ureq) 3.x (blocking, pure-Rust TLS via
 rustls). A single `ureq::Agent` is stored in `GitHubClient` and reused across
 calls for connection pooling. `Agent` is `Clone` (backed by `Arc`) so
 `GitHubClient` can be cheaply cloned as well.
-
-`GITHUB_TOKEN` is read once from the environment at construction time.
 
 ## Assumptions and design decisions
 
@@ -217,11 +231,11 @@ second request when needed. The extra request is cached as part of the combined
 `CacheEntry` result (keyed on the original `git_ref`), so subsequent calls only
 require one cache read.
 
-### Release date is best-effort
+### Release date comes from the releases index
 
-Not every tag has a GitHub Release entry. The `api_release_date` call returns
-`Ok(None)` on HTTP 404. The overall `resolve_ref` call always succeeds if the
-ref itself resolves.
+Tag `published_at` is taken from the cached `list_releases` index when the pin
+tag matches a release name. `resolve_ref` no longer makes a separate
+`releases/tags/{tag}` request per tag lookup.
 
 ### `fetched_at` for future TTL
 

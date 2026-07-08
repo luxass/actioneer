@@ -8,7 +8,8 @@ Interactive terminal UI for the `update` command, built on [ratatui](https://rat
 src/tui/
 ├── mod.rs        public entry-point; terminal lifecycle + event loop
 ├── app.rs        App state, scan worker, selection navigation
-├── selection.rs  SelectableUpdate rows from ScanReport
+├── selection.rs  WorkflowGroup + SelectableItem from ScanReport
+├── view.rs       DisplayRow list, collapse/scroll helpers
 ├── event.rs      EventHandler (background thread, channel-based)
 ├── theme.rs      semantic colour palette + Style constructors
 └── ui.rs         update screen rendering
@@ -17,7 +18,7 @@ src/tui/
 ### Entry points
 
 ```rust
-actioneer::tui::run_app(ActioneerConfig) -> Result<TuiOutcome, TuiError>
+actioneer::tui::run_app(ActioneerConfig, workflow_paths) -> Result<TuiOutcome, TuiError>
 ```
 
 `actioneer update` (and bare `actioneer`) launches the TUI unless `--mode plain` or
@@ -52,16 +53,18 @@ Post-TUI apply output uses the same semantics via `src/ansi.rs` when stdout is a
 
 ## Interactive selection
 
-When planned updates exist:
+When planned updates exist, rows are grouped by workflow file. Each group has a
+collapsible header (`▾` expanded, `▸` collapsed with item count). Blank lines
+separate groups. Action rows show checkbox, action name, from, and to columns.
 
 | Key | Action |
 |-----|--------|
-| `↑` / `k` | Move cursor up |
+| `↑` / `k` | Move cursor up (headers and actions) |
 | `↓` / `j` | Move cursor down |
-| `Space` | Toggle `[x]` on current row |
+| `Space` | On action row: toggle selection. On group header: expand/collapse |
+| `Enter` | On action row: apply selected. On group header: expand/collapse |
 | `a` | Select all |
 | `n` | Deselect all |
-| `Enter` | Apply selected updates |
 | `q` / `Esc` | Quit |
 
 Rows start unselected; use Space or `a` to choose updates. Footer shows `N selected`.

@@ -305,10 +305,25 @@ pub fn comment_matches_ref(reference: &ActionReference) -> CommentMatch {
         return CommentMatch::Match;
     }
 
+    // SHA pins with semver-shaped comments defer semantic validation to audit.
+    if matches!(reference.pin_kind, PinKind::FullSha | PinKind::ShortSha)
+        && comment_looks_like_version(comment)
+    {
+        return CommentMatch::Match;
+    }
+
     CommentMatch::Mismatch {
         comment: comment.to_string(),
         expected: git_ref.to_string(),
     }
+}
+
+fn comment_looks_like_version(comment: &str) -> bool {
+    let without_v = comment.strip_prefix('v').unwrap_or(comment);
+    if !without_v.is_empty() && without_v.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    without_v.contains('.') && semver::Version::parse(without_v).is_ok()
 }
 
 /// Errors returned by [`parse_workflow`].

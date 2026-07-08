@@ -1,4 +1,4 @@
-use std::{path::Path, process::ExitCode};
+use std::{path::Path, path::PathBuf, process::ExitCode};
 
 use actioneer::cli::{Cli, Command};
 use actioneer::cmd;
@@ -24,24 +24,28 @@ fn main() -> ExitCode {
     }
 
     match cli.command {
-        Some(Command::Update) => match cfg.mode {
-            Some(OutputMode::Plain) | Some(OutputMode::Json) => cmd::update::run(&cfg),
-            None => run_tui_update(&cfg),
+        Some(Command::Update { .. }) => match cfg.mode {
+            Some(OutputMode::Plain) | Some(OutputMode::Json) => {
+                cmd::update::run(&cfg, cli.workflow_paths())
+            }
+            None => run_tui_update(&cfg, cli.workflow_paths()),
         },
-        Some(Command::Audit) => cmd::audit::run(&cfg),
+        Some(Command::Audit { .. }) => cmd::audit::run(&cfg, cli.workflow_paths()),
         Some(Command::Version) => {
             cmd::version::run();
             ExitCode::SUCCESS
         }
         None => match cfg.mode {
-            Some(OutputMode::Plain) | Some(OutputMode::Json) => cmd::update::run(&cfg),
-            None => run_tui_update(&cfg),
+            Some(OutputMode::Plain) | Some(OutputMode::Json) => {
+                cmd::update::run(&cfg, cli.workflow_paths())
+            }
+            None => run_tui_update(&cfg, cli.workflow_paths()),
         },
     }
 }
 
-fn run_tui_update(cfg: &config::ActioneerConfig) -> ExitCode {
-    match tui::run_app(cfg.clone()) {
+fn run_tui_update(cfg: &config::ActioneerConfig, workflow_paths: &[PathBuf]) -> ExitCode {
+    match tui::run_app(cfg.clone(), workflow_paths.to_vec()) {
         Ok(outcome) => {
             if let Some(error) = outcome.apply_error {
                 eprintln!("error: {error}");

@@ -44,6 +44,21 @@ pub enum AuditIssue {
     ResolutionFailed {
         message: String,
     },
+    FloatingMajorPin {
+        pin: String,
+    },
+    UnreleasedCommit {
+        sha: String,
+    },
+    UpdateBlockedByConfig {
+        current_version: String,
+        available_version: String,
+        update_level: String,
+    },
+    CommentMajorLineMismatch {
+        comment: String,
+        resolved_version: String,
+    },
 }
 
 /// Why an update was proposed.
@@ -97,6 +112,7 @@ pub struct ScanStats {
     pub issues: usize,
     pub planned: usize,
     pub blocked: usize,
+    pub config_blocked: usize,
 }
 
 /// Full workspace scan result shared by audit and update commands.

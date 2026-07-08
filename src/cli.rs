@@ -1,21 +1,57 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand};
 
 use crate::config::{OutputMode, PinMode, RelativeDuration, UpdateLevel};
 
+#[derive(Debug, Args, Default)]
+pub struct WorkflowPathArgs {
+    /// Workflow file(s) or directory to scan (default: .github/workflows/)
+    #[arg(value_name = "PATH")]
+    pub paths: Vec<PathBuf>,
+}
+
 #[derive(Debug, Parser)]
-#[command(name = "actioneer", version, about = "GitHub Actions CLI")]
+#[command(
+    name = "actioneer",
+    version,
+    about = "GitHub Actions CLI",
+    args_conflicts_with_subcommands = true
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
+
+    /// Workflow file(s) or directory to scan (default: .github/workflows/)
+    #[arg(value_name = "PATH")]
+    pub paths: Vec<PathBuf>,
 
     #[command(flatten)]
     pub config: ConfigArgs,
 }
 
+impl Cli {
+    /// Resolved workflow targets for the active command.
+    pub fn workflow_paths(&self) -> &[PathBuf] {
+        match &self.command {
+            Some(Command::Audit { workflow_paths }) => &workflow_paths.paths,
+            Some(Command::Update { workflow_paths }) => &workflow_paths.paths,
+            Some(Command::Version) => &[],
+            None => &self.paths,
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    Audit,
-    Update,
+    Audit {
+        #[command(flatten)]
+        workflow_paths: WorkflowPathArgs,
+    },
+    Update {
+        #[command(flatten)]
+        workflow_paths: WorkflowPathArgs,
+    },
     Version,
 }
 

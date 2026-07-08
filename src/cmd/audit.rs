@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use crate::cache::cache_dir;
@@ -6,11 +6,11 @@ use crate::config::{ActioneerConfig, OutputMode};
 use crate::github::GitHubClient;
 use crate::scan::{scan_workspace, AuditIssue, ScanReport};
 
-pub fn run(config: &ActioneerConfig) -> ExitCode {
+pub fn run(config: &ActioneerConfig, workflow_paths: &[PathBuf]) -> ExitCode {
     let root = Path::new(".");
     let client = GitHubClient::new(config, cache_dir());
 
-    let report = match scan_workspace(root, config, &client) {
+    let report = match scan_workspace(root, workflow_paths, config, &client) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: {e}");
@@ -97,5 +97,24 @@ fn issue_label(issue: &AuditIssue) -> String {
             format!("secondary reference ({reference_kind})")
         }
         AuditIssue::ResolutionFailed { message } => format!("resolution failed: {message}"),
+        AuditIssue::FloatingMajorPin { pin } => {
+            format!("floating major-line tag ({pin})")
+        }
+        AuditIssue::UnreleasedCommit { sha } => {
+            format!("pinned commit not found in any GitHub release ({sha})")
+        }
+        AuditIssue::UpdateBlockedByConfig {
+            current_version,
+            available_version,
+            update_level,
+        } => format!(
+            "update blocked by {update_level} level (current {current_version}, available {available_version})"
+        ),
+        AuditIssue::CommentMajorLineMismatch {
+            comment,
+            resolved_version,
+        } => format!(
+            "comment major-line mismatch (comment {comment:?}, resolved {resolved_version})"
+        ),
     }
 }

@@ -1,21 +1,40 @@
 //! Update planning from GitHub releases and config.
 
+use std::collections::HashMap;
+
 use semver::Version;
 use time::format_description::well_known::Rfc3339;
 
 use crate::config::{ActioneerConfig, DurationUnit, PinMode, RelativeDuration, UpdateLevel};
 use crate::engine::PinKind;
-use crate::github::{GitHubClient, GitHubError, Release};
+use crate::github::{GitHubClient, GitHubError, Release, ResolvedRef};
 
 use super::audit::blocks_update;
+use super::pin::{
+    classify_tag, latest_on_major, parse_semver_tag, version_baseline, would_change,
+    written_version_tag, TagShape, VersionBaseline,
+};
 use super::types::{AuditIssue, PlannedChange, PlanReason, ResolvedReference};
 
+/// GitHub resolution context shared across plan steps.
+pub struct PlanContext<'a> {
+    pub client: &'a GitHubClient,
+    pub owner: &'a str,
+    pub repo: &'a str,
+    pub resolve_cache: &'a mut HashMap<(String, String, String), ResolvedRef>,
+    /// Maps commit SHA → inferred semver on the current major line (per scan).
+    pub sha_version_cache: &'a mut HashMap<String, Option<Version>>,
+}
+
 /// Propose an update for one reference, if applicable.
+///
+/// GitHub calls: at most one `resolve_ref` for the chosen target tag (cached).
+/// Current pin is already resolved by the scan pipeline.
 pub fn propose(
     resolved: &ResolvedReference,
     releases: &[Release],
     config: &ActioneerConfig,
-    client: &GitHubClient,
+    ctx: &mut PlanContext<'_>,
     issues: &[AuditIssue],
 ) -> Result<Option<PlannedChange>, GitHubError> {
     let reference = &resolved.located.reference;
@@ -28,16 +47,34 @@ pub fn propose(
         return Ok(None);
     }
 
-    let Some(owner) = reference.owner.as_deref() else {
+    let current_sha = &resolved.current.sha;
+    if current_sha.is_empty() {
         return Ok(None);
-    };
-    let Some(repo) = reference.repo.as_deref() else {
-        return Ok(None);
-    };
+    }
 
-    let current_tag = current_version_tag(reference);
-    let Some(current_ver) = current_tag.as_deref().and_then(parse_semver_tag) else {
-        return Ok(None);
+    if issues.iter().any(|i| matches!(i, AuditIssue::UnreleasedCommit { .. })) {
+        return propose_remediation(resolved, releases, config, ctx);
+    }
+
+    let written_tag = written_version_tag(reference);
+    let from_version = written_tag.clone();
+
+    if let VersionBaseline::MajorOnly(major) = version_baseline(reference) {
+        return propose_major_only(
+            resolved,
+            releases,
+            config,
+            ctx,
+            major,
+            current_sha,
+            from_version,
+        );
+    }
+
+    let current_ver = match version_baseline(reference) {
+        VersionBaseline::Exact(v) => v,
+        VersionBaseline::Unknown => return Ok(None),
+        VersionBaseline::MajorOnly(_) => unreachable!("handled above"),
     };
 
     let candidate = select_release(releases, &current_ver, config.update, config.min_release_age)?;
@@ -45,11 +82,91 @@ pub fn propose(
         return Ok(None);
     };
 
-    if release.tag_name == current_tag.as_deref().unwrap_or("") {
+    if release.tag_name == written_tag.as_deref().unwrap_or("") {
         return Ok(None);
     }
 
-    let target_resolved = client.resolve_ref(owner, repo, &release.tag_name)?;
+    build_plan(resolved, &release, from_version, config, ctx)
+}
+
+fn propose_major_only(
+    resolved: &ResolvedReference,
+    releases: &[Release],
+    config: &ActioneerConfig,
+    ctx: &mut PlanContext<'_>,
+    major: u64,
+    current_sha: &str,
+    from_version: Option<String>,
+) -> Result<Option<PlannedChange>, GitHubError> {
+    let Some(latest) = latest_on_major_with_age(releases, major, config.min_release_age) else {
+        return Ok(None);
+    };
+
+    let latest_resolved = match cached_resolve(ctx, &latest.tag_name) {
+        Ok(r) => r,
+        Err(_) => return Ok(None),
+    };
+
+    if current_sha == latest_resolved.sha {
+        return build_plan(resolved, latest, from_version, config, ctx);
+    }
+
+    let current_ver = infer_version_on_major(current_sha, releases, major, ctx)?
+        .unwrap_or_else(|| Version::new(major, 0, 0));
+
+    let filtered = filter_releases_on_major(releases, major);
+    let Some(release) = select_release(&filtered, &current_ver, config.update, config.min_release_age)?
+    else {
+        return Ok(None);
+    };
+
+    build_plan(resolved, &release, from_version, config, ctx)
+}
+
+fn propose_remediation(
+    resolved: &ResolvedReference,
+    releases: &[Release],
+    config: &ActioneerConfig,
+    ctx: &mut PlanContext<'_>,
+) -> Result<Option<PlannedChange>, GitHubError> {
+    let reference = &resolved.located.reference;
+    let written_tag = written_version_tag(reference);
+
+    let target = match written_tag.as_deref().map(classify_tag) {
+        Some(TagShape::FullSemver(_)) => releases
+            .iter()
+            .find(|r| r.tag_name == written_tag.as_deref().unwrap_or("")),
+        Some(TagShape::MajorOnly(major)) => {
+            latest_on_major_with_age(releases, major, config.min_release_age)
+        }
+        _ => latest_official_with_age(releases, config.min_release_age),
+    };
+
+    let Some(release) = target else {
+        return Ok(None);
+    };
+
+    build_plan(
+        resolved,
+        release,
+        written_tag,
+        config,
+        ctx,
+    )
+}
+
+fn build_plan(
+    resolved: &ResolvedReference,
+    release: &Release,
+    from_version: Option<String>,
+    config: &ActioneerConfig,
+    ctx: &mut PlanContext<'_>,
+) -> Result<Option<PlannedChange>, GitHubError> {
+    let reference = &resolved.located.reference;
+    let target_resolved = match cached_resolve(ctx, &release.tag_name) {
+        Ok(r) => r,
+        Err(_) => return Ok(None),
+    };
 
     let (to_ref, to_comment) = match config.pin {
         PinMode::Sha => (
@@ -64,31 +181,121 @@ pub fn propose(
         .clone()
         .unwrap_or_else(|| reference.raw.clone());
 
-    Ok(Some(PlannedChange {
+    let planned = PlannedChange {
         from_ref,
         to_ref,
-        from_version: current_tag,
+        from_version,
         to_sha: target_resolved.sha,
         to_comment,
         reason: PlanReason::SemverBump {
             level: config.update.to_string(),
         },
-    }))
+    };
+
+    if !would_change(reference, &planned, config) {
+        return Ok(None);
+    }
+
+    Ok(Some(planned))
 }
 
-fn current_version_tag(reference: &crate::engine::ActionReference) -> Option<String> {
-    if reference.pin_kind == PinKind::Tag {
-        return reference.git_ref.clone();
+/// When `@v4` lags behind, infer effective semver by walking releases newest-first.
+/// Stops at the first tag whose SHA matches. Populates [`PlanContext::sha_version_cache`]
+/// for every tag resolved along the walk.
+fn infer_version_on_major(
+    sha: &str,
+    releases: &[Release],
+    major: u64,
+    ctx: &mut PlanContext<'_>,
+) -> Result<Option<Version>, GitHubError> {
+    if let Some(cached) = ctx.sha_version_cache.get(sha) {
+        return Ok(cached.clone());
     }
-    if reference.pin_kind == PinKind::FullSha || reference.pin_kind == PinKind::ShortSha {
-        return reference.line_comment.clone();
+
+    let mut sorted: Vec<&Release> = releases
+        .iter()
+        .filter(|r| !r.prerelease)
+        .filter(|r| parse_semver_tag(&r.tag_name).is_some_and(|v| v.major == major))
+        .collect();
+    sorted.sort_by(|a, b| {
+        let va = parse_semver_tag(&a.tag_name).unwrap();
+        let vb = parse_semver_tag(&b.tag_name).unwrap();
+        vb.cmp(&va)
+    });
+
+    for release in sorted {
+        let Ok(resolved) = cached_resolve(ctx, &release.tag_name) else {
+            continue;
+        };
+        let version = parse_semver_tag(&release.tag_name);
+        ctx.sha_version_cache
+            .insert(resolved.sha.clone(), version.clone());
+        if resolved.sha == sha {
+            return Ok(version);
+        }
     }
-    None
+    ctx.sha_version_cache.insert(sha.to_string(), None);
+    Ok(None)
 }
 
-fn parse_semver_tag(tag: &str) -> Option<Version> {
-    let trimmed = tag.strip_prefix('v').unwrap_or(tag);
-    Version::parse(trimmed).ok()
+fn cached_resolve(
+    ctx: &mut PlanContext<'_>,
+    git_ref: &str,
+) -> Result<ResolvedRef, GitHubError> {
+    let key = (
+        ctx.owner.to_string(),
+        ctx.repo.to_string(),
+        git_ref.to_string(),
+    );
+    if let Some(cached) = ctx.resolve_cache.get(&key) {
+        return Ok(cached.clone());
+    }
+    let resolved = ctx.client.resolve_ref(ctx.owner, ctx.repo, git_ref)?;
+    ctx.resolve_cache.insert(key, resolved.clone());
+    Ok(resolved)
+}
+
+fn filter_releases_on_major(releases: &[Release], major: u64) -> Vec<Release> {
+    releases
+        .iter()
+        .filter(|r| {
+            !r.prerelease
+                && parse_semver_tag(&r.tag_name).is_some_and(|v| v.major == major)
+        })
+        .cloned()
+        .collect()
+}
+
+fn latest_on_major_with_age(
+    releases: &[Release],
+    major: u64,
+    min_age: Option<RelativeDuration>,
+) -> Option<&Release> {
+    let now = time::OffsetDateTime::now_utc();
+    latest_on_major(releases, major).filter(|r| release_meets_min_age(r, min_age, now))
+}
+
+fn latest_official_with_age(
+    releases: &[Release],
+    min_age: Option<RelativeDuration>,
+) -> Option<&Release> {
+    let now = time::OffsetDateTime::now_utc();
+    let mut best: Option<(Version, &Release)> = None;
+    for release in releases {
+        if release.prerelease {
+            continue;
+        }
+        let Some(ver) = parse_semver_tag(&release.tag_name) else {
+            continue;
+        };
+        if !release_meets_min_age(release, min_age, now) {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(bv, _)| ver > *bv) {
+            best = Some((ver, release));
+        }
+    }
+    best.map(|(_, r)| r)
 }
 
 fn select_release(
@@ -152,6 +359,17 @@ fn release_meets_min_age(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+
+    use tempfile::TempDir;
+
+    use crate::cache::resolve_cache_dir_with;
+    use crate::config::{ActioneerConfig, PinMode, UpdateLevel};
+    use crate::engine::{ActionReference, CommentMatch, PinKind, ReferenceKind};
+    use crate::github::{CacheEntry, GitHubClient, RefKind, ResolvedRef};
+    use crate::scan::types::{LocatedReference, ResolvedReference};
+
     use super::*;
 
     fn releases() -> Vec<Release> {
@@ -166,30 +384,122 @@ mod tests {
                 published_at: "2021-06-01T00:00:00Z".into(),
                 prerelease: false,
             },
-            Release {
-                tag_name: "v5.0.0".into(),
-                published_at: "2022-06-01T00:00:00Z".into(),
-                prerelease: false,
-            },
         ]
     }
 
-    #[test]
-    fn minor_bump_stays_on_same_major() {
-        let current = Version::new(4, 1, 0);
-        let picked = select_release(&releases(), &current, UpdateLevel::Minor, None).unwrap();
-        assert_eq!(picked.unwrap().tag_name, "v4.2.0");
+    fn sha_b() -> String {
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into()
+    }
+
+    fn seed_tag_cache(dir: &TempDir, tag: &str, sha: &str) {
+        let cache = resolve_cache_dir_with(Some(dir.path().to_str().unwrap())).unwrap();
+        let path = cache
+            .path()
+            .join("github/actions/checkout/refs/tags")
+            .join(format!("{tag}.json"));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let entry = CacheEntry {
+            sha: sha.to_string(),
+            ref_kind: "tag".into(),
+            published_at: Some("2020-01-01T00:00:00Z".into()),
+            fetched_at: 1_700_000_000,
+        };
+        fs::write(&path, serde_json::to_vec_pretty(&entry).unwrap()).unwrap();
+    }
+
+    fn offline_client(dir: &TempDir) -> GitHubClient {
+        let config = ActioneerConfig {
+            offline: true,
+            ..Default::default()
+        };
+        GitHubClient::new(&config, resolve_cache_dir_with(Some(dir.path().to_str().unwrap())))
+    }
+
+    fn tag_ref(git_ref: &str) -> ResolvedReference {
+        ResolvedReference {
+            located: LocatedReference {
+                workflow_path: PathBuf::from(".github/workflows/ci.yml"),
+                reference: ActionReference {
+                    raw: format!("actions/checkout@{git_ref}"),
+                    kind: ReferenceKind::Action,
+                    pin_kind: PinKind::Tag,
+                    owner: Some("actions".into()),
+                    repo: Some("checkout".into()),
+                    subpath: None,
+                    git_ref: Some(git_ref.into()),
+                    step_name: None,
+                    job_id: "build".into(),
+                    job_name: None,
+                    step_index: Some(0),
+                    line: Some(10),
+                    line_comment: None,
+                },
+            },
+            current: ResolvedRef {
+                sha: sha_b(),
+                ref_kind: RefKind::Tag,
+                published_at: Some("2020-01-01T00:00:00Z".into()),
+            },
+            comment_match: CommentMatch::NoComment,
+        }
     }
 
     #[test]
-    fn major_bump_can_jump_major() {
-        let current = Version::new(4, 1, 0);
-        let picked = select_release(&releases(), &current, UpdateLevel::Major, None).unwrap();
-        assert_eq!(picked.unwrap().tag_name, "v5.0.0");
+    fn major_only_plans_to_latest_on_line() {
+        let dir = TempDir::new().unwrap();
+        seed_tag_cache(&dir, "v4.2.0", &sha_b());
+
+        let config = ActioneerConfig {
+            pin: PinMode::Tag,
+            update: UpdateLevel::Minor,
+            offline: true,
+            ..Default::default()
+        };
+        let client = offline_client(&dir);
+        let resolved = tag_ref("v4");
+        let mut cache = HashMap::new();
+        let mut sha_cache = HashMap::new();
+        let mut ctx = PlanContext {
+            client: &client,
+            owner: "actions",
+            repo: "checkout",
+            resolve_cache: &mut cache,
+            sha_version_cache: &mut sha_cache,
+        };
+
+        let planned = propose(&resolved, &releases(), &config, &mut ctx, &[])
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(planned.from_version.as_deref(), Some("v4"));
+        assert_eq!(planned.to_ref, "v4.2.0");
     }
 
     #[test]
-    fn parse_v_prefix_tag() {
-        assert_eq!(parse_semver_tag("v1.2.3"), Some(Version::new(1, 2, 3)));
+    fn major_only_same_sha_still_plans_normalization() {
+        let dir = TempDir::new().unwrap();
+        seed_tag_cache(&dir, "v4.2.0", &sha_b());
+
+        let config = ActioneerConfig {
+            pin: PinMode::Tag,
+            update: UpdateLevel::Minor,
+            offline: true,
+            ..Default::default()
+        };
+        let client = offline_client(&dir);
+        let resolved = tag_ref("v4");
+        let mut cache = HashMap::new();
+        let mut sha_cache = HashMap::new();
+        let mut ctx = PlanContext {
+            client: &client,
+            owner: "actions",
+            repo: "checkout",
+            resolve_cache: &mut cache,
+            sha_version_cache: &mut sha_cache,
+        };
+
+        assert!(propose(&resolved, &releases(), &config, &mut ctx, &[])
+        .unwrap()
+        .is_some());
     }
 }

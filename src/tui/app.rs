@@ -1,15 +1,14 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
-
-use ratatui::widgets::TableState;
 
 use crate::cache::cache_dir;
 use crate::config::ActioneerConfig;
 use crate::github::GitHubClient;
 use crate::scan::{apply, scan_workspace, ApplyReport, ScanError, ScanReport};
 
-use super::selection::{from_report, SelectableUpdate};
+use super::selection::{from_report, WorkflowGroup};
+use super::view::{self, ListView};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanPhase {
@@ -30,8 +29,11 @@ pub struct App {
     pub phase: ScanPhase,
     pub report: Option<ScanReport>,
     pub error: Option<String>,
-    pub selections: Vec<SelectableUpdate>,
-    pub table_state: TableState,
+    pub groups: Vec<WorkflowGroup>,
+    pub list_view: ListView,
+    /// Index into [`ListView::focusable_row_indices`].
+    pub focus_index: usize,
+    pub scroll_offset: usize,
     pub status_banner: Option<String>,
     /// Updated each frame for scroll calculations.
     pub viewport_rows: usize,
@@ -41,14 +43,14 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(config: ActioneerConfig) -> Self {
+    pub fn new(config: ActioneerConfig, workflow_paths: Vec<PathBuf>) -> Self {
         let (tx, rx) = mpsc::channel();
         let scan_config = config.clone();
 
         thread::spawn(move || {
             let root = Path::new(".");
             let client = GitHubClient::new(&scan_config, cache_dir());
-            let outcome = match scan_workspace(root, &scan_config, &client) {
+            let outcome = match scan_workspace(root, &workflow_paths, &scan_config, &client) {
                 Ok(report) => ScanOutcome::Ok(report),
                 Err(e) => ScanOutcome::Err(format_scan_error(e)),
             };
@@ -62,8 +64,10 @@ impl App {
             phase: ScanPhase::Scanning,
             report: None,
             error: None,
-            selections: Vec::new(),
-            table_state: TableState::default(),
+            groups: Vec::new(),
+            list_view: ListView::default(),
+            focus_index: 0,
+            scroll_offset: 0,
             status_banner: None,
             viewport_rows: 20,
             apply_report: None,
@@ -81,9 +85,10 @@ impl App {
         };
         match rx.try_recv() {
             Ok(ScanOutcome::Ok(report)) => {
-                self.selections = from_report(&report, &self.config);
-                if !self.selections.is_empty() {
-                    self.table_state.select(Some(0));
+                self.groups = from_report(&report, &self.config);
+                self.rebuild_list();
+                if !self.focusable_rows().is_empty() {
+                    self.focus_index = 0;
                 }
                 self.report = Some(report);
                 self.phase = ScanPhase::Ready;
@@ -103,45 +108,82 @@ impl App {
         }
     }
 
+    pub fn rebuild_list(&mut self) {
+        self.list_view = ListView::rebuild(&self.groups);
+        self.clamp_focus();
+    }
+
+    pub fn focusable_rows(&self) -> Vec<usize> {
+        self.list_view.focusable_row_indices()
+    }
+
+    pub fn focused_display_row(&self) -> Option<usize> {
+        view::focus_to_row(&self.focusable_rows(), self.focus_index)
+    }
+
+    pub fn total_planned_items(&self) -> usize {
+        self.groups.iter().map(|g| g.items.len()).sum()
+    }
+
     pub fn selected_count(&self) -> usize {
-        self.selections.iter().filter(|s| s.selected).count()
+        self.groups
+            .iter()
+            .flat_map(|g| g.items.iter())
+            .filter(|item| item.selected)
+            .count()
     }
 
     pub fn move_selection(&mut self, delta: isize) {
-        if self.selections.is_empty() {
+        let focusable = self.focusable_rows();
+        if focusable.is_empty() {
             return;
         }
-        let current = self.table_state.selected().unwrap_or(0);
-        let last = self.selections.len() - 1;
-        let new = (current as isize + delta).clamp(0, last as isize) as usize;
-        self.table_state.select(Some(new));
-
-        let offset = self.table_state.offset();
-        let visible = self.viewport_rows.max(1);
-        if new < offset {
-            *self.table_state.offset_mut() = new;
-        } else if new >= offset + visible {
-            *self.table_state.offset_mut() = new.saturating_sub(visible - 1);
-        }
+        self.focus_index = view::move_focus(&focusable, self.focus_index, delta);
+        self.scroll_offset = view::scroll_for_focus(
+            &focusable,
+            self.focus_index,
+            self.scroll_offset,
+            self.viewport_rows,
+        );
     }
 
     pub fn toggle_current(&mut self) {
-        if let Some(i) = self.table_state.selected()
-            && let Some(item) = self.selections.get_mut(i)
-        {
-            item.selected = !item.selected;
+        let Some(row) = self
+            .focused_display_row()
+            .and_then(|idx| self.list_view.row(idx))
+        else {
+            return;
+        };
+        match row {
+            view::DisplayRow::GroupHeader(group_idx) => {
+                if let Some(group) = self.groups.get_mut(group_idx) {
+                    group.collapsed = !group.collapsed;
+                }
+                self.rebuild_list();
+            }
+            view::DisplayRow::Action { group, item } => {
+                if let Some(entry) = self.groups.get_mut(group).and_then(|g| g.items.get_mut(item))
+                {
+                    entry.selected = !entry.selected;
+                }
+            }
+            view::DisplayRow::Spacer => {}
         }
     }
 
     pub fn select_all(&mut self) {
-        for item in &mut self.selections {
-            item.selected = true;
+        for group in &mut self.groups {
+            for item in &mut group.items {
+                item.selected = true;
+            }
         }
     }
 
     pub fn select_none(&mut self) {
-        for item in &mut self.selections {
-            item.selected = false;
+        for group in &mut self.groups {
+            for item in &mut group.items {
+                item.selected = false;
+            }
         }
     }
 
@@ -156,10 +198,15 @@ impl App {
         };
 
         let targets: Vec<_> = self
-            .selections
+            .groups
             .iter()
-            .filter(|item| item.selected)
-            .map(|item| item.apply_target())
+            .flat_map(|group| {
+                group
+                    .items
+                    .iter()
+                    .filter(|item| item.selected)
+                    .map(|item| item.apply_target(&group.workflow_path))
+            })
             .collect();
 
         let root = Path::new(".");
@@ -173,6 +220,24 @@ impl App {
                 self.quit();
             }
         }
+    }
+
+    fn clamp_focus(&mut self) {
+        let focusable = self.focusable_rows();
+        if focusable.is_empty() {
+            self.focus_index = 0;
+            self.scroll_offset = 0;
+            return;
+        }
+        if self.focus_index >= focusable.len() {
+            self.focus_index = focusable.len() - 1;
+        }
+        self.scroll_offset = view::scroll_for_focus(
+            &focusable,
+            self.focus_index,
+            self.scroll_offset,
+            self.viewport_rows,
+        );
     }
 
     pub fn on_tick(&mut self) {
@@ -201,10 +266,11 @@ fn format_scan_error(error: ScanError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::selection::SelectableItem;
 
     #[test]
     fn spinner_cycles() {
-        let mut app = App::new(ActioneerConfig::default());
+        let mut app = App::new(ActioneerConfig::default(), Vec::new());
         let first = app.spinner();
         for _ in 0..10 {
             app.on_tick();
@@ -214,26 +280,30 @@ mod tests {
 
     #[test]
     fn toggle_and_select_all_none() {
-        let mut app = App::new(ActioneerConfig::default());
-        app.selections = vec![
-            SelectableUpdate {
-                workflow_path: "ci.yml".into(),
-                line: 10,
-                action: "actions/checkout@v4".into(),
-                from_label: "v4".into(),
-                to_label: "v4.2.0".into(),
-                selected: true,
-            },
-            SelectableUpdate {
-                workflow_path: "ci.yml".into(),
-                line: 11,
-                action: "actions/setup-node@v4".into(),
-                from_label: "v4".into(),
-                to_label: "v4.1.0".into(),
-                selected: true,
-            },
-        ];
-        app.table_state.select(Some(0));
+        let mut app = App::new(ActioneerConfig::default(), Vec::new());
+        app.groups = vec![WorkflowGroup {
+            workflow_path: "ci.yml".into(),
+            collapsed: false,
+            items: vec![
+                SelectableItem {
+                    line: 10,
+                    action: "actions/checkout@v4".into(),
+                    from_label: "v4".into(),
+                    to_label: "v4.2.0".into(),
+                    selected: true,
+                },
+                SelectableItem {
+                    line: 11,
+                    action: "actions/setup-node@v4".into(),
+                    from_label: "v4".into(),
+                    to_label: "v4.1.0".into(),
+                    selected: true,
+                },
+            ],
+        }];
+        app.rebuild_list();
+        // Focus first action row (index 1: header, index 2: first action)
+        app.focus_index = 1;
         app.toggle_current();
         assert_eq!(app.selected_count(), 1);
 
@@ -247,5 +317,35 @@ mod tests {
             app.status_banner.as_deref(),
             Some("Select at least one update (Space to toggle).")
         );
+    }
+
+    #[test]
+    fn toggle_header_collapses_group() {
+        let mut app = App::new(ActioneerConfig::default(), Vec::new());
+        app.groups = vec![WorkflowGroup {
+            workflow_path: "ci.yml".into(),
+            collapsed: false,
+            items: vec![SelectableItem {
+                line: 10,
+                action: "actions/checkout@v4".into(),
+                from_label: "v4".into(),
+                to_label: "v4.2.0".into(),
+                selected: false,
+            }],
+        }];
+        app.rebuild_list();
+        assert!(app.list_view.rows.iter().any(|r| matches!(
+            r,
+            view::DisplayRow::Action { .. }
+        )));
+
+        app.focus_index = 0;
+        app.toggle_current();
+        assert!(app.groups[0].collapsed);
+        assert!(!app
+            .list_view
+            .rows
+            .iter()
+            .any(|r| matches!(r, view::DisplayRow::Action { .. })));
     }
 }

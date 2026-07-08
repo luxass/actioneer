@@ -403,6 +403,36 @@ fn list_releases_offline_cache_hit() {
     assert_eq!(releases[0].tag_name, "v4.2.0");
 }
 
+// --- gh auth token (ignored unless gh is logged in) ---
+
+#[test]
+#[ignore = "requires gh cli logged in; run with --include-ignored"]
+fn gh_auth_token_used_when_env_unset() {
+    let gh_ok = std::process::Command::new("gh")
+        .args(["auth", "status"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !gh_ok {
+        eprintln!("skipping: gh not installed or not logged in");
+        return;
+    }
+
+    // If GITHUB_TOKEN is set in the test runner env, this test cannot verify gh fallback.
+    if std::env::var("GITHUB_TOKEN").is_ok_and(|t| !t.trim().is_empty()) {
+        eprintln!("skipping: GITHUB_TOKEN is set in environment");
+        return;
+    }
+
+    let token = actioneer::github::resolve_github_token();
+    assert!(
+        token.is_some(),
+        "expected gh auth token when GITHUB_TOKEN unset and gh is logged in"
+    );
+}
+
 // --- Live network test (ignored in CI) ---
 
 #[test]

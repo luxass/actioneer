@@ -554,8 +554,8 @@ fn comment_match_tag_mismatch() {
 }
 
 #[test]
-fn comment_match_full_sha_tag_comment_is_mismatch() {
-    // SHA pin with a tag comment - the comment is "v4.2.0" but the ref is the SHA.
+fn comment_match_full_sha_tag_comment_defers_to_audit() {
+    // SHA pin with a semver comment defers semantic validation to the audit layer.
     let sha = "a81bbbf8298c0fa03ea29cdc473d45769f953675";
     let r = make_ref(
         &format!("actions/checkout@{sha}"),
@@ -563,13 +563,7 @@ fn comment_match_full_sha_tag_comment_is_mismatch() {
         PinKind::FullSha,
         Some("v4.2.0"),
     );
-    assert_eq!(
-        comment_matches_ref(&r),
-        CommentMatch::Mismatch {
-            comment: "v4.2.0".into(),
-            expected: sha.into(),
-        }
-    );
+    assert_eq!(comment_matches_ref(&r), CommentMatch::Match);
 }
 
 #[test]

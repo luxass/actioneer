@@ -278,10 +278,12 @@ indefinitely after a tag is force-pushed or deleted.
 
 **Decision (2026-06-27):** Defer to a follow-up. TTL fields are reserved.
 
-### OQ-3: Pagination for tag/release lookups
+### OQ-3: Pagination limits
 
-`GET /repos/{owner}/{repo}/git/ref/tags/{tag}` is a single-item lookup, not a
-list endpoint, so pagination is not relevant for the current implementation.
+Tag and branch ref lookups are single-item requests and do not need pagination.
+Release listing follows up to ten pages of 100 entries and stops early when a
+short page is returned. Increasing that safety cap or adding link-header based
+pagination can be considered if repositories exceed the current limit.
 
 ### OQ-4: `skip_branches` config integration
 

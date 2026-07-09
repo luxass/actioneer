@@ -8,11 +8,11 @@ Interactive terminal UI for the `update` command, built on [ratatui](https://rat
 src/tui/
 ├── mod.rs        public entry-point; terminal lifecycle + event loop
 ├── app.rs        App state, scan worker, selection navigation
-├── selection.rs  WorkflowGroup + SelectableItem from ScanReport
-├── view.rs       DisplayRow list, collapse/scroll helpers
-├── event.rs      EventHandler (background thread, channel-based)
-├── theme.rs      semantic colour palette + Style constructors
-└── ui.rs         update screen rendering
+├── selection.rs  private WorkflowGroup + SelectableItem from ScanReport
+├── view.rs       private DisplayRow list, collapse/scroll helpers
+├── event.rs      private EventHandler (background thread, channel-based)
+├── theme.rs      private semantic colour palette + Style constructors
+└── ui.rs         private update screen rendering
 ```
 
 ### Entry points

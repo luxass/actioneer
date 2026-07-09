@@ -100,7 +100,7 @@ See `docs/scan.md` § Deferred and `docs/engine.md` § Open questions.
 cargo build
 cargo test --locked   # preferred
 just ci               # fmt-check + clippy + rustdoc/doctests + test
-just test / just lint / just check
+just doc-check / just test / just lint / just check
 ```
 
 CI (`.github/workflows/ci.yaml`): build + test on ubuntu/macos/windows. Rust edition 2024, MSRV 1.95.

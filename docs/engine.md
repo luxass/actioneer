@@ -180,7 +180,7 @@ action. The GHA schema enforces this.
 | `pin_kind == FullSha` and `line_comment` contains `git_ref` | `Match` |
 | Anything else | `Mismatch { comment, expected }` |
 
-The `line` + `line_comment` fields together provide everything the future patching layer
+The `line` + `line_comment` fields together provide everything the apply layer
 needs to locate and rewrite the comment without a full YAML re-parse.
 
 ### Line tracking
@@ -288,14 +288,15 @@ this comment so the audit layer can verify or update it?
 
 - `ActionReference::line_comment: Option<String>` stores the comment text (without `#`).
 - `comment_matches_ref(&ActionReference) -> CommentMatch` compares it against `git_ref`.
-- The raw comment text plus `line` is sufficient for the future update layer to patch
-  the comment in-place; actual file rewriting is deferred.
+- The raw comment text plus `line` is sufficient for the apply layer to patch
+  the comment in-place.
 
 ### OQ-6: Column / byte offset
 
 `line` is a 1-based line number. A `column` field (1-based) or `byte_offset` (from the
-start of the file) would be needed for zero-diff patching. The current forward scan can
-provide column cheaply. Defer until the patching layer is designed.
+start of the file) would be needed for zero-diff patching or editor integrations. The
+current line-based apply path does not need either field; defer until a zero-diff
+patching interface is designed.
 
 ### OQ-8: Docker and local-action scope in audit/update
 
@@ -327,5 +328,4 @@ These integration points are intentionally left unimplemented:
   higher-level layer, not the engine.
 - **GitHub API / version resolution** - no network calls from the engine, ever.
 - **Caching** - the engine is stateless; caching wraps it from the outside.
-- **Patching** - textual substitution will use `line`/`column` from `ActionReference`.
 - **`action.yml` composite actions** - see OQ-1.

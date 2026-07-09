@@ -107,6 +107,91 @@ fn scan_empty_repo_has_no_workflows() {
 }
 
 #[test]
+fn scan_local_reusable_workflow_skips_remote_audit_and_resolution() {
+    let dir = TempDir::new().unwrap();
+    let workflows = dir.path().join(".github/workflows");
+    fs::create_dir_all(&workflows).unwrap();
+    fs::write(
+        workflows.join("ci.yml"),
+        "jobs:\n  build:\n    uses: ./.github/workflows/build.yml\n",
+    )
+    .unwrap();
+
+    let config = ActioneerConfig {
+        offline: true,
+        ..Default::default()
+    };
+    let cache = resolve_cache_dir_with(Some(dir.path().to_str().unwrap()));
+    let client = GitHubClient::new(&config, cache);
+
+    let report = scan_workspace(dir.path(), &[], &config, &client).unwrap();
+    let reference = &report.workflows[0].references[0];
+
+    assert_eq!(
+        reference.resolved.located.reference.raw,
+        "./.github/workflows/build.yml"
+    );
+    assert!(!reference.issues.iter().any(|issue| matches!(
+        issue,
+        actioneer::scan::AuditIssue::NotShaPinned
+            | actioneer::scan::AuditIssue::ResolutionFailed { .. }
+    )));
+    assert!(reference.issues.is_empty());
+    assert!(reference.planned.is_none());
+    assert_eq!(report.stats.blocked, 0);
+    assert_eq!(report.stats.primary, 0);
+    assert_eq!(report.stats.secondary, 1);
+}
+
+#[test]
+fn scan_remote_reusable_workflow_still_receives_primary_pin_audit() {
+    let dir = TempDir::new().unwrap();
+    let workflows = dir.path().join(".github/workflows");
+    fs::create_dir_all(&workflows).unwrap();
+    fs::write(
+        workflows.join("ci.yml"),
+        "jobs:\n  build:\n    uses: octo/example/.github/workflows/build.yml@v1\n",
+    )
+    .unwrap();
+
+    let entry = CacheEntry {
+        sha: "a81bbbf8298c0fa03ea29cdc473d45769f953675".into(),
+        ref_kind: "tag".into(),
+        published_at: Some("2020-01-01T00:00:00Z".into()),
+        fetched_at: 1_700_000_000,
+    };
+    seed_ref_cache(&dir, "octo", "example", "tags", "v1", &entry);
+    seed_releases_cache(
+        &dir,
+        "octo",
+        "example",
+        &ReleasesIndex {
+            releases: Vec::new(),
+            fetched_at: 1_700_000_000,
+        },
+    );
+
+    let config = ActioneerConfig {
+        offline: true,
+        ..Default::default()
+    };
+    let cache = resolve_cache_dir_with(Some(dir.path().to_str().unwrap()));
+    let client = GitHubClient::new(&config, cache);
+
+    let report = scan_workspace(dir.path(), &[], &config, &client).unwrap();
+    let reference = &report.workflows[0].references[0];
+
+    assert!(
+        reference
+            .issues
+            .iter()
+            .any(|issue| matches!(issue, actioneer::scan::AuditIssue::NotShaPinned))
+    );
+    assert!(reference.planned.is_none());
+    assert_eq!(report.stats.primary, 1);
+}
+
+#[test]
 fn scan_major_only_tag_plans_normalization_and_flags_floating() {
     let dir = TempDir::new().unwrap();
     let workflows = dir.path().join(".github/workflows");

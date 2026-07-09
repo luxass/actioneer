@@ -40,7 +40,17 @@ commit but represent different pinning intent. Audit and plan share helpers in `
 - `classify_tag` / `version_baseline` — major-line (`v4`) vs full semver (`v4.2.0`) from the written pin
 - `build_target_value` / `would_change` — skip planning when the on-disk line would not change
 
-### GitHub API budget (per unique owner/repo)
+### Reusable workflow policy
+
+Local reusable workflow calls such as `./.github/workflows/build.yml` are retained in the scan
+report as secondary inventory rows with no audit finding. The scan does not fetch releases,
+resolve a GitHub ref, require a SHA pin, or propose an update for them.
+
+Remote reusable workflow calls such as `owner/repo/.github/workflows/build.yml@v1` remain primary
+audit targets. They receive GitHub resolution and pin-quality checks, but automatic reusable
+workflow updates remain deferred.
+
+### GitHub API budget (per unique remote owner/repo)
 
 | Call | When |
 |------|------|
@@ -122,7 +132,7 @@ One row per `uses:` reference:
 | `UpdateBlockedByConfig` | No |
 | `ReleaseTooYoung` | **Yes** |
 | `SkippedBranch` | **Yes** |
-| `SecondaryReference` | No (docker/local inventory) |
+| `SecondaryReference` | No (docker/local-action inventory; local reusable workflows emit no finding) |
 | `ResolutionFailed` | **Yes** |
 
 ### Update planner

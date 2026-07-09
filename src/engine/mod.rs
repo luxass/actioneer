@@ -212,6 +212,16 @@ pub struct ActionReference {
     pub line_comment: Option<String>,
 }
 
+impl ActionReference {
+    /// Returns `true` for repository-local reusable workflow calls.
+    ///
+    /// These references have reusable-workflow syntax but no GitHub repository
+    /// coordinates, so scan and audit layers must not apply remote checks.
+    pub fn is_local_reusable_workflow(&self) -> bool {
+        self.kind == ReferenceKind::ReusableWorkflow && self.owner.is_none()
+    }
+}
+
 /// A parsed GitHub Actions workflow document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkflowDocument {

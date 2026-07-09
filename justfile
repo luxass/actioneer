@@ -26,10 +26,16 @@ fmt-check:
 lint:
   cargo clippy -- -D warnings
 
+# Build API documentation and run doctests with warnings denied
+doc-check:
+  RUSTDOCFLAGS="-D warnings" cargo doc --locked --lib --no-deps
+  cargo test --doc --locked
+
 # Run all CI checks
 ci:
   just fmt-check
   just lint
+  just doc-check
   just test
 
 # ==================== RELEASE ====================

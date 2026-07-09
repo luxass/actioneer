@@ -51,6 +51,9 @@ jobs:
       - name: lint
         run: just lint
 
+      - name: docs
+        run: just doc-check
+
       - name: build
         run: just build
 

@@ -31,59 +31,59 @@ const BORDER: Color = Color::Rgb(65, 70, 82);
 /// Full-width selected row band.
 const SELECTION_BG: Color = Color::Rgb(48, 52, 68);
 
-pub fn bold_brand() -> Style {
+pub(super) fn bold_brand() -> Style {
     Style::default().fg(BRAND).add_modifier(Modifier::BOLD)
 }
 
-pub fn bold_accent() -> Style {
+pub(super) fn bold_accent() -> Style {
     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
 }
 
-pub fn accent() -> Style {
+pub(super) fn accent() -> Style {
     Style::default().fg(ACCENT)
 }
 
-pub fn success() -> Style {
+pub(super) fn success() -> Style {
     Style::default().fg(SUCCESS)
 }
 
-pub fn warn() -> Style {
+pub(super) fn warn() -> Style {
     Style::default().fg(WARN)
 }
 
-pub fn error() -> Style {
+pub(super) fn error() -> Style {
     Style::default().fg(ERROR)
 }
 
-pub fn info() -> Style {
+pub(super) fn info() -> Style {
     Style::default().fg(FG)
 }
 
-pub fn value() -> Style {
+pub(super) fn value() -> Style {
     Style::default().fg(FG)
 }
 
-pub fn muted() -> Style {
+pub(super) fn muted() -> Style {
     Style::default().fg(FG_DIM)
 }
 
-pub fn border() -> Style {
+pub(super) fn border() -> Style {
     Style::default().fg(BORDER)
 }
 
-pub fn panel_title() -> Style {
+pub(super) fn panel_title() -> Style {
     Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD)
 }
 
-pub fn key() -> Style {
+pub(super) fn key() -> Style {
     Style::default().fg(KEY).add_modifier(Modifier::BOLD)
 }
 
-pub fn key_label() -> Style {
+pub(super) fn key_label() -> Style {
     Style::default().fg(FG_DIM)
 }
 
-pub fn checkbox(checked: bool) -> Style {
+pub(super) fn checkbox(checked: bool) -> Style {
     if checked {
         Style::default().fg(SUCCESS)
     } else {
@@ -91,31 +91,31 @@ pub fn checkbox(checked: bool) -> Style {
     }
 }
 
-pub fn workflow() -> Style {
+pub(super) fn workflow() -> Style {
     Style::default().fg(WORKFLOW)
 }
 
-pub fn action_ref() -> Style {
+pub(super) fn action_ref() -> Style {
     Style::default().fg(ACTION)
 }
 
-pub fn from_ref() -> Style {
+pub(super) fn from_ref() -> Style {
     Style::default().fg(FROM)
 }
 
-pub fn to_ref() -> Style {
+pub(super) fn to_ref() -> Style {
     Style::default().fg(TO)
 }
 
-pub fn column_from() -> Style {
+pub(super) fn column_from() -> Style {
     Style::default().fg(FROM).add_modifier(Modifier::BOLD)
 }
 
-pub fn column_to() -> Style {
+pub(super) fn column_to() -> Style {
     Style::default().fg(TO).add_modifier(Modifier::BOLD)
 }
 
 /// Full-width row highlight (painted behind the table, not per-cell).
-pub fn selection_row() -> Style {
+pub(super) fn selection_row() -> Style {
     Style::default().bg(SELECTION_BG)
 }

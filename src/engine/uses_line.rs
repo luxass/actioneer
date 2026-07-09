@@ -1,9 +1,13 @@
 //! Parse and rewrite `uses:` lines in workflow YAML source.
 
+/// Quoting style used by a parsed `uses:` value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuoteStyle {
+    /// The `uses:` value is unquoted.
     None,
+    /// The `uses:` value is wrapped in double quotes.
     Double,
+    /// The `uses:` value is wrapped in single quotes.
     Single,
 }
 
@@ -14,7 +18,8 @@ pub struct UsesLine {
     pub head: String,
     /// Unquoted `owner/repo@ref`.
     pub value: String,
-    quote: QuoteStyle,
+    /// Quoting style preserved when rebuilding the source line.
+    pub quote: QuoteStyle,
     /// Trailing `# comment` text, without the `#`.
     pub comment: Option<String>,
 }

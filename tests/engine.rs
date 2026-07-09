@@ -1,3 +1,5 @@
+//! Integration tests for workflow parsing and reference classification.
+
 use actioneer::engine::{
     ActionReference, AuditTier, CommentMatch, PinKind, ReferenceKind, comment_matches_ref,
     parse_workflow,

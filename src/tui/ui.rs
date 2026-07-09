@@ -20,7 +20,7 @@ const TABLE_COLUMNS: [Constraint; 4] = [
     Constraint::Length(28),
 ];
 
-pub fn render(frame: &mut Frame, app: &mut App) {
+pub(super) fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {

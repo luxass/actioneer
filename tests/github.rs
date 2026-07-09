@@ -1,3 +1,5 @@
+//! Integration tests for GitHub resolution, caching, and fixtures.
+
 use actioneer::{
     cache::resolve_cache_dir_with,
     config::ActioneerConfig,

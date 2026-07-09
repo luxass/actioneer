@@ -4,7 +4,7 @@ use super::selection::WorkflowGroup;
 
 /// One rendered line in the planned-changes list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DisplayRow {
+pub(super) enum DisplayRow {
     Spacer,
     GroupHeader(usize),
     Action { group: usize, item: usize },
@@ -12,12 +12,12 @@ pub enum DisplayRow {
 
 /// Scrollable list of display rows derived from workflow groups.
 #[derive(Debug, Clone, Default)]
-pub struct ListView {
-    pub rows: Vec<DisplayRow>,
+pub(super) struct ListView {
+    pub(super) rows: Vec<DisplayRow>,
 }
 
 impl ListView {
-    pub fn rebuild(groups: &[WorkflowGroup]) -> Self {
+    pub(super) fn rebuild(groups: &[WorkflowGroup]) -> Self {
         let mut rows = Vec::new();
         for (group_idx, group) in groups.iter().enumerate() {
             if group_idx > 0 {
@@ -38,7 +38,7 @@ impl ListView {
         Self { rows }
     }
 
-    pub fn focusable_row_indices(&self) -> Vec<usize> {
+    pub(super) fn focusable_row_indices(&self) -> Vec<usize> {
         self.rows
             .iter()
             .enumerate()
@@ -47,24 +47,24 @@ impl ListView {
             .collect()
     }
 
-    pub fn row(&self, index: usize) -> Option<DisplayRow> {
+    pub(super) fn row(&self, index: usize) -> Option<DisplayRow> {
         self.rows.get(index).copied()
     }
 }
 
 impl DisplayRow {
-    pub fn is_focusable(self) -> bool {
+    pub(super) fn is_focusable(self) -> bool {
         !matches!(self, Self::Spacer)
     }
 }
 
 /// Map a focus index (among focusable rows) to a display row index.
-pub fn focus_to_row(focusable: &[usize], focus_index: usize) -> Option<usize> {
+pub(super) fn focus_to_row(focusable: &[usize], focus_index: usize) -> Option<usize> {
     focusable.get(focus_index).copied()
 }
 
 /// Move within focusable rows, wrapping at bounds.
-pub fn move_focus(focusable: &[usize], current: usize, delta: isize) -> usize {
+pub(super) fn move_focus(focusable: &[usize], current: usize, delta: isize) -> usize {
     if focusable.is_empty() {
         return 0;
     }
@@ -73,7 +73,7 @@ pub fn move_focus(focusable: &[usize], current: usize, delta: isize) -> usize {
 }
 
 /// Keep the focused display row visible in a viewport of `visible_rows` lines.
-pub fn scroll_for_focus(
+pub(super) fn scroll_for_focus(
     focusable: &[usize],
     focus_index: usize,
     current_scroll: usize,
@@ -94,7 +94,7 @@ pub fn scroll_for_focus(
     current_scroll
 }
 
-pub fn group_header_label(group: &WorkflowGroup) -> String {
+pub(super) fn group_header_label(group: &WorkflowGroup) -> String {
     let chevron = if group.collapsed { "▸" } else { "▾" };
     let name = group.workflow_name();
     let count = group.items.len();

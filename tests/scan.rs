@@ -1,3 +1,5 @@
+//! Integration tests for the shared workspace scan pipeline.
+
 use std::fs;
 
 use actioneer::{

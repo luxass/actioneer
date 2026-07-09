@@ -1,3 +1,5 @@
+//! Integration tests for positional workflow paths and CLI routing.
+
 use std::path::PathBuf;
 
 use actioneer::cli::Cli;

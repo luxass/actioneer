@@ -1,3 +1,5 @@
+//! Integration tests for workflow discovery and explicit targets.
+
 use std::fs;
 use std::path::PathBuf;
 

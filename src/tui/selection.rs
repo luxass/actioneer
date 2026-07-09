@@ -5,24 +5,24 @@ use crate::scan::{ApplyTarget, ScanReport, plan_from_label, plan_to_label};
 
 /// One planned update within a workflow group.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SelectableItem {
-    pub line: u32,
-    pub action: String,
-    pub from_label: String,
-    pub to_label: String,
-    pub selected: bool,
+pub(super) struct SelectableItem {
+    pub(super) line: u32,
+    pub(super) action: String,
+    pub(super) from_label: String,
+    pub(super) to_label: String,
+    pub(super) selected: bool,
 }
 
 /// Planned updates for one workflow file.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkflowGroup {
-    pub workflow_path: PathBuf,
-    pub collapsed: bool,
-    pub items: Vec<SelectableItem>,
+pub(super) struct WorkflowGroup {
+    pub(super) workflow_path: PathBuf,
+    pub(super) collapsed: bool,
+    pub(super) items: Vec<SelectableItem>,
 }
 
 impl WorkflowGroup {
-    pub fn workflow_name(&self) -> &str {
+    pub(super) fn workflow_name(&self) -> &str {
         self.workflow_path
             .file_name()
             .and_then(|s| s.to_str())
@@ -31,7 +31,7 @@ impl WorkflowGroup {
 }
 
 impl SelectableItem {
-    pub fn apply_target(&self, workflow_path: &Path) -> ApplyTarget {
+    pub(super) fn apply_target(&self, workflow_path: &Path) -> ApplyTarget {
         ApplyTarget {
             workflow_path: workflow_path.to_path_buf(),
             line: self.line,
@@ -40,7 +40,7 @@ impl SelectableItem {
 }
 
 /// Build collapsible workflow groups from a scan report (items start unselected).
-pub fn from_report(report: &ScanReport, config: &ActioneerConfig) -> Vec<WorkflowGroup> {
+pub(super) fn from_report(report: &ScanReport, config: &ActioneerConfig) -> Vec<WorkflowGroup> {
     let mut groups: Vec<WorkflowGroup> = Vec::new();
 
     for (path, reference) in report.planned_changes() {

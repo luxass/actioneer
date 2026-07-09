@@ -1,3 +1,5 @@
+//! Integration tests for cache-directory resolution.
+
 use actioneer::cache::resolve_cache_dir_with;
 
 #[test]

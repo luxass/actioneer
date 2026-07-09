@@ -4,8 +4,6 @@
 //! The command-line application uses the same scan report for plain text, JSON,
 //! apply, and [`tui`] output.
 
-#![deny(missing_docs)]
-
 mod ansi;
 /// Cache-directory resolution.
 pub mod cache;

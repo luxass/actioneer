@@ -11,7 +11,7 @@ use super::selection::{WorkflowGroup, from_report};
 use super::view::{self, ListView};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScanPhase {
+pub(super) enum ScanPhase {
     Scanning,
     Ready,
     Failed,
@@ -22,28 +22,28 @@ enum ScanOutcome {
     Err(String),
 }
 
-pub struct App {
-    pub config: ActioneerConfig,
-    pub should_quit: bool,
-    pub tick: u64,
-    pub phase: ScanPhase,
-    pub report: Option<ScanReport>,
-    pub error: Option<String>,
-    pub groups: Vec<WorkflowGroup>,
-    pub list_view: ListView,
+pub(super) struct App {
+    pub(super) config: ActioneerConfig,
+    pub(super) should_quit: bool,
+    pub(super) tick: u64,
+    pub(super) phase: ScanPhase,
+    pub(super) report: Option<ScanReport>,
+    pub(super) error: Option<String>,
+    pub(super) groups: Vec<WorkflowGroup>,
+    pub(super) list_view: ListView,
     /// Index into [`ListView::focusable_row_indices`].
-    pub focus_index: usize,
-    pub scroll_offset: usize,
-    pub status_banner: Option<String>,
+    pub(super) focus_index: usize,
+    pub(super) scroll_offset: usize,
+    pub(super) status_banner: Option<String>,
     /// Updated each frame for scroll calculations.
-    pub viewport_rows: usize,
-    pub apply_report: Option<ApplyReport>,
-    pub apply_error: Option<String>,
+    pub(super) viewport_rows: usize,
+    pub(super) apply_report: Option<ApplyReport>,
+    pub(super) apply_error: Option<String>,
     scan_rx: Option<mpsc::Receiver<ScanOutcome>>,
 }
 
 impl App {
-    pub fn new(config: ActioneerConfig, workflow_paths: Vec<PathBuf>) -> Self {
+    pub(super) fn new(config: ActioneerConfig, workflow_paths: Vec<PathBuf>) -> Self {
         let (tx, rx) = mpsc::channel();
         let scan_config = config.clone();
 
@@ -76,7 +76,7 @@ impl App {
         }
     }
 
-    pub fn poll_scan(&mut self) {
+    pub(super) fn poll_scan(&mut self) {
         if self.phase != ScanPhase::Scanning {
             return;
         }
@@ -108,24 +108,24 @@ impl App {
         }
     }
 
-    pub fn rebuild_list(&mut self) {
+    pub(super) fn rebuild_list(&mut self) {
         self.list_view = ListView::rebuild(&self.groups);
         self.clamp_focus();
     }
 
-    pub fn focusable_rows(&self) -> Vec<usize> {
+    pub(super) fn focusable_rows(&self) -> Vec<usize> {
         self.list_view.focusable_row_indices()
     }
 
-    pub fn focused_display_row(&self) -> Option<usize> {
+    pub(super) fn focused_display_row(&self) -> Option<usize> {
         view::focus_to_row(&self.focusable_rows(), self.focus_index)
     }
 
-    pub fn total_planned_items(&self) -> usize {
+    pub(super) fn total_planned_items(&self) -> usize {
         self.groups.iter().map(|g| g.items.len()).sum()
     }
 
-    pub fn selected_count(&self) -> usize {
+    pub(super) fn selected_count(&self) -> usize {
         self.groups
             .iter()
             .flat_map(|g| g.items.iter())
@@ -133,7 +133,7 @@ impl App {
             .count()
     }
 
-    pub fn move_selection(&mut self, delta: isize) {
+    pub(super) fn move_selection(&mut self, delta: isize) {
         let focusable = self.focusable_rows();
         if focusable.is_empty() {
             return;
@@ -147,7 +147,7 @@ impl App {
         );
     }
 
-    pub fn toggle_current(&mut self) {
+    pub(super) fn toggle_current(&mut self) {
         let Some(row) = self
             .focused_display_row()
             .and_then(|idx| self.list_view.row(idx))
@@ -174,7 +174,7 @@ impl App {
         }
     }
 
-    pub fn select_all(&mut self) {
+    pub(super) fn select_all(&mut self) {
         for group in &mut self.groups {
             for item in &mut group.items {
                 item.selected = true;
@@ -182,7 +182,7 @@ impl App {
         }
     }
 
-    pub fn select_none(&mut self) {
+    pub(super) fn select_none(&mut self) {
         for group in &mut self.groups {
             for item in &mut group.items {
                 item.selected = false;
@@ -190,7 +190,7 @@ impl App {
         }
     }
 
-    pub fn apply_selected(&mut self) {
+    pub(super) fn apply_selected(&mut self) {
         if self.selected_count() == 0 {
             self.status_banner = Some("Select at least one update (Space to toggle).".into());
             return;
@@ -243,16 +243,16 @@ impl App {
         );
     }
 
-    pub fn on_tick(&mut self) {
+    pub(super) fn on_tick(&mut self) {
         self.tick = self.tick.wrapping_add(1);
     }
 
-    pub fn spinner(&self) -> char {
+    pub(super) fn spinner(&self) -> char {
         const FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
         FRAMES[(self.tick as usize) % FRAMES.len()]
     }
 
-    pub fn quit(&mut self) {
+    pub(super) fn quit(&mut self) {
         self.should_quit = true;
     }
 }

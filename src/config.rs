@@ -85,7 +85,7 @@ impl FromStr for UpdateLevel {
 /// Parsed from strings like `"7d"`, `"4h"`, `"30m"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RelativeDuration {
-    /// Number of duration units.
+    /// Number of duration units. Zero is accepted and represents no delay.
     pub amount: u64,
     /// Unit applied to [`Self::amount`].
     pub unit: DurationUnit,

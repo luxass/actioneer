@@ -1,3 +1,5 @@
+//! Integration tests for configuration parsing, overrides, and validation.
+
 use std::{fs, path::Path};
 
 use actioneer::{

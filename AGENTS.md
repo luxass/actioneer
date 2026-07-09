@@ -1,6 +1,6 @@
 # AGENTS.md — actioneer
 
-Guide for AI agents working on this repository. User-facing docs: `README.md` (stale on rewrite branch) and `docs/*.md` (living specs — update when design changes).
+Guide for AI agents working on this repository. User-facing docs: `README.md` and `docs/*.md` (living specs — update when design changes).
 
 ## Purpose
 
@@ -108,7 +108,7 @@ See `docs/scan.md` § Deferred and `docs/engine.md` § Open questions.
 ```sh
 cargo build
 cargo test --locked   # preferred
-just ci               # fmt-check + clippy + test
+just ci               # fmt-check + clippy + rustdoc/doctests + test
 just test / just lint / just check
 ```
 

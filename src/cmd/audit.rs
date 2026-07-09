@@ -9,6 +9,11 @@ use crate::github::GitHubClient;
 use crate::scan::{AuditIssue, ScanReport, scan_workspace};
 
 /// Scan the selected workflows, render audit results, and return the CLI status.
+///
+/// This reads workflows relative to the current directory and may use the
+/// GitHub cache or network. Results are written to stdout and failures to
+/// stderr. The status is successful only when scanning succeeds and no audit
+/// issues are found.
 pub fn run(config: &ActioneerConfig, workflow_paths: &[PathBuf]) -> ExitCode {
     let root = Path::new(".");
     let client = GitHubClient::new(config, cache_dir());

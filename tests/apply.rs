@@ -1,3 +1,5 @@
+//! Integration tests for applying planned workflow changes.
+
 use std::fs;
 use std::path::PathBuf;
 

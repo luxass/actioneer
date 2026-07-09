@@ -1,7 +1,5 @@
 //! Command-line entry point for actioneer.
 
-#![deny(missing_docs)]
-
 use std::{path::Path, path::PathBuf, process::ExitCode};
 
 use actioneer::cli::{Cli, Command};

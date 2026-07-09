@@ -6,20 +6,20 @@ use std::{
 
 use crossterm::event::{self, Event as CxEvent, KeyEvent};
 
-pub enum Event {
+pub(super) enum Event {
     Tick,
     Key(KeyEvent),
     Resize,
 }
 
-pub struct EventHandler {
+pub(super) struct EventHandler {
     rx: mpsc::Receiver<Event>,
 }
 
 impl EventHandler {
     /// Spawn a background thread that polls crossterm events and sends ticks at
     /// `tick_ms` millisecond intervals.
-    pub fn new(tick_ms: u64) -> Self {
+    pub(super) fn new(tick_ms: u64) -> Self {
         let (tx, rx) = mpsc::channel();
         let rate = Duration::from_millis(tick_ms);
 
@@ -59,7 +59,7 @@ impl EventHandler {
 
     /// Block until the next event is available. Returns `None` when the sender
     /// thread has exited (channel closed).
-    pub fn next(&self) -> Option<Event> {
+    pub(super) fn next(&self) -> Option<Event> {
         self.rx.recv().ok()
     }
 }

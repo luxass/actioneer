@@ -13,6 +13,11 @@ use crate::scan::{
 };
 
 /// Scan workflows, render or apply planned changes, and return the CLI status.
+///
+/// This reads workflows relative to the current directory, may use the GitHub
+/// cache or network, and writes selected workflows when apply mode is enabled.
+/// Results go to stdout and failures to stderr. Planning succeeds when the scan
+/// completes; apply succeeds only when its report contains no failures.
 pub fn run(config: &ActioneerConfig, workflow_paths: &[PathBuf]) -> ExitCode {
     let root = Path::new(".");
     let client = GitHubClient::new(config, cache_dir());

@@ -1,0 +1,12 @@
+[
+  {
+    "tag_name": "v4.1.0",
+    "published_at": "2020-06-01T00:00:00Z",
+    "prerelease": false
+  },
+  {
+    "tag_name": "v4.2.0",
+    "published_at": "2021-06-01T00:00:00Z",
+    "prerelease": false
+  }
+]

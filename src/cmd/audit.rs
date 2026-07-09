@@ -1,87 +1,126 @@
+//! Audit command execution and rendering.
+
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use owo_colors::OwoColorize;
-
-use crate::actions::resolve;
-use crate::cli::{GlobalArgs, ScanArgs};
-use crate::cmd::{
-    apply_filters, default_inputs, describe_sha_mismatch, discover_actions, fetch_tags_reporting,
-    plural, resolve_config,
-};
+use crate::cache::cache_dir;
+use crate::config::{ActioneerConfig, OutputMode};
 use crate::github::GitHubClient;
-use crate::terminal::display::{Printer, print_json};
+use crate::scan::{AuditIssue, ScanReport, scan_workspace};
 
-pub fn run(global: GlobalArgs, args: ScanArgs, gh: GitHubClient) -> ExitCode {
-    let printer = Printer::new(global.mode);
-    let inputs = default_inputs(args.inputs.clone(), args.recursive);
+/// Scan the selected workflows, render audit results, and return the CLI status.
+///
+/// This reads workflows relative to the current directory and may use the
+/// GitHub cache or network. Results are written to stdout and failures to
+/// stderr. The status is successful only when scanning succeeds and no audit
+/// issues are found.
+pub fn run(config: &ActioneerConfig, workflow_paths: &[PathBuf]) -> ExitCode {
+    let root = Path::new(".");
+    let client = GitHubClient::new(config, cache_dir());
 
-    let actions = match discover_actions(&printer, global.mode, &inputs, args.recursive) {
-        Ok(actions) => actions,
-        Err(code) => return code,
+    let report = match scan_workspace(root, workflow_paths, config, &client) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
     };
 
-    let tags = match fetch_tags_reporting(&printer, &actions, &gh) {
-        Ok(tags) => tags,
-        Err(code) => return code,
-    };
-
-    let findings: Vec<_> = apply_filters(
-        resolve(&actions, &tags, &resolve_config(&global, &args)),
-        &args.filters,
-    )
-    .into_iter()
-    .filter(|a| a.is_branch || a.sha_mismatch)
-    .collect();
-
-    if global.mode.is_json() {
-        print_json(&findings);
-        return if findings.iter().any(|a| a.is_security_sensitive()) {
-            ExitCode::FAILURE
-        } else {
-            ExitCode::SUCCESS
-        };
+    match config.mode {
+        Some(OutputMode::Json) => render_json(&report),
+        Some(OutputMode::Plain) | None => render_plain(&report),
     }
 
-    let branch_count = findings.iter().filter(|a| a.is_branch).count();
-    let mismatch_count = findings.iter().filter(|a| a.sha_mismatch).count();
+    if report.stats.issues > 0 {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
 
-    if branch_count == 0 && mismatch_count == 0 {
-        printer.info("All references are securely pinned.");
-        return ExitCode::SUCCESS;
+fn render_json(report: &ScanReport) {
+    match serde_json::to_string_pretty(report) {
+        Ok(json) => println!("{json}"),
+        Err(e) => eprintln!("error: failed to encode JSON: {e}"),
+    }
+}
+
+fn render_plain(report: &ScanReport) {
+    if report.workflows.is_empty() {
+        println!("No workflow files found under .github/workflows/");
+        return;
     }
 
-    if branch_count > 0 {
-        printer.error(&format!(
-            "{} action reference{} {} mutable branch refs and {} insecure.",
-            branch_count.to_string().yellow(),
-            plural(branch_count),
-            if branch_count == 1 { "uses" } else { "use" },
-            if branch_count == 1 { "is" } else { "are" },
-        ));
-        for a in findings.iter().filter(|a| a.is_branch) {
-            printer.error(&format!(
-                "{} at {}:{} uses {} (unpinned branch ref)",
-                a.action_name().bold(),
-                a.action.file.cyan(),
-                a.action.line,
-                a.action.current_ref.red()
-            ));
-        }
-    }
-
-    if mismatch_count > 0 {
-        printer.error(&format!(
-            "{} pinned SHA{} do not match their stated versions.",
-            mismatch_count.to_string().yellow(),
-            plural(mismatch_count),
-        ));
-        for a in findings.iter().filter(|a| a.sha_mismatch) {
-            printer.error(&describe_sha_mismatch(a));
-        }
-    }
-
-    printer.info(
-        "Run `actioneer update` to pin branch refs to version tags, or fix SHA/comment mismatches.",
+    println!(
+        "Scanned {} workflow(s), {} reference(s), {} issue(s)\n",
+        report.stats.workflows, report.stats.references, report.stats.issues
     );
-    ExitCode::FAILURE
+
+    for workflow in &report.workflows {
+        let workflow_issues: usize = workflow.references.iter().map(|r| r.issues.len()).sum();
+        if workflow_issues == 0 {
+            continue;
+        }
+
+        println!("{}", workflow.path.display());
+        if let Some(name) = &workflow.name {
+            println!("  name: {name}");
+        }
+
+        for reference in &workflow.references {
+            if reference.issues.is_empty() {
+                continue;
+            }
+            let action = reference.resolved.located.reference.raw.clone();
+            for issue in &reference.issues {
+                println!("  - {action}: {}", issue_label(issue));
+            }
+        }
+        println!();
+    }
+
+    if report.stats.issues == 0 {
+        println!("No issues found.");
+    }
+}
+
+fn issue_label(issue: &AuditIssue) -> String {
+    match issue {
+        AuditIssue::MutableBranch => "mutable branch pin".into(),
+        AuditIssue::ShortSha => "short SHA pin".into(),
+        AuditIssue::NotShaPinned => "not pinned to full SHA".into(),
+        AuditIssue::CommentMismatch { comment, expected } => {
+            format!("comment mismatch (got {comment:?}, expected {expected:?})")
+        }
+        AuditIssue::ReleaseTooYoung {
+            min_age,
+            published_at,
+        } => {
+            format!("release too young (min {min_age}, published {published_at})")
+        }
+        AuditIssue::SkippedBranch => "branch pin skipped by config".into(),
+        AuditIssue::SecondaryReference { reference_kind } => {
+            format!("secondary reference ({reference_kind})")
+        }
+        AuditIssue::ResolutionFailed { message } => format!("resolution failed: {message}"),
+        AuditIssue::FloatingMajorPin { pin } => {
+            format!("floating major-line tag ({pin})")
+        }
+        AuditIssue::UnreleasedCommit { sha } => {
+            format!("pinned commit not found in any GitHub release ({sha})")
+        }
+        AuditIssue::UpdateBlockedByConfig {
+            current_version,
+            available_version,
+            update_level,
+        } => format!(
+            "update blocked by {update_level} level (current {current_version}, available {available_version})"
+        ),
+        AuditIssue::CommentMajorLineMismatch {
+            comment,
+            resolved_version,
+        } => format!(
+            "comment major-line mismatch (comment {comment:?}, resolved {resolved_version})"
+        ),
+    }
 }

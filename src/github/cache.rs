@@ -1,205 +1,207 @@
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+//! On-disk cache for GitHub API responses.
+//!
+//! Cache layout under [`CacheDir`]:
+//!
+//! ```text
+//! <cache_dir>/github/
+//!   <owner>/<repo>/
+//!     refs/
+//!       tags/<encoded_tag>.json
+//!       heads/<encoded_branch>.json
+//!     releases/
+//!       index.json
+//! ```
+//!
+//! Branch names that contain `/` (e.g. `feature/foo`) are encoded as
+//! `feature%2Ffoo` in the filename so that the file stays within the
+//! `heads/` directory. All other characters are preserved as-is.
+//!
+//! Ref files store a [`CacheEntry`]; the release index stores a
+//! [`ReleasesIndex`](super::ReleasesIndex). Writes are performed atomically: JSON
+//! is written to `<path>.tmp`, then renamed to `<path>`.
 
-use crate::actions::Tag;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-const CACHE_TTL: Duration = Duration::from_secs(60 * 5);
+use serde::{Deserialize, Serialize};
 
-#[derive(serde::Serialize, serde::Deserialize)]
-struct CachedTag {
-    name: String,
-    sha: String,
+use crate::cache::CacheDir;
+
+use super::{GitHubError, RefKind, ReleasesIndex};
+
+/// A single on-disk cache entry for a resolved GitHub ref.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CacheEntry {
+    /// Full 40-character commit SHA.
+    pub sha: String,
+    /// How the ref was classified when it was fetched: `"tag"`, `"branch"`, or `"sha"`.
+    pub ref_kind: String,
+    /// ISO 8601 publication timestamp from the GitHub Releases API, or `null`.
+    pub published_at: Option<String>,
+    /// Unix timestamp (seconds) when this entry was written to the cache.
+    pub fetched_at: u64,
 }
 
-pub fn cache_path(owner: &str, name: &str) -> PathBuf {
-    std::env::temp_dir()
-        .join("actioneer-cache")
-        .join("tags")
-        .join(format!(
-            "{}__{}.json",
-            encode_cache_component(owner),
-            encode_cache_component(name)
-        ))
-}
-
-fn encode_cache_component(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.') {
-            encoded.push(char::from(byte));
-        } else {
-            encoded.push_str(&format!("%{byte:02X}"));
+impl CacheEntry {
+    /// Reconstruct the [`RefKind`] from the stored string.
+    pub fn ref_kind(&self) -> RefKind {
+        match self.ref_kind.as_str() {
+            "tag" => RefKind::Tag,
+            "sha" => RefKind::Sha,
+            _ => RefKind::Branch,
         }
     }
-    encoded
 }
 
-pub fn read_cache(path: &Path) -> Option<Vec<Tag>> {
-    let meta = fs::metadata(path).ok()?;
-    let age = SystemTime::now()
-        .duration_since(meta.modified().ok()?)
-        .ok()?;
-    if age > CACHE_TTL {
-        return None;
-    }
-    let contents = fs::read_to_string(path).ok()?;
-    let cached: Vec<CachedTag> = serde_json::from_str(&contents).ok()?;
-    Some(
-        cached
-            .into_iter()
-            .filter_map(|t| Tag::from_name_sha(t.name, t.sha))
-            .collect(),
-    )
+/// Compute the cache path for a resolved ref entry.
+///
+/// `kind` is `"tags"` or `"heads"`. The ref string is `/`-encoded so that
+/// branch names with slashes remain within the `heads/` directory.
+pub(super) fn ref_path(
+    cache: &CacheDir,
+    owner: &str,
+    repo: &str,
+    kind: &str,
+    git_ref: &str,
+) -> PathBuf {
+    let encoded = encode_ref(git_ref);
+    cache
+        .path()
+        .join("github")
+        .join(owner)
+        .join(repo)
+        .join("refs")
+        .join(kind)
+        .join(format!("{encoded}.json"))
 }
 
-pub fn write_cache(path: &Path, tags: &[Tag]) {
+/// Compute the cache path for a repository releases index.
+pub(super) fn releases_index_path(cache: &CacheDir, owner: &str, repo: &str) -> PathBuf {
+    cache
+        .path()
+        .join("github")
+        .join(owner)
+        .join(repo)
+        .join("releases")
+        .join("index.json")
+}
+
+/// Write a [`ReleasesIndex`] to `path` atomically.
+pub(super) fn write_releases_index(path: &Path, index: &ReleasesIndex) -> Result<(), GitHubError> {
     if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+        fs::create_dir_all(parent).map_err(GitHubError::CacheWrite)?;
     }
-    let cached: Vec<CachedTag> = tags
-        .iter()
-        .map(|t| CachedTag {
-            name: t.name.clone(),
-            sha: t.sha.clone(),
-        })
-        .collect();
-    if let Ok(json) = serde_json::to_string(&cached) {
-        let _ = fs::write(path, json);
-    }
+    let json = serde_json::to_vec_pretty(index).map_err(GitHubError::Json)?;
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, &json).map_err(GitHubError::CacheWrite)?;
+    fs::rename(&tmp, path).map_err(GitHubError::CacheWrite)?;
+    Ok(())
 }
 
-pub fn no_cache_from_env() -> bool {
-    std::env::var("ACTIONEER_NO_CACHE")
-        .ok()
-        .is_some_and(|v| is_truthy(&v))
+/// Read a [`CacheEntry`] from `path`.
+///
+/// Returns `Ok(None)` if the file does not exist.
+pub(super) fn read_entry(path: &Path) -> Result<Option<CacheEntry>, GitHubError> {
+    let data = match fs::read(path) {
+        Ok(d) => d,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(GitHubError::CacheRead(e)),
+    };
+    let entry: CacheEntry = serde_json::from_slice(&data).map_err(GitHubError::Json)?;
+    Ok(Some(entry))
 }
 
-fn is_truthy(value: &str) -> bool {
-    matches!(
-        value.trim().to_ascii_lowercase().as_str(),
-        "1" | "true" | "yes" | "on"
-    )
+/// Write a [`CacheEntry`] to `path` atomically.
+///
+/// Parent directories are created as needed. The file is written to
+/// `<path>.tmp` and then renamed to `<path>` to ensure atomicity on
+/// POSIX systems (both paths are on the same filesystem).
+pub(super) fn write_entry(path: &Path, entry: &CacheEntry) -> Result<(), GitHubError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(GitHubError::CacheWrite)?;
+    }
+    let json = serde_json::to_vec_pretty(entry).map_err(GitHubError::Json)?;
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, &json).map_err(GitHubError::CacheWrite)?;
+    fs::rename(&tmp, path).map_err(GitHubError::CacheWrite)?;
+    Ok(())
+}
+
+/// Return the current Unix timestamp in seconds.
+pub(super) fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Encode a ref string for use as a file-system path component.
+///
+/// Only `/` is encoded (as `%2F`). Other characters used in valid git ref
+/// names (letters, digits, `-`, `_`, `.`) are left unchanged.
+fn encode_ref(s: &str) -> String {
+    s.replace('/', "%2F")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actions::parse_version;
+    use tempfile::TempDir;
 
-    #[test]
-    fn encode_keeps_safe_characters() {
-        assert_eq!("actions", encode_cache_component("actions"));
-        assert_eq!("my-repo_v1.2", encode_cache_component("my-repo_v1.2"));
+    fn temp_cache() -> (TempDir, CacheDir) {
+        use crate::cache::resolve_cache_dir_with;
+        let dir = TempDir::new().unwrap();
+        let cache = resolve_cache_dir_with(Some(dir.path().to_str().unwrap())).unwrap();
+        (dir, cache)
     }
 
     #[test]
-    fn encode_escapes_unsafe_characters() {
-        assert_eq!("a%2Fb", encode_cache_component("a/b"));
-        assert_eq!("owner%20name", encode_cache_component("owner name"));
+    fn encode_simple_tag() {
+        assert_eq!(encode_ref("v4"), "v4");
+        assert_eq!(encode_ref("v1.2.3"), "v1.2.3");
     }
 
     #[test]
-    fn encode_escapes_path_traversal() {
-        let encoded = encode_cache_component("../../etc/passwd");
-        assert!(!encoded.contains('/'));
+    fn encode_branch_with_slash() {
+        assert_eq!(encode_ref("feature/foo"), "feature%2Ffoo");
     }
 
     #[test]
-    fn cache_path_is_namespaced_per_repo() {
-        let a = cache_path("actions", "checkout");
-        let b = cache_path("actions", "setup-node");
-        assert_ne!(a, b);
-        assert!(a.to_string_lossy().ends_with("actions__checkout.json"));
+    fn round_trip_entry() {
+        let (_dir, cache) = temp_cache();
+        let path = ref_path(&cache, "actions", "checkout", "tags", "v4");
+        let entry = CacheEntry {
+            sha: "a81bbbf8298c0fa03ea29cdc473d45769f953675".into(),
+            ref_kind: "tag".into(),
+            published_at: Some("2023-10-16T00:00:00Z".into()),
+            fetched_at: 1_700_000_000,
+        };
+        write_entry(&path, &entry).unwrap();
+        let loaded = read_entry(&path).unwrap().unwrap();
+        assert_eq!(loaded, entry);
     }
 
     #[test]
-    fn read_cache_missing_file_returns_none() {
-        let path = std::env::temp_dir().join("actioneer-cache-test-does-not-exist.json");
-        assert!(read_cache(&path).is_none());
+    fn read_missing_returns_none() {
+        let (_dir, cache) = temp_cache();
+        let path = ref_path(&cache, "no-owner", "no-repo", "tags", "nonexistent");
+        assert!(read_entry(&path).unwrap().is_none());
     }
 
     #[test]
-    fn write_then_read_roundtrip() {
-        let path = std::env::temp_dir().join(format!(
-            "actioneer-cache-test-roundtrip-{}.json",
-            std::process::id()
-        ));
-        let tags = vec![Tag {
-            name: "v1.2.3".into(),
-            sha: "abc123".into(),
-            version: parse_version("v1.2.3").unwrap(),
-        }];
-
-        write_cache(&path, &tags);
-        let cached = read_cache(&path).unwrap();
-        let _ = fs::remove_file(&path);
-
-        assert_eq!(1, cached.len());
-        assert_eq!("v1.2.3", cached[0].name);
-        assert_eq!("abc123", cached[0].sha);
-        assert_eq!(tags[0].version, cached[0].version);
-    }
-
-    #[test]
-    fn read_cache_drops_unparseable_versions() {
-        let path = std::env::temp_dir().join(format!(
-            "actioneer-cache-test-unparseable-{}.json",
-            std::process::id()
-        ));
-        fs::write(
-            &path,
-            r#"[{"name":"not-a-version","sha":"abc"},{"name":"v2.0.0","sha":"def"}]"#,
-        )
-        .unwrap();
-
-        let cached = read_cache(&path).unwrap();
-        let _ = fs::remove_file(&path);
-
-        assert_eq!(1, cached.len());
-        assert_eq!("v2.0.0", cached[0].name);
-    }
-
-    #[test]
-    fn read_cache_expired_returns_none() {
-        let path = std::env::temp_dir().join(format!(
-            "actioneer-cache-test-expired-{}.json",
-            std::process::id()
-        ));
-        fs::write(&path, "[]").unwrap();
-        let stale = SystemTime::now() - (CACHE_TTL + Duration::from_secs(60));
-        let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
-        file.set_times(fs::FileTimes::new().set_modified(stale))
-            .unwrap();
-        drop(file);
-
-        let cached = read_cache(&path);
-        let _ = fs::remove_file(&path);
-
-        assert!(cached.is_none());
-    }
-
-    #[test]
-    fn read_cache_invalid_json_returns_none() {
-        let path = std::env::temp_dir().join(format!(
-            "actioneer-cache-test-invalid-{}.json",
-            std::process::id()
-        ));
-        fs::write(&path, "not json").unwrap();
-
-        let cached = read_cache(&path);
-        let _ = fs::remove_file(&path);
-
-        assert!(cached.is_none());
-    }
-
-    #[test]
-    fn truthy_values() {
-        for v in ["1", "true", "TRUE", " yes ", "on"] {
-            assert!(is_truthy(v), "{v:?} should be truthy");
-        }
-        for v in ["", "0", "false", "no", "off", "2"] {
-            assert!(!is_truthy(v), "{v:?} should be falsy");
-        }
+    fn write_creates_parents() {
+        let (_dir, cache) = temp_cache();
+        let path = ref_path(&cache, "a", "b", "heads", "feature/deep/branch");
+        let entry = CacheEntry {
+            sha: "0".repeat(40),
+            ref_kind: "branch".into(),
+            published_at: None,
+            fetched_at: 0,
+        };
+        write_entry(&path, &entry).unwrap();
+        assert!(path.exists());
     }
 }

@@ -18,38 +18,32 @@ path = "src/lib.rs"
 name = "actioneer"
 path = "src/main.rs"
 
-[[test]]
-name = "e2e"
-path = "tests/e2e.rs"
-required-features = ["e2e"]
-
-[features]
-e2e = []
-
 [dependencies]
-clap = { version = "4.6.1", features = ["derive", "env"] }
-thiserror = "2.0.18"
-owo-colors = "4.3.0"
-crossterm = "0.28"
-ratatui = "0.29"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+clap = { version = "4.6.1", features = ["derive"] }
+crossterm = "0.29.0"
+indexmap = { version = "2.14.0", features = ["serde"] }
+ratatui = "0.30.2"
+semver = "1.0.27"
 serde = { version = "1", features = ["derive"] }
-serde_yaml = { package = "yaml_serde", version = "0.10" }
-serde_json = "1"
-time = { version = "0.3", features = ["parsing"] }
-walkdir = "2"
-yamlpath = "1.24.1"
+serde_json = "1.0.150"
+serde_yaml = "0.9"
+time = { version = "0.3.47", features = ["parsing", "formatting"] }
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+ureq = { version = "3.3.0", features = ["json"] }
 
 [dev-dependencies]
-tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
-wiremock = "0.6"
+tempfile = "3"
 
 [lints.rust]
+missing_docs = "deny"
 unsafe_code = "forbid"
 
 [lints.clippy]
 dbg_macro = "warn"
 todo = "warn"
+
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
 
 [profile.release]
 lto = true

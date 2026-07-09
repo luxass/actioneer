@@ -1,0 +1,17 @@
+{
+  "node_id": "TA_kwDOFpBSY...",
+  "sha": "aabbccdd11223344556677889900aabbccdd1122",
+  "url": "https://api.github.com/repos/example/repo/git/tags/aabbccdd11223344556677889900aabbccdd1122",
+  "tagger": {
+    "name": "Release Bot",
+    "email": "bot@example.com",
+    "date": "2024-01-01T00:00:00Z"
+  },
+  "object": {
+    "sha": "deadbeefdeadbeefdeadbeefdeadbeef12345678",
+    "type": "commit",
+    "url": "https://api.github.com/repos/example/repo/git/commits/deadbeefdeadbeefdeadbeefdeadbeef12345678"
+  },
+  "tag": "v1.0.0",
+  "message": "Release v1.0.0\n"
+}

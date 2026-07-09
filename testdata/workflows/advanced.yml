@@ -1,0 +1,41 @@
+name: Advanced features
+
+on:
+  workflow_dispatch:
+
+jobs:
+  reusable-job:
+    uses: octo-org/octo-repo/.github/workflows/workflow.yml@v1
+    with:
+      username: mona
+
+  nested-action:
+    name: Nested action example
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Nested sub-path action
+        uses: actions/aws-actions/amazon-ecr-login@v2
+
+  docker-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Docker step
+        uses: docker://alpine:3.14
+
+      - name: Docker with digest
+        uses: docker://ghcr.io/owner/image:sha256abcdef
+
+  local-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Local action
+        uses: ./my-local-action
+
+      - name: Relative parent action
+        uses: ../shared-action
+
+  local-reusable:
+    uses: ./.github/workflows/deploy.yml

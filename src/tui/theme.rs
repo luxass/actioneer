@@ -32,9 +32,7 @@ const BORDER: Color = Color::Rgb(65, 70, 82);
 const SELECTION_BG: Color = Color::Rgb(48, 52, 68);
 
 pub fn bold_brand() -> Style {
-    Style::default()
-        .fg(BRAND)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(BRAND).add_modifier(Modifier::BOLD)
 }
 
 pub fn bold_accent() -> Style {
@@ -61,19 +59,11 @@ pub fn info() -> Style {
     Style::default().fg(FG)
 }
 
-pub fn label() -> Style {
-    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD)
-}
-
 pub fn value() -> Style {
     Style::default().fg(FG)
 }
 
 pub fn muted() -> Style {
-    Style::default().fg(FG_DIM)
-}
-
-pub fn dim() -> Style {
     Style::default().fg(FG_DIM)
 }
 
@@ -115,14 +105,6 @@ pub fn from_ref() -> Style {
 
 pub fn to_ref() -> Style {
     Style::default().fg(TO)
-}
-
-pub fn column_workflow() -> Style {
-    Style::default().fg(WORKFLOW).add_modifier(Modifier::BOLD)
-}
-
-pub fn column_action() -> Style {
-    Style::default().fg(ACTION).add_modifier(Modifier::BOLD)
 }
 
 pub fn column_from() -> Style {

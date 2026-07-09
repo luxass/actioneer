@@ -9,7 +9,7 @@ use crossterm::event::{self, Event as CxEvent, KeyEvent};
 pub enum Event {
     Tick,
     Key(KeyEvent),
-    Resize(u16, u16),
+    Resize,
 }
 
 pub struct EventHandler {
@@ -35,7 +35,7 @@ impl EventHandler {
                 {
                     let msg = match ev {
                         CxEvent::Key(k) => Some(Event::Key(k)),
-                        CxEvent::Resize(w, h) => Some(Event::Resize(w, h)),
+                        CxEvent::Resize(_, _) => Some(Event::Resize),
                         _ => None,
                     };
                     if let Some(m) = msg

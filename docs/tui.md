@@ -71,8 +71,15 @@ Rows start unselected; use Space or `a` to choose updates. Footer shows `N selec
 
 ## Terminal safety
 
-- Raw mode + alternate screen entered before the loop.
-- Panic hook restores the terminal on crash.
+- A state-aware guard tracks raw mode and alternate-screen setup.
+- Partial initialization and event-loop errors restore every state that was
+  successfully entered before returning the error.
+- Normal exits restore explicitly; the guard also restores best-effort during
+  unwinding.
+- The panic hook restores the terminal before printing the panic message.
+
+Process aborts and operating-system termination that bypass Rust unwinding (for
+example, `SIGKILL`) cannot run cleanup.
 
 ## Future work
 

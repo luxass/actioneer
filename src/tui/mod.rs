@@ -1,14 +1,16 @@
+//! Interactive terminal interface for selecting and applying planned updates.
+
 use std::path::PathBuf;
 use std::{
     io::{self, Stdout, stdout},
     panic,
 };
 
+use crossterm::event::KeyCode;
 use crossterm::{
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use crossterm::event::KeyCode;
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 use crate::config::ActioneerConfig;
@@ -18,15 +20,97 @@ use self::app::{App, ScanPhase};
 
 use self::view::DisplayRow;
 
-pub mod app;
-pub mod event;
-pub mod selection;
-pub mod theme;
-pub mod ui;
-pub mod view;
+mod app;
+mod event;
+mod selection;
+mod theme;
+mod ui;
+mod view;
+
+trait TerminalOps {
+    fn enable_raw_mode(&mut self) -> io::Result<()>;
+    fn enter_alternate_screen(&mut self) -> io::Result<()>;
+    fn leave_alternate_screen(&mut self) -> io::Result<()>;
+    fn disable_raw_mode(&mut self) -> io::Result<()>;
+}
+
+struct CrosstermTerminalOps;
+
+impl TerminalOps for CrosstermTerminalOps {
+    fn enable_raw_mode(&mut self) -> io::Result<()> {
+        enable_raw_mode()
+    }
+
+    fn enter_alternate_screen(&mut self) -> io::Result<()> {
+        execute!(io::stdout(), EnterAlternateScreen)
+    }
+
+    fn leave_alternate_screen(&mut self) -> io::Result<()> {
+        execute!(io::stdout(), LeaveAlternateScreen)
+    }
+
+    fn disable_raw_mode(&mut self) -> io::Result<()> {
+        disable_raw_mode()
+    }
+}
+
+struct TerminalSession<O: TerminalOps> {
+    ops: O,
+    raw_mode: bool,
+    alternate_screen: bool,
+}
+
+impl<O: TerminalOps> TerminalSession<O> {
+    fn enter(ops: O) -> io::Result<Self> {
+        let mut session = Self {
+            ops,
+            raw_mode: false,
+            alternate_screen: false,
+        };
+
+        session.ops.enable_raw_mode()?;
+        session.raw_mode = true;
+        session.ops.enter_alternate_screen()?;
+        session.alternate_screen = true;
+        Ok(session)
+    }
+
+    fn restore(&mut self) -> io::Result<()> {
+        let mut first_error = None;
+
+        if self.alternate_screen {
+            if let Err(error) = self.ops.leave_alternate_screen() {
+                first_error = Some(error);
+            }
+            self.alternate_screen = false;
+        }
+
+        if self.raw_mode {
+            if let Err(error) = self.ops.disable_raw_mode()
+                && first_error.is_none()
+            {
+                first_error = Some(error);
+            }
+            self.raw_mode = false;
+        }
+
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+}
+
+impl<O: TerminalOps> Drop for TerminalSession<O> {
+    fn drop(&mut self) {
+        let _ = self.restore();
+    }
+}
 
 #[derive(Debug)]
+/// Errors that prevent the terminal interface from running or restoring state.
 pub enum TuiError {
+    /// Terminal input, drawing, setup, or cleanup failed.
     Io(io::Error),
 }
 
@@ -53,9 +137,14 @@ impl From<io::Error> for TuiError {
 }
 
 /// Outcome after the TUI closes.
+///
+/// Both fields are `None` when the user quits without applying. Apply success
+/// and failure are mutually exclusive, so at most one field is populated.
 #[derive(Debug, Default)]
 pub struct TuiOutcome {
+    /// Apply result when the user selected updates and apply produced a report.
     pub apply_report: Option<ApplyReport>,
+    /// Apply error when selected updates could not produce a report.
     pub apply_error: Option<String>,
 }
 
@@ -63,19 +152,32 @@ pub struct TuiOutcome {
 ///
 /// Terminal state (raw mode + alternate screen) is always restored on exit —
 /// including panics. Callers should print [`TuiOutcome::apply_report`] after return.
-pub fn run_app(config: ActioneerConfig, workflow_paths: Vec<PathBuf>) -> Result<TuiOutcome, TuiError> {
+/// Relative workflow paths are resolved from the process current directory.
+///
+/// # Side effects
+///
+/// Scanning reads workflow files and may use the GitHub cache or network.
+/// Applying selected rows rewrites their workflow files before the TUI exits.
+///
+/// # Errors
+///
+/// Returns [`TuiError`] when terminal setup, event handling, drawing, or explicit
+/// restoration fails. A state-aware guard still attempts best-effort cleanup on
+/// every partially initialized or error return path.
+pub fn run_app(
+    config: ActioneerConfig,
+    workflow_paths: Vec<PathBuf>,
+) -> Result<TuiOutcome, TuiError> {
     install_panic_hook();
 
-    enable_raw_mode()?;
-    let mut out = stdout();
-    execute!(out, EnterAlternateScreen)?;
-
+    let mut session = TerminalSession::enter(CrosstermTerminalOps)?;
+    let out = stdout();
     let backend = CrosstermBackend::new(out);
     let mut terminal: Terminal<CrosstermBackend<Stdout>> = Terminal::new(backend)?;
 
     let outcome = event_loop(&mut terminal, config, workflow_paths);
 
-    restore_terminal()?;
+    session.restore()?;
     outcome
 }
 
@@ -98,7 +200,7 @@ fn event_loop(
         match events.next() {
             None => break,
             Some(Event::Tick) => app.on_tick(),
-            Some(Event::Resize(_, _)) => {}
+            Some(Event::Resize) => {}
             Some(Event::Key(key)) => {
                 if matches!(
                     (key.code, key.modifiers),
@@ -159,7 +261,120 @@ fn install_panic_hook() {
 }
 
 fn restore_terminal() -> io::Result<()> {
-    disable_raw_mode()?;
-    execute!(io::stdout(), LeaveAlternateScreen)?;
-    Ok(())
+    let mut session = TerminalSession {
+        ops: CrosstermTerminalOps,
+        raw_mode: true,
+        alternate_screen: true,
+    };
+    session.restore()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::RefCell, io, rc::Rc};
+
+    use super::{TerminalOps, TerminalSession};
+
+    #[derive(Clone)]
+    struct FakeTerminalOps {
+        calls: Rc<RefCell<Vec<&'static str>>>,
+        fail_enter_alternate: bool,
+        fail_leave_alternate: bool,
+    }
+
+    impl TerminalOps for FakeTerminalOps {
+        fn enable_raw_mode(&mut self) -> io::Result<()> {
+            self.calls.borrow_mut().push("enable-raw");
+            Ok(())
+        }
+
+        fn enter_alternate_screen(&mut self) -> io::Result<()> {
+            self.calls.borrow_mut().push("enter-alternate");
+            if self.fail_enter_alternate {
+                Err(io::Error::other("enter failed"))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn leave_alternate_screen(&mut self) -> io::Result<()> {
+            self.calls.borrow_mut().push("leave-alternate");
+            if self.fail_leave_alternate {
+                Err(io::Error::other("leave failed"))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn disable_raw_mode(&mut self) -> io::Result<()> {
+            self.calls.borrow_mut().push("disable-raw");
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn alternate_screen_setup_failure_restores_raw_mode() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let ops = FakeTerminalOps {
+            calls: Rc::clone(&calls),
+            fail_enter_alternate: true,
+            fail_leave_alternate: false,
+        };
+
+        let result = TerminalSession::enter(ops);
+
+        assert!(result.is_err());
+        assert_eq!(
+            *calls.borrow(),
+            ["enable-raw", "enter-alternate", "disable-raw"]
+        );
+    }
+
+    #[test]
+    fn explicit_restore_is_not_repeated_on_drop() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let ops = FakeTerminalOps {
+            calls: Rc::clone(&calls),
+            fail_enter_alternate: false,
+            fail_leave_alternate: false,
+        };
+        let mut session = TerminalSession::enter(ops).unwrap();
+
+        session.restore().unwrap();
+        drop(session);
+
+        assert_eq!(
+            *calls.borrow(),
+            [
+                "enable-raw",
+                "enter-alternate",
+                "leave-alternate",
+                "disable-raw"
+            ]
+        );
+    }
+
+    #[test]
+    fn restore_attempts_raw_cleanup_after_alternate_screen_error() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let ops = FakeTerminalOps {
+            calls: Rc::clone(&calls),
+            fail_enter_alternate: false,
+            fail_leave_alternate: true,
+        };
+        let mut session = TerminalSession::enter(ops).unwrap();
+
+        let error = session.restore().unwrap_err();
+
+        assert_eq!(error.to_string(), "leave failed");
+        assert_eq!(
+            *calls.borrow(),
+            [
+                "enable-raw",
+                "enter-alternate",
+                "leave-alternate",
+                "disable-raw"
+            ]
+        );
+    }
 }

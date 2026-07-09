@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::config::ActioneerConfig;
-use crate::scan::{plan_from_label, plan_to_label, ApplyTarget, ScanReport};
+use crate::scan::{ApplyTarget, ScanReport, plan_from_label, plan_to_label};
 
 /// One planned update within a workflow group.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,8 +75,8 @@ mod tests {
 
     use crate::engine::{ActionReference, CommentMatch, PinKind, ReferenceKind};
     use crate::github::{RefKind, ResolvedRef};
-    use crate::scan::types::{
-        LocatedReference, PlannedChange, PlanReason, ReferenceReport, ResolvedReference,
+    use crate::scan::{
+        LocatedReference, PlanReason, PlannedChange, ReferenceReport, ResolvedReference,
         ScanReport, ScanStats, WorkflowReport,
     };
 

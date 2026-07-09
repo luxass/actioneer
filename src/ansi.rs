@@ -15,12 +15,6 @@ impl Colors {
         }
     }
 
-    pub fn stderr() -> Self {
-        Self {
-            enabled: io::stderr().is_terminal(),
-        }
-    }
-
     fn paint(self, code: &str, s: &str) -> String {
         if self.enabled {
             format!("\x1b[{code}m{s}\x1b[0m")
@@ -42,10 +36,6 @@ impl Colors {
     }
 
     pub fn to(self, s: &str) -> String {
-        self.paint("32", s)
-    }
-
-    pub fn success(self, s: &str) -> String {
         self.paint("32", s)
     }
 

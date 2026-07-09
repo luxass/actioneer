@@ -66,7 +66,7 @@ jobs:
 
       - name: Test
         shell: bash
-        run: cargo test --features e2e
+        run: cargo test --locked
 
       - name: Build release
         shell: bash

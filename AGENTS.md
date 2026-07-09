@@ -6,15 +6,6 @@ Guide for AI agents working on this repository. User-facing docs: `README.md` an
 
 **actioneer** is a Rust CLI that audits GitHub Actions workflow pins and proposes/applies updates. It discovers `.github/workflows/*.{yml,yaml}`, parses `uses:` references, resolves them via GitHub, flags pin issues, plans semver-bump updates, and optionally rewrites workflow files.
 
-## Branch context
-
-| Branch | State |
-|--------|-------|
-| `rewrite/from-spec` | **Active rewrite.** Clean layered architecture; scan-once pipeline; TUI default for update. Reset from minimal baseline then rebuilt (config → cache → engine → github → scan → apply → TUI). |
-| `main` | Pre-rewrite codebase. Has legacy features (e.g. `--fix`) not ported to rewrite. Do not assume parity. |
-
-Target merge: rewrite replaces main when feature-complete and README/docs updated.
-
 ## Architecture map
 
 ```
@@ -69,7 +60,7 @@ Config file: `.github/actioneer.toml` (optional; defaults apply). CLI flags over
 
 ## Implemented vs deferred
 
-### Implemented (v0.1 rewrite)
+### Implemented
 
 - Workflow discovery + engine parse (actions, reusable workflows, docker, local)
 - GitHub ref resolution + release listing + disk cache

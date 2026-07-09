@@ -7,7 +7,7 @@ a terminal UI; plain text and JSON modes are available for automation.
 
 ## Build
 
-The rewrite targets Rust 1.95 or newer.
+actioneer targets Rust 1.95 or newer.
 
 ```sh
 cargo build --locked
@@ -84,5 +84,5 @@ just ci
 ```
 
 The living design specifications are in `docs/`. Contributors and coding agents
-should also read `AGENTS.md`, which records the rewrite architecture, deferred
-features, and repository conventions.
+should also read `AGENTS.md`, which records the architecture, deferred features,
+and repository conventions.

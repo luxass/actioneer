@@ -1,6 +1,8 @@
-use std::process::ExitCode;
+//! Version command execution.
 
-pub fn run() -> ExitCode {
-    println!("{}", env!("CARGO_PKG_VERSION"));
-    ExitCode::SUCCESS
+use crate::VERSION;
+
+/// Print the compiled actioneer version to stdout.
+pub fn run() {
+    println!("actioneer {VERSION}");
 }

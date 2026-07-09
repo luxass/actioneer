@@ -1,140 +1,110 @@
-use std::time::Duration;
+//! Clap argument types shared by the actioneer binary and tests.
 
-use clap::{
-    Args, Parser, Subcommand, ValueEnum,
-    builder::styling::{AnsiColor, Effects, Styles},
-};
+use std::path::PathBuf;
 
-use crate::actions::{PinStyle, UpdateMode};
+use clap::{Args, Parser, Subcommand};
 
-const STYLES: Styles = Styles::styled()
-    .header(AnsiColor::Green.on_default().effects(Effects::BOLD))
-    .usage(AnsiColor::Green.on_default().effects(Effects::BOLD))
-    .literal(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
-    .placeholder(AnsiColor::Cyan.on_default());
+use crate::config::{OutputMode, PinMode, RelativeDuration, UpdateLevel};
+
+#[derive(Debug, Args, Default)]
+/// Positional workflow files or flat directories supplied to a command.
+pub struct WorkflowPathArgs {
+    /// Workflow file(s) or directory to scan (default: .github/workflows/)
+    #[arg(value_name = "PATH")]
+    pub paths: Vec<PathBuf>,
+}
 
 #[derive(Debug, Parser)]
-#[command(name = "actioneer", about, version, styles = STYLES)]
-pub struct App {
+#[command(
+    name = "actioneer",
+    version,
+    about = "GitHub Actions CLI",
+    args_conflicts_with_subcommands = true
+)]
+/// Parsed command line for actioneer.
+pub struct Cli {
+    /// Explicit subcommand, or `None` for the default update command.
     #[command(subcommand)]
     pub command: Option<Command>,
 
-    #[command(flatten)]
-    pub global: GlobalArgs,
+    /// Workflow file(s) or directory to scan (default: .github/workflows/)
+    #[arg(value_name = "PATH")]
+    pub paths: Vec<PathBuf>,
 
+    /// Configuration overrides supplied on the command line.
     #[command(flatten)]
-    pub update: UpdateArgs,
+    pub config: ConfigArgs,
+}
+
+impl Cli {
+    /// Resolved workflow targets for the active command.
+    pub fn workflow_paths(&self) -> &[PathBuf] {
+        match &self.command {
+            Some(Command::Audit { workflow_paths }) => &workflow_paths.paths,
+            Some(Command::Update { workflow_paths }) => &workflow_paths.paths,
+            Some(Command::Version) => &[],
+            None => &self.paths,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
+/// Commands supported by the actioneer binary.
 pub enum Command {
-    Update(UpdateArgs),
-    Audit(ScanArgs),
+    /// Audit workflow references and return a failing status when issues exist.
+    Audit {
+        /// Explicit workflows or directories to audit.
+        #[command(flatten)]
+        workflow_paths: WorkflowPathArgs,
+    },
+    /// Plan, display, or apply workflow-reference updates.
+    Update {
+        /// Explicit workflows or directories to update.
+        #[command(flatten)]
+        workflow_paths: WorkflowPathArgs,
+    },
+    /// Print the compiled package version.
     Version,
 }
 
-#[derive(Clone, Debug, Args)]
-pub struct GlobalArgs {
-    #[arg(long, global = true, default_value_t = false)]
-    pub dry_run: bool,
+/// CLI overrides for config-file settings.
+///
+/// Any value provided here takes precedence over the loaded `actioneer.toml`.
+#[derive(Debug, Default, Args)]
+pub struct ConfigArgs {
+    /// Pin mode: "sha" or "tag"
+    #[arg(long, global = true, value_name = "MODE")]
+    pub pin: Option<PinMode>,
 
-    #[arg(long = "no-cache", global = true, default_value_t = false)]
-    pub no_cache: bool,
+    /// Update level: "major", "minor", or "patch"
+    #[arg(long, global = true, value_name = "LEVEL")]
+    pub update: Option<UpdateLevel>,
 
-    #[arg(long = "exclude", global = true)]
-    pub excludes: Vec<String>,
+    /// Skip processing branches (pass --skip-branches=false to explicitly disable)
+    #[arg(long, global = true, num_args = 0..=1, default_missing_value = "true")]
+    pub skip_branches: Option<bool>,
 
-    #[arg(long, global = true, value_enum, default_value_t = Mode::Beautiful)]
-    pub mode: Mode,
-}
+    /// Minimum release age before considering an update (e.g. 7d, 4h, 30m)
+    #[arg(long = "min-release-age", global = true, value_name = "DURATION")]
+    pub min_release_age: Option<RelativeDuration>,
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct MinReleaseAge(Duration);
+    /// Never perform network requests; use the local cache only
+    #[arg(long, global = true, num_args = 0..=1, default_missing_value = "true")]
+    pub offline: Option<bool>,
 
-impl MinReleaseAge {
-    pub fn from_duration(duration: Duration) -> Self {
-        Self(duration)
-    }
+    /// Bypass cache reads/writes; always fetch fresh data from the network
+    #[arg(long = "no-cache", global = true, num_args = 0..=1, default_missing_value = "true")]
+    pub no_cache: Option<bool>,
 
-    pub fn as_duration(self) -> Duration {
-        self.0
-    }
-}
+    /// Output mode: "plain" or "json" (update uses TUI unless overridden)
+    #[arg(long, global = true, value_name = "MODE")]
+    pub mode: Option<OutputMode>,
 
-#[derive(Clone, Debug, Args)]
-pub struct UpdateArgs {
-    #[command(flatten)]
-    pub scan: ScanArgs,
+    /// Write planned updates to workflow files
+    #[arg(long, global = true, num_args = 0..=1, default_missing_value = "true")]
+    pub apply: Option<bool>,
 
-    #[arg(
-        long = "min-release-age",
-        value_name = "DURATION",
-        value_parser = parse_min_release_age,
-        help = "Skip update tags newer than this age (e.g. 30m, 12h, 7d)"
-    )]
-    pub min_release_age: Option<MinReleaseAge>,
-}
-
-#[derive(Clone, Debug, Args)]
-pub struct ScanArgs {
-    #[arg(long, short = 'r', default_value_t = false)]
-    pub recursive: bool,
-
-    #[arg(long = "skip-branches", default_value_t = false)]
-    pub skip_branches: bool,
-
-    #[arg(long = "update", value_enum, default_value_t = UpdateMode::Major)]
-    pub update: UpdateMode,
-
-    #[arg(long = "pin", value_enum, default_value = "sha")]
-    pub pin: PinStyle,
-
-    #[arg(long, short = 'y', default_value_t = false)]
-    pub yes: bool,
-
-    #[arg(long = "filter", value_name = "OWNER/NAME")]
-    pub filters: Vec<String>,
-
-    #[arg(value_name = "INPUT")]
-    pub inputs: Vec<String>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum Mode {
-    Plain,
-    Json,
-    Beautiful,
-}
-
-impl Mode {
-    pub fn is_json(self) -> bool {
-        self == Mode::Json
-    }
-}
-
-fn parse_min_release_age(value: &str) -> Result<MinReleaseAge, String> {
-    let Some(unit) = value.chars().last() else {
-        return Err("duration must use m, h, or d units".into());
-    };
-    let amount = &value[..value.len() - unit.len_utf8()];
-    if amount.is_empty() || !amount.bytes().all(|b| b.is_ascii_digit()) {
-        return Err("duration must be a positive integer followed by m, h, or d".into());
-    }
-
-    let amount: u64 = amount
-        .parse()
-        .map_err(|_| "duration amount is too large".to_string())?;
-    if amount == 0 {
-        return Err("duration amount must be greater than zero".into());
-    }
-
-    let seconds = match unit {
-        'm' => amount.checked_mul(60),
-        'h' => amount.checked_mul(60 * 60),
-        'd' => amount.checked_mul(60 * 60 * 24),
-        _ => return Err("duration must use m, h, or d units".into()),
-    }
-    .ok_or_else(|| "duration amount is too large".to_string())?;
-
-    Ok(MinReleaseAge(Duration::from_secs(seconds)))
+    /// Preview file writes without modifying workflows (implies --apply)
+    #[arg(long, global = true, num_args = 0..=1, default_missing_value = "true")]
+    pub dry_run: Option<bool>,
 }

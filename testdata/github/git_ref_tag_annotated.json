@@ -1,0 +1,10 @@
+{
+  "ref": "refs/tags/v1.0.0",
+  "node_id": "MDM6UmVmNDMwNzI1NTI6cmVmcy90YWdzL3YxLjAuMA==",
+  "url": "https://api.github.com/repos/example/repo/git/refs/tags/v1.0.0",
+  "object": {
+    "sha": "aabbccdd11223344556677889900aabbccdd1122",
+    "type": "tag",
+    "url": "https://api.github.com/repos/example/repo/git/tags/aabbccdd11223344556677889900aabbccdd1122"
+  }
+}

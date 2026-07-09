@@ -1,3 +1,5 @@
+//! Update planning, apply execution, and result rendering.
+
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -6,10 +8,11 @@ use crate::cache::cache_dir;
 use crate::config::{ActioneerConfig, OutputMode};
 use crate::github::GitHubClient;
 use crate::scan::{
-    all_planned_targets, apply, plan_from_label, plan_to_label, scan_workspace, ApplyReport,
-    ScanReport,
+    ApplyReport, ScanReport, all_planned_targets, apply, plan_from_label, plan_to_label,
+    scan_workspace,
 };
 
+/// Scan workflows, render or apply planned changes, and return the CLI status.
 pub fn run(config: &ActioneerConfig, workflow_paths: &[PathBuf]) -> ExitCode {
     let root = Path::new(".");
     let client = GitHubClient::new(config, cache_dir());
@@ -92,7 +95,10 @@ fn render_plan_plain(report: &ScanReport, config: &ActioneerConfig) {
             report.stats.workflows, report.stats.references
         );
         if report.stats.blocked > 0 {
-            println!("{} reference(s) blocked by audit rules.", report.stats.blocked);
+            println!(
+                "{} reference(s) blocked by audit rules.",
+                report.stats.blocked
+            );
         }
         if report.stats.config_blocked > 0 {
             println!(
@@ -107,10 +113,7 @@ fn render_plan_plain(report: &ScanReport, config: &ActioneerConfig) {
         "{} planned update(s) across {} workflow(s)\n",
         report.stats.planned, report.stats.workflows
     );
-    println!(
-        "{:<40} {:<35} {:<28} To",
-        "Workflow", "Action", "From"
-    );
+    println!("{:<40} {:<35} {:<28} To", "Workflow", "Action", "From");
     println!("{}", "-".repeat(115));
 
     for (path, reference) in changes {
@@ -123,7 +126,10 @@ fn render_plan_plain(report: &ScanReport, config: &ActioneerConfig) {
     }
 
     if report.stats.blocked > 0 {
-        println!("\n{} reference(s) blocked by audit rules.", report.stats.blocked);
+        println!(
+            "\n{} reference(s) blocked by audit rules.",
+            report.stats.blocked
+        );
     }
     if report.stats.config_blocked > 0 {
         println!(
@@ -186,7 +192,10 @@ pub fn print_apply_plain(apply_report: &ApplyReport, dry_run: bool) {
     if !apply_report.failures.is_empty() {
         println!(
             "\n{}",
-            c.error(&format!("{} update(s) failed:", apply_report.failures.len()))
+            c.error(&format!(
+                "{} update(s) failed:",
+                apply_report.failures.len()
+            ))
         );
         for failure in &apply_report.failures {
             let workflow = failure
@@ -195,11 +204,7 @@ pub fn print_apply_plain(apply_report: &ApplyReport, dry_run: bool) {
                 .and_then(|s| s.to_str())
                 .unwrap_or("?");
             let loc = format!("{}:{}", workflow, failure.line);
-            println!(
-                "  {}  {}",
-                c.workflow(&loc),
-                c.error(&failure.message),
-            );
+            println!("  {}  {}", c.workflow(&loc), c.error(&failure.message),);
         }
     }
 }

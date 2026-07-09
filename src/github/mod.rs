@@ -1,7 +1,8 @@
 //! GitHub API client with disk caching.
 //!
-//! Resolves `owner/repo@git_ref` to a commit SHA. Also fetches the release
-//! publication date for future `min-release-age` filtering.
+//! Resolves `owner/repo@git_ref` to a commit SHA and lists repository releases.
+//! The scan layer uses the releases index to enrich resolved refs and enforce
+//! release-age policy without a per-ref release request.
 //!
 //! # Cache policy
 //!
@@ -60,15 +61,20 @@ impl fmt::Display for RefKind {
 /// A GitHub release entry used for update planning.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Release {
+    /// Git tag attached to the release.
     pub tag_name: String,
+    /// RFC 3339 publication timestamp returned by GitHub.
     pub published_at: String,
+    /// Whether GitHub marks this as a prerelease.
     pub prerelease: bool,
 }
 
 /// Cached list of releases for a repository.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReleasesIndex {
+    /// Published releases in GitHub response order, normally newest first.
     pub releases: Vec<Release>,
+    /// Unix timestamp in seconds when the index was cached.
     pub fetched_at: u64,
 }
 
@@ -102,8 +108,11 @@ pub enum GitHubError {
     RateLimited,
     /// The requested ref does not exist on GitHub (HTTP 404).
     NotFound {
+        /// Repository owner used by the failed request.
         owner: String,
+        /// Repository name used by the failed request.
         repo: String,
+        /// Requested tag or branch; empty for repository-level requests.
         git_ref: String,
     },
     /// Failed to read a cache entry from disk.
@@ -252,9 +261,9 @@ impl GitHubClient {
     ///
     /// Returns immediately for full 40-hex-char SHAs (no I/O). For tags the
     /// `GET /repos/{owner}/{repo}/git/ref/tags/{tag}` endpoint is used, with
-    /// automatic dereferencing of annotated tags. Release dates are fetched
-    /// best-effort and cached independently — their absence does not fail the
-    /// call.
+    /// automatic dereferencing of annotated tags. This method does not fetch
+    /// release metadata; the scan layer enriches matching tags from
+    /// [`Self::list_releases`].
     ///
     /// # Cache policy
     ///
@@ -301,7 +310,14 @@ impl GitHubClient {
         let published_at = None;
 
         if !self.no_cache {
-            self.write_cached(owner, repo, git_ref, ref_kind, &sha, published_at.as_deref())?;
+            self.write_cached(
+                owner,
+                repo,
+                git_ref,
+                ref_kind,
+                &sha,
+                published_at.as_deref(),
+            )?;
         }
 
         Ok(ResolvedRef {
@@ -504,10 +520,7 @@ impl GitHubClient {
             .agent
             .get(url)
             .header("Accept", "application/vnd.github+json")
-            .header(
-                "User-Agent",
-                &format!("actioneer/{}", crate::VERSION),
-            )
+            .header("User-Agent", &format!("actioneer/{}", crate::VERSION))
             .header("X-GitHub-Api-Version", "2022-11-28");
 
         let req = if let Some(token) = &self.token {

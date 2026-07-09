@@ -14,7 +14,7 @@ pub struct UsesLine {
     pub head: String,
     /// Unquoted `owner/repo@ref`.
     pub value: String,
-    pub quote: QuoteStyle,
+    quote: QuoteStyle,
     /// Trailing `# comment` text, without the `#`.
     pub comment: Option<String>,
 }
@@ -34,7 +34,11 @@ pub fn split(line: &str) -> Option<UsesLine> {
 
 /// Rebuild a full source line with a new action value and comment.
 pub fn join(line: &UsesLine, value: &str, comment: Option<&str>) -> String {
-    format!("{}{}", line.head, format_uses_value(value, line.quote, comment))
+    format!(
+        "{}{}",
+        line.head,
+        format_uses_value(value, line.quote, comment)
+    )
 }
 
 /// Byte index in `line` where the `uses:` value begins.

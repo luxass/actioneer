@@ -1,3 +1,5 @@
+//! Configuration values, file loading, CLI overrides, and validation.
+
 use std::{
     fmt,
     path::{Path, PathBuf},
@@ -10,8 +12,10 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PinMode {
+    /// Write a full commit SHA and, when known, a human-readable tag comment.
     #[default]
     Sha,
+    /// Write the selected release tag directly.
     Tag,
 }
 
@@ -42,9 +46,12 @@ impl FromStr for PinMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UpdateLevel {
+    /// Allow updates across major versions.
     Major,
+    /// Allow updates within the current major version.
     #[default]
     Minor,
+    /// Allow updates within the current major and minor version.
     Patch,
 }
 
@@ -78,14 +85,20 @@ impl FromStr for UpdateLevel {
 /// Parsed from strings like `"7d"`, `"4h"`, `"30m"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RelativeDuration {
+    /// Number of duration units.
     pub amount: u64,
+    /// Unit applied to [`Self::amount`].
     pub unit: DurationUnit,
 }
 
+/// Units accepted by [`RelativeDuration`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DurationUnit {
+    /// Calendar-independent 24-hour periods.
     Days,
+    /// Hours.
     Hours,
+    /// Minutes.
     Minutes,
 }
 
@@ -118,7 +131,7 @@ impl FromStr for RelativeDuration {
             _ => {
                 return Err(format!(
                     "unknown duration unit {unit_char:?} in {s:?}; expected 'd', 'h', or 'm'"
-                ))
+                ));
             }
         };
 
@@ -147,7 +160,9 @@ impl<'de> Deserialize<'de> for RelativeDuration {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OutputMode {
+    /// Human-readable non-interactive output.
     Plain,
+    /// Machine-readable JSON output.
     Json,
 }
 
@@ -180,16 +195,25 @@ impl FromStr for OutputMode {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ActioneerConfig {
+    /// Output pin representation used when applying updates.
     pub pin: PinMode,
+    /// Largest semver component that may change during routine updates.
     pub update: UpdateLevel,
+    /// Whether branch-pinned references are excluded from processing.
     pub skip_branches: bool,
+    /// Minimum age required before a release is eligible.
     #[serde(rename = "min-release-age")]
     pub min_release_age: Option<RelativeDuration>,
+    /// Whether network access is disabled in favor of cached data.
     pub offline: bool,
+    /// Whether cache reads and writes are bypassed.
     pub no_cache: bool,
+    /// Non-interactive output mode; `None` selects the update TUI.
     pub mode: Option<OutputMode>,
+    /// Whether all planned changes should be applied.
     #[serde(default)]
     pub apply: bool,
+    /// Whether apply results should be previewed without writing files.
     #[serde(default)]
     pub dry_run: bool,
 }
@@ -246,8 +270,11 @@ impl ActioneerConfig {
 /// Errors that can occur when loading or validating the configuration.
 #[derive(Debug)]
 pub enum ConfigError {
+    /// The configuration file could not be read.
     Io(std::io::Error),
+    /// The configuration file is not valid actioneer TOML.
     Parse(toml::de::Error),
+    /// Two or more resolved settings cannot be used together.
     Conflict(String),
 }
 

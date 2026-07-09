@@ -9,16 +9,16 @@
 //!       tags/<encoded_tag>.json
 //!       heads/<encoded_branch>.json
 //!     releases/
-//!       <encoded_tag>.json
+//!       index.json
 //! ```
 //!
 //! Branch names that contain `/` (e.g. `feature/foo`) are encoded as
 //! `feature%2Ffoo` in the filename so that the file stays within the
 //! `heads/` directory. All other characters are preserved as-is.
 //!
-//! Each `.json` file stores a [`CacheEntry`] serialised with
-//! [`serde_json::to_vec_pretty`]. Writes are performed atomically: the
-//! JSON is written to `<path>.tmp`, then renamed to `<path>`.
+//! Ref files store a [`CacheEntry`]; the release index stores a
+//! [`ReleasesIndex`](super::ReleasesIndex). Writes are performed atomically: JSON
+//! is written to `<path>.tmp`, then renamed to `<path>`.
 
 use std::{
     fs,
@@ -60,7 +60,13 @@ impl CacheEntry {
 ///
 /// `kind` is `"tags"` or `"heads"`. The ref string is `/`-encoded so that
 /// branch names with slashes remain within the `heads/` directory.
-pub(super) fn ref_path(cache: &CacheDir, owner: &str, repo: &str, kind: &str, git_ref: &str) -> PathBuf {
+pub(super) fn ref_path(
+    cache: &CacheDir,
+    owner: &str,
+    repo: &str,
+    kind: &str,
+    git_ref: &str,
+) -> PathBuf {
     let encoded = encode_ref(git_ref);
     cache
         .path()

@@ -1,11 +1,14 @@
+//! Audit command execution and rendering.
+
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use crate::cache::cache_dir;
 use crate::config::{ActioneerConfig, OutputMode};
 use crate::github::GitHubClient;
-use crate::scan::{scan_workspace, AuditIssue, ScanReport};
+use crate::scan::{AuditIssue, ScanReport, scan_workspace};
 
+/// Scan the selected workflows, render audit results, and return the CLI status.
 pub fn run(config: &ActioneerConfig, workflow_paths: &[PathBuf]) -> ExitCode {
     let root = Path::new(".");
     let client = GitHubClient::new(config, cache_dir());
@@ -63,12 +66,7 @@ fn render_plain(report: &ScanReport) {
             if reference.issues.is_empty() {
                 continue;
             }
-            let action = reference
-                .resolved
-                .located
-                .reference
-                .raw
-                .clone();
+            let action = reference.resolved.located.reference.raw.clone();
             for issue in &reference.issues {
                 println!("  - {action}: {}", issue_label(issue));
             }
@@ -89,7 +87,10 @@ fn issue_label(issue: &AuditIssue) -> String {
         AuditIssue::CommentMismatch { comment, expected } => {
             format!("comment mismatch (got {comment:?}, expected {expected:?})")
         }
-        AuditIssue::ReleaseTooYoung { min_age, published_at } => {
+        AuditIssue::ReleaseTooYoung {
+            min_age,
+            published_at,
+        } => {
             format!("release too young (min {min_age}, published {published_at})")
         }
         AuditIssue::SkippedBranch => "branch pin skipped by config".into(),

@@ -5,7 +5,7 @@ mod audit;
 mod display;
 mod pin;
 mod plan;
-pub mod types;
+mod types;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -13,14 +13,14 @@ use std::{fmt, io};
 
 use crate::config::ActioneerConfig;
 use crate::discovery::{self, DiscoveryError};
-use crate::engine::{comment_matches_ref, parse_workflow, ParseError, PinKind};
+use crate::engine::{ParseError, PinKind, comment_matches_ref, parse_workflow};
 use crate::github::{GitHubClient, GitHubError, Release, ResolvedRef};
 
-use pin::{classify_tag, TagShape};
+use pin::{TagShape, classify_tag};
 
 pub use types::{
     AppliedChange, ApplyFailure, ApplyReport, ApplyTarget, AuditIssue, LocatedReference,
-    PlannedChange, PlanReason, ReferenceReport, ResolvedReference, ScanReport, ScanStats,
+    PlanReason, PlannedChange, ReferenceReport, ResolvedReference, ScanReport, ScanStats,
     WorkflowReport,
 };
 
@@ -30,9 +30,18 @@ pub use display::{plan_from_label, plan_to_label, truncate_label};
 /// Errors during workspace scanning.
 #[derive(Debug)]
 pub enum ScanError {
+    /// Workflow target discovery failed.
     Discovery(DiscoveryError),
+    /// A workflow or apply target could not be read or written.
     Io(io::Error),
-    Parse { path: PathBuf, error: ParseError },
+    /// A discovered workflow could not be parsed.
+    Parse {
+        /// Workflow path relative to the scan root.
+        path: PathBuf,
+        /// Parser error returned by the engine.
+        error: ParseError,
+    },
+    /// A GitHub operation required for a complete scan failed.
     GitHub(GitHubError),
 }
 
@@ -83,6 +92,22 @@ impl From<GitHubError> for ScanError {
 /// - one `resolve_ref` per unique pin (cached)
 /// - at most one `resolve_ref` for the planned target tag
 /// - for SHA pins with semver comments: one `resolve_ref` for that comment tag
+///
+/// Paths in the returned report are relative to `root`. Passing no
+/// `workflow_paths` discovers the flat `root/.github/workflows` directory.
+///
+/// # Errors
+///
+/// Discovery, file reads, parsing, release-list requests, and GitHub requests
+/// required to construct a plan abort the scan. A failure to resolve the current
+/// written ref is instead represented by [`AuditIssue::ResolutionFailed`], and
+/// semver-comment resolution is best-effort.
+///
+/// # Side effects
+///
+/// The function reads workflow files and may read or populate the GitHub cache
+/// or perform network requests according to `config` and `client`. It does not
+/// modify workflow files.
 pub fn scan_workspace(
     root: &Path,
     workflow_paths: &[PathBuf],
@@ -136,11 +161,12 @@ pub fn scan_workspace(
 
             enrich_published_at(&mut resolved, &releases);
 
-            let comment_tag_sha = if let (Some(owner), Some(repo)) = (&reference.owner, &reference.repo) {
-                resolve_comment_tag_sha(&reference, client, owner, repo, &mut resolve_cache)?
-            } else {
-                None
-            };
+            let comment_tag_sha =
+                if let (Some(owner), Some(repo)) = (&reference.owner, &reference.repo) {
+                    resolve_comment_tag_sha(&reference, client, owner, repo, &mut resolve_cache)?
+                } else {
+                    None
+                };
 
             let mut issues = audit::evaluate(
                 &resolved,

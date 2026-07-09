@@ -7,8 +7,9 @@
 ## Overview
 
 The GitHub client resolves `owner/repo@ref` strings (produced by the engine
-layer) to commit SHAs. It also fetches the GitHub Release publication date for
-future `min-release-age` filtering.
+layer) to commit SHAs and lists repository releases. The scan layer matches a
+resolved tag to that releases index to enforce `min-release-age` and plan
+updates without a per-reference release request.
 
 ```
 ActioneerConfig { offline, no_cache, ... }
@@ -31,12 +32,14 @@ CacheDir (optional)
          │    or  /repos/{owner}/{repo}/git/ref/heads/{branch}
          │    (annotated tag? dereference via /git/tags/{sha})
          │
-         ├─ Fetch release date (best-effort, tags only)
-         │    GET /repos/{owner}/{repo}/releases/tags/{tag}
-         │
          ├─ Write to cache (unless no_cache)
          │
          └── ResolvedRef { sha, ref_kind, published_at }
+
+  list_releases(owner, repo)
+         ├─ Read releases/index.json (unless no_cache)
+         ├─ GET /repos/{owner}/{repo}/releases on cache miss
+         └── scan layer enriches matching ResolvedRef values
 ```
 
 ## Module layout
@@ -44,7 +47,7 @@ CacheDir (optional)
 | Path | Role |
 |------|------|
 | `src/github/mod.rs` | Public types: `GitHubClient`, `ResolvedRef`, `RefKind`, `GitHubError`; private: response types, HTTP helpers, resolution logic |
-| `src/github/cache.rs` | `CacheEntry`; `ref_path`, `release_path`, `read_entry`, `write_entry`, `now_secs` |
+| `src/github/cache.rs` | `CacheEntry`; ref/release-index paths, cache reads/writes, `now_secs` |
 | `testdata/github/` | JSON fixtures matching real GitHub API response shapes |
 | `tests/github.rs` | Integration test suite (cache-based; live tests are `#[ignore]`) |
 
@@ -58,6 +61,8 @@ GitHubClient::with_base_url(self, url: impl Into<String>) -> Self  // test helpe
 // Resolution
 GitHubClient::resolve_ref(&self, owner: &str, repo: &str, git_ref: &str)
     -> Result<ResolvedRef, GitHubError>
+GitHubClient::list_releases(&self, owner: &str, repo: &str)
+    -> Result<Vec<Release>, GitHubError>
 
 // Types
 pub struct ResolvedRef { pub sha: String, pub ref_kind: RefKind, pub published_at: Option<String> }
@@ -75,7 +80,7 @@ pub struct CacheEntry { pub sha, pub ref_kind, pub published_at, pub fetched_at 
       tags/<encoded_tag>.json
       heads/<encoded_branch>.json
     releases/
-      <encoded_tag>.json
+      index.json
 ```
 
 Encoding: `/` in ref names is replaced with `%2F`. All other characters used in
@@ -150,19 +155,16 @@ GET /repos/{owner}/{repo}/git/ref/heads/{branch}
 Same response shape as the tag endpoint. `object.type` is always `"commit"` for
 branch refs.
 
-### Fetch release date (best-effort)
+### List repository releases
 
 ```
-GET /repos/{owner}/{repo}/releases/tags/{tag}
+GET /repos/{owner}/{repo}/releases?per_page=100&page={page}
 ```
 
-Response (partial):
-```json
-{ "published_at": "2023-10-16T17:17:35Z" }
-```
-
-HTTP 404 means the tag has no corresponding GitHub Release — this is treated as
-`published_at: None`, not an error.
+The client follows up to ten pages, ignores releases without `published_at`, and
+caches the result at `releases/index.json`. The scan layer enriches a resolved
+tag when its name matches an entry. `resolve_ref` does not make a separate
+`releases/tags/{tag}` request.
 
 ## Request headers
 
@@ -296,11 +298,9 @@ Currently `RateLimited` is returned immediately. A retry-with-backoff strategy
 
 ## Future hooks
 
-- **`min_release_age` enforcement** — `published_at` is available but the
-  comparison against `ActioneerConfig::min_release_age` is not yet implemented.
-  The audit layer will do this comparison using the `ResolvedRef::published_at`
-  string.
-- **Audit / update commands** — the client is intentionally not wired into
-  `cmd/audit.rs` or `cmd/update.rs` yet.
 - **File discovery** — the client does not search for workflow files; that
   belongs in a separate layer.
+- **Cache TTL** — cache entries record `fetched_at`, but expiration and manual
+  clearing remain deferred.
+- **Rate-limit retry** — rate-limit errors are returned immediately; retry and
+  backoff remain deferred.

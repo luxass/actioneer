@@ -6,10 +6,23 @@ use std::path::{Path, PathBuf};
 /// Errors during workflow discovery.
 #[derive(Debug)]
 pub enum DiscoveryError {
+    /// A directory or filesystem entry could not be read.
     Io(std::io::Error),
-    NotFound { path: PathBuf },
-    NotWorkflowFile { path: PathBuf },
-    NotFileOrDirectory { path: PathBuf },
+    /// An explicit target does not exist.
+    NotFound {
+        /// Target path as supplied by the caller.
+        path: PathBuf,
+    },
+    /// An explicit file target is not YAML.
+    NotWorkflowFile {
+        /// Target path as supplied by the caller.
+        path: PathBuf,
+    },
+    /// An explicit target exists but is neither a regular file nor directory.
+    NotFileOrDirectory {
+        /// Target path as supplied by the caller.
+        path: PathBuf,
+    },
 }
 
 impl std::fmt::Display for DiscoveryError {
@@ -77,7 +90,9 @@ pub fn resolve_workflow_paths(
         };
 
         if !absolute.exists() {
-            return Err(DiscoveryError::NotFound { path: target.clone() });
+            return Err(DiscoveryError::NotFound {
+                path: target.clone(),
+            });
         }
 
         if absolute.is_file() {

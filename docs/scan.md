@@ -6,7 +6,7 @@
 ## Overview
 
 **Scan once, render many.** Both commands call `scan_workspace()` and receive the same
-[`ScanReport`](src/scan/types.rs). Audit surfaces `issues`; update surfaces `planned`.
+[`ScanReport`](../src/scan/types.rs). Audit surfaces `issues`; update surfaces `planned`.
 
 ```
 repo root

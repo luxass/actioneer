@@ -1,3 +1,5 @@
+//! Clap argument types shared by the actioneer binary and tests.
+
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
@@ -5,6 +7,7 @@ use clap::{Args, Parser, Subcommand};
 use crate::config::{OutputMode, PinMode, RelativeDuration, UpdateLevel};
 
 #[derive(Debug, Args, Default)]
+/// Positional workflow files or flat directories supplied to a command.
 pub struct WorkflowPathArgs {
     /// Workflow file(s) or directory to scan (default: .github/workflows/)
     #[arg(value_name = "PATH")]
@@ -18,7 +21,9 @@ pub struct WorkflowPathArgs {
     about = "GitHub Actions CLI",
     args_conflicts_with_subcommands = true
 )]
+/// Parsed command line for actioneer.
 pub struct Cli {
+    /// Explicit subcommand, or `None` for the default update command.
     #[command(subcommand)]
     pub command: Option<Command>,
 
@@ -26,6 +31,7 @@ pub struct Cli {
     #[arg(value_name = "PATH")]
     pub paths: Vec<PathBuf>,
 
+    /// Configuration overrides supplied on the command line.
     #[command(flatten)]
     pub config: ConfigArgs,
 }
@@ -43,15 +49,21 @@ impl Cli {
 }
 
 #[derive(Debug, Subcommand)]
+/// Commands supported by the actioneer binary.
 pub enum Command {
+    /// Audit workflow references and return a failing status when issues exist.
     Audit {
+        /// Explicit workflows or directories to audit.
         #[command(flatten)]
         workflow_paths: WorkflowPathArgs,
     },
+    /// Plan, display, or apply workflow-reference updates.
     Update {
+        /// Explicit workflows or directories to update.
         #[command(flatten)]
         workflow_paths: WorkflowPathArgs,
     },
+    /// Print the compiled package version.
     Version,
 }
 

@@ -2,14 +2,11 @@ use std::fs;
 use std::path::PathBuf;
 
 use actioneer::config::{ActioneerConfig, PinMode};
-use actioneer::engine::{parse_workflow, CommentMatch};
+use actioneer::engine::{CommentMatch, parse_workflow};
 use actioneer::github::{RefKind, ResolvedRef};
 use actioneer::scan::{
-    apply,
-    types::{
-        ApplyTarget, LocatedReference, PlannedChange, PlanReason, ReferenceReport,
-        ResolvedReference, ScanReport, ScanStats, WorkflowReport,
-    },
+    ApplyTarget, LocatedReference, PlanReason, PlannedChange, ReferenceReport, ResolvedReference,
+    ScanReport, ScanStats, WorkflowReport, apply,
 };
 use tempfile::TempDir;
 

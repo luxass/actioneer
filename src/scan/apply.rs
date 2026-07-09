@@ -6,16 +6,36 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::config::{ActioneerConfig, PinMode};
-use crate::engine::{join_uses_line as join, split_uses_line as split, UsesLine};
+use crate::engine::{UsesLine, join_uses_line as join, split_uses_line as split};
 
-use super::display::{plan_from_label, plan_to_label};
-use super::types::{ApplyFailure, AppliedChange, ApplyReport, ApplyTarget, PlannedChange, ScanReport};
 use super::ScanError;
+use super::display::{plan_from_label, plan_to_label};
+use super::types::{
+    AppliedChange, ApplyFailure, ApplyReport, ApplyTarget, PlannedChange, ScanReport,
+};
 
 /// Apply selected planned updates to workflow files.
 ///
 /// When `dry_run` is true, files are not modified but [`ApplyReport`] still lists
-/// the changes that would have been written.
+/// the changes that would have been written in [`ApplyReport::applied`].
+///
+/// Callers must inspect [`ApplyReport::failures`] even when this function returns
+/// `Ok`: stale or invalid individual targets are reported there. Valid targets
+/// in the same workflow are still written. File replacement uses a temporary
+/// file and rename, but applying multiple workflows is not one atomic operation
+/// and earlier files are not rolled back after a later failure.
+///
+/// # Errors
+///
+/// Operation-wide failures may be returned as [`ScanError`]. File and target
+/// failures that can be associated with requested targets are collected in the
+/// returned report instead.
+///
+/// # Side effects
+///
+/// Unless `dry_run` is set, this function rewrites workflow files below `root`.
+/// It verifies that each source line still matches the scanned reference before
+/// replacing it.
 pub fn apply(
     root: &Path,
     report: &ScanReport,
@@ -39,7 +59,14 @@ pub fn apply(
 
     for (workflow_path, file_targets) in by_file {
         let path = root.join(&workflow_path);
-        match apply_file(report, &path, &workflow_path, &file_targets, config, dry_run) {
+        match apply_file(
+            report,
+            &path,
+            &workflow_path,
+            &file_targets,
+            config,
+            dry_run,
+        ) {
             Ok((applied, failures)) => {
                 result.applied.extend(applied);
                 result.failures.extend(failures);
@@ -177,9 +204,10 @@ fn find_reference<'a>(
         if workflow.path != workflow_path {
             return None;
         }
-        workflow.references.iter().find(|reference| {
-            reference.resolved.located.reference.line == Some(line)
-        })
+        workflow
+            .references
+            .iter()
+            .find(|reference| reference.resolved.located.reference.line == Some(line))
     })
 }
 
@@ -191,11 +219,7 @@ fn target_value(raw: &str, planned: &PlannedChange) -> String {
     format!("{base}@{}", planned.to_ref)
 }
 
-fn target_comment(
-    pin: PinMode,
-    planned: &PlannedChange,
-    existing: &UsesLine,
-) -> Option<String> {
+fn target_comment(pin: PinMode, planned: &PlannedChange, existing: &UsesLine) -> Option<String> {
     match pin {
         PinMode::Sha => planned.to_comment.clone(),
         PinMode::Tag => {
@@ -214,13 +238,13 @@ fn write_lines(path: &Path, lines: &[String], had_trailing_newline: bool) -> Res
         content.push('\n');
     }
 
-    let parent = path
-        .parent()
-        .ok_or_else(|| ScanError::Io(io::Error::new(io::ErrorKind::InvalidInput, "missing parent")))?;
-    let tmp = parent.join(format!(
-        ".actioneer-apply-{}",
-        std::process::id()
-    ));
+    let parent = path.parent().ok_or_else(|| {
+        ScanError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "missing parent",
+        ))
+    })?;
+    let tmp = parent.join(format!(".actioneer-apply-{}", std::process::id()));
     std::fs::write(&tmp, &content).map_err(ScanError::Io)?;
     std::fs::rename(&tmp, path).map_err(ScanError::Io)?;
     Ok(())
@@ -231,11 +255,7 @@ impl fmt::Display for ApplyReport {
         if self.applied.is_empty() && self.failures.is_empty() {
             return write!(f, "no updates applied");
         }
-        write!(
-            f,
-            "applied {} update(s)",
-            self.applied.len()
-        )?;
+        write!(f, "applied {} update(s)", self.applied.len())?;
         if !self.failures.is_empty() {
             write!(f, ", {} failed", self.failures.len())?;
         }

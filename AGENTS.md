@@ -140,7 +140,5 @@ Live GitHub tests are `#[ignore]`; default suite uses `testdata/github/` fixture
 
 ## Pitfalls
 
-- `README.md` on rewrite branch is outdated — trust `docs/` and this file.
-- `docs/github.md` § Future hooks mentions audit/update “not wired yet” — stale; they are wired via scan pipeline.
 - Same `uses:` value repeated in a file can confuse line-number assignment (documented in `docs/engine.md`).
 - `serde_yaml 0.9` is deprecated upstream but still used; migration path noted in engine spec.

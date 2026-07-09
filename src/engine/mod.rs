@@ -21,14 +21,14 @@
 //! |--------|----------------|
 //! | `mod.rs` (this file) | Public types and re-exports |
 //! | `parse` | YAML → [`WorkflowDocument`] |
-//! | `reference` | Raw `uses:` string → [`ParsedUses`] |
+//! | `reference` | Raw `uses:` string → `ParsedUses` |
 
 mod parse;
 mod reference;
 mod uses_line;
 
 pub use parse::parse_workflow;
-pub use uses_line::{join as join_uses_line, split as split_uses_line, uses_value_start, UsesLine};
+pub use uses_line::{UsesLine, join as join_uses_line, split as split_uses_line, uses_value_start};
 
 use std::fmt;
 
@@ -256,6 +256,7 @@ pub enum CommentMatch {
 /// | No [`ActionReference::line_comment`] | [`CommentMatch::NoComment`] |
 /// | Comment text equals `git_ref` exactly | [`CommentMatch::Match`] |
 /// | `git_ref` is a full SHA-1 and the comment contains that SHA | [`CommentMatch::Match`] |
+/// | SHA pin with a semver-shaped comment | [`CommentMatch::Match`] (validated by audit) |
 /// | Otherwise | [`CommentMatch::Mismatch`] |
 ///
 /// # Examples

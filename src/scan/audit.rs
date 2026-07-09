@@ -7,8 +7,7 @@ use crate::engine::{AuditTier, CommentMatch, PinKind, ReferenceKind};
 use crate::github::{Release, ResolvedRef};
 
 use super::pin::{
-    classify_tag, latest_on_major, parse_semver_tag, version_baseline,
-    TagShape, VersionBaseline,
+    TagShape, VersionBaseline, classify_tag, latest_on_major, parse_semver_tag, version_baseline,
 };
 use super::types::{AuditIssue, ResolvedReference};
 
@@ -200,9 +199,10 @@ fn check_update_blocked_by_config(
     }
 
     let allowed = select_release_for_level(releases, &current_ver, config.update);
-    if allowed.as_ref().is_none_or(|r| {
-        parse_semver_tag(&r.tag_name).is_some_and(|v| v <= current_ver)
-    }) {
+    if allowed
+        .as_ref()
+        .is_none_or(|r| parse_semver_tag(&r.tag_name).is_some_and(|v| v <= current_ver))
+    {
         issues.push(AuditIssue::UpdateBlockedByConfig {
             current_version: format_version_tag(&current_ver),
             available_version: latest.tag_name.clone(),
@@ -219,10 +219,7 @@ fn select_release_for_level(
     let mut candidates: Vec<&Release> = releases
         .iter()
         .filter(|r| !r.prerelease)
-        .filter(|r| {
-            parse_semver_tag(&r.tag_name)
-                .is_some_and(|v| is_candidate(current, &v, level))
-        })
+        .filter(|r| parse_semver_tag(&r.tag_name).is_some_and(|v| is_candidate(current, &v, level)))
         .collect();
 
     candidates.sort_by(|a, b| {
@@ -239,9 +236,7 @@ fn is_candidate(current: &Version, candidate: &Version, level: UpdateLevel) -> b
         return false;
     }
     match level {
-        UpdateLevel::Patch => {
-            candidate.major == current.major && candidate.minor == current.minor
-        }
+        UpdateLevel::Patch => candidate.major == current.major && candidate.minor == current.minor,
         UpdateLevel::Minor => candidate.major == current.major,
         UpdateLevel::Major => true,
     }
@@ -261,11 +256,9 @@ fn short_sha(sha: &str) -> String {
 
 fn check_release_age(current: &ResolvedRef, min_age: RelativeDuration) -> Option<AuditIssue> {
     let published_at = current.published_at.as_deref()?;
-    let published = time::OffsetDateTime::parse(
-        published_at,
-        &time::format_description::well_known::Rfc3339,
-    )
-    .ok()?;
+    let published =
+        time::OffsetDateTime::parse(published_at, &time::format_description::well_known::Rfc3339)
+            .ok()?;
     let now = time::OffsetDateTime::now_utc();
     let min_duration = relative_duration_to_time(min_age);
     let age = now - published;
@@ -362,14 +355,22 @@ mod tests {
     fn branch_pin_is_mutable() {
         let resolved = action_ref(PinKind::Branch, "main", None, ReferenceKind::Action);
         let issues = evaluate(&resolved, &[], &ActioneerConfig::default(), None);
-        assert!(issues.iter().any(|i| matches!(i, AuditIssue::MutableBranch)));
+        assert!(
+            issues
+                .iter()
+                .any(|i| matches!(i, AuditIssue::MutableBranch))
+        );
     }
 
     #[test]
     fn major_only_tag_is_floating() {
         let resolved = action_ref(PinKind::Tag, "v4", None, ReferenceKind::Action);
         let issues = evaluate(&resolved, &[], &ActioneerConfig::default(), None);
-        assert!(issues.iter().any(|i| matches!(i, AuditIssue::FloatingMajorPin { .. })));
+        assert!(
+            issues
+                .iter()
+                .any(|i| matches!(i, AuditIssue::FloatingMajorPin { .. }))
+        );
     }
 
     #[test]
@@ -390,8 +391,16 @@ mod tests {
             &ActioneerConfig::default(),
             Some(("v4.2.0", &sha)),
         );
-        assert!(!issues.iter().any(|i| matches!(i, AuditIssue::CommentMismatch { .. })));
-        assert!(!issues.iter().any(|i| matches!(i, AuditIssue::UnreleasedCommit { .. })));
+        assert!(
+            !issues
+                .iter()
+                .any(|i| matches!(i, AuditIssue::CommentMismatch { .. }))
+        );
+        assert!(
+            !issues
+                .iter()
+                .any(|i| matches!(i, AuditIssue::UnreleasedCommit { .. }))
+        );
     }
 
     #[test]
@@ -407,17 +416,23 @@ mod tests {
             &ActioneerConfig::default(),
             Some(("v4.2.0", &sha)),
         );
-        assert!(issues.iter().any(|i| matches!(
-            i,
-            AuditIssue::CommentMajorLineMismatch { .. }
-        )));
+        assert!(
+            issues
+                .iter()
+                .any(|i| matches!(i, AuditIssue::CommentMajorLineMismatch { .. }))
+        );
     }
 
     #[test]
     fn unreleased_sha_when_comment_tag_mismatch() {
         let sha = "a".repeat(40);
         let other = "b".repeat(40);
-        let mut resolved = action_ref(PinKind::FullSha, &sha, Some("v4.2.0"), ReferenceKind::Action);
+        let mut resolved = action_ref(
+            PinKind::FullSha,
+            &sha,
+            Some("v4.2.0"),
+            ReferenceKind::Action,
+        );
         resolved.current.sha = sha;
 
         let issues = evaluate(
@@ -426,7 +441,11 @@ mod tests {
             &ActioneerConfig::default(),
             Some(("v4.2.0", &other)),
         );
-        assert!(issues.iter().any(|i| matches!(i, AuditIssue::UnreleasedCommit { .. })));
+        assert!(
+            issues
+                .iter()
+                .any(|i| matches!(i, AuditIssue::UnreleasedCommit { .. }))
+        );
     }
 
     #[test]
@@ -437,10 +456,11 @@ mod tests {
             ..Default::default()
         };
         let issues = evaluate(&resolved, &releases(), &config, None);
-        assert!(issues.iter().any(|i| matches!(
-            i,
-            AuditIssue::UpdateBlockedByConfig { .. }
-        )));
+        assert!(
+            issues
+                .iter()
+                .any(|i| matches!(i, AuditIssue::UpdateBlockedByConfig { .. }))
+        );
     }
 
     #[test]

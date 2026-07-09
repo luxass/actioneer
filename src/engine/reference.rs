@@ -231,10 +231,7 @@ mod tests {
         assert_eq!(p.kind, ReferenceKind::ReusableWorkflow);
         assert_eq!(p.owner.as_deref(), Some("octo-org"));
         assert_eq!(p.repo.as_deref(), Some("octo-repo"));
-        assert_eq!(
-            p.subpath.as_deref(),
-            Some(".github/workflows/workflow.yml")
-        );
+        assert_eq!(p.subpath.as_deref(), Some(".github/workflows/workflow.yml"));
         assert_eq!(p.pin_kind, PinKind::Tag);
     }
 

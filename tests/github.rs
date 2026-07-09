@@ -34,7 +34,14 @@ fn no_cache_client() -> (TempDir, GitHubClient) {
 }
 
 /// Write a pre-built [`CacheEntry`] at the expected cache path for `owner/repo@ref`.
-fn seed_cache(dir: &TempDir, owner: &str, repo: &str, kind: &str, git_ref: &str, entry: &CacheEntry) {
+fn seed_cache(
+    dir: &TempDir,
+    owner: &str,
+    repo: &str,
+    kind: &str,
+    git_ref: &str,
+    entry: &CacheEntry,
+) {
     use actioneer::cache::resolve_cache_dir_with;
     use std::fs;
 
@@ -105,7 +112,14 @@ fn cache_hit_branch_with_slash_in_name() {
         published_at: None,
         fetched_at: 1_700_000_000,
     };
-    seed_cache(&dir, "myorg", "myrepo", "heads", "feature/cool-thing", &entry);
+    seed_cache(
+        &dir,
+        "myorg",
+        "myrepo",
+        "heads",
+        "feature/cool-thing",
+        &entry,
+    );
 
     let client = offline_client(&dir);
     let resolved = client
@@ -138,9 +152,7 @@ fn offline_cache_miss_returns_error() {
     let dir = TempDir::new().unwrap();
     let client = offline_client(&dir);
 
-    let err = client
-        .resolve_ref("actions", "checkout", "v4")
-        .unwrap_err();
+    let err = client.resolve_ref("actions", "checkout", "v4").unwrap_err();
 
     assert!(
         matches!(err, GitHubError::Offline),
@@ -246,7 +258,10 @@ fn error_not_found_display() {
         repo: "checkout".into(),
         git_ref: "v99".into(),
     };
-    assert_eq!(e.to_string(), "actions/checkout@v99: ref not found on GitHub");
+    assert_eq!(
+        e.to_string(),
+        "actions/checkout@v99: ref not found on GitHub"
+    );
 }
 
 #[test]
@@ -284,10 +299,7 @@ fn error_http_without_message_display() {
 // the shape of the real GitHub API responses stored in testdata/github/.
 
 fn fixture(name: &str) -> String {
-    let path = format!(
-        "{}/testdata/github/{name}",
-        env!("CARGO_MANIFEST_DIR")
-    );
+    let path = format!("{}/testdata/github/{name}", env!("CARGO_MANIFEST_DIR"));
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"))
 }
 
@@ -304,7 +316,8 @@ fn fixture_git_ref_tag_lightweight_sha() {
         kind: String,
     }
 
-    let resp: GitRefResponse = serde_json::from_str(&fixture("git_ref_tag_lightweight.json")).unwrap();
+    let resp: GitRefResponse =
+        serde_json::from_str(&fixture("git_ref_tag_lightweight.json")).unwrap();
     assert_eq!(resp.object.sha, "a81bbbf8298c0fa03ea29cdc473d45769f953675");
     assert_eq!(resp.object.kind, "commit");
 }
@@ -321,8 +334,12 @@ fn fixture_git_ref_tag_annotated_type() {
         kind: String,
     }
 
-    let resp: GitRefResponse = serde_json::from_str(&fixture("git_ref_tag_annotated.json")).unwrap();
-    assert_eq!(resp.object.kind, "tag", "annotated tag object type must be 'tag'");
+    let resp: GitRefResponse =
+        serde_json::from_str(&fixture("git_ref_tag_annotated.json")).unwrap();
+    assert_eq!(
+        resp.object.kind, "tag",
+        "annotated tag object type must be 'tag'"
+    );
 }
 
 #[test]
@@ -338,10 +355,7 @@ fn fixture_git_tag_annotated_deref_commit_sha() {
 
     let resp: GitTagResponse =
         serde_json::from_str(&fixture("git_tag_annotated_deref.json")).unwrap();
-    assert_eq!(
-        resp.object.sha,
-        "deadbeefdeadbeefdeadbeefdeadbeef12345678"
-    );
+    assert_eq!(resp.object.sha, "deadbeefdeadbeefdeadbeefdeadbeef12345678");
 }
 
 #[test]

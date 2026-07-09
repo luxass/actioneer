@@ -6,7 +6,10 @@
 use indexmap::IndexMap;
 use serde::Deserialize;
 
-use super::{reference::parse_uses, uses_line::parse_value_and_comment, ActionReference, ParseError, WorkflowDocument};
+use super::{
+    ActionReference, ParseError, WorkflowDocument, reference::parse_uses,
+    uses_line::parse_value_and_comment,
+};
 
 /// Parse a GitHub Actions workflow from its raw YAML content.
 ///

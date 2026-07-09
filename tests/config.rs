@@ -3,8 +3,8 @@ use std::{fs, path::Path};
 use actioneer::{
     cli::ConfigArgs,
     config::{
-        find_config, load, load_config, ActioneerConfig, DurationUnit, OutputMode, PinMode,
-        RelativeDuration, UpdateLevel,
+        ActioneerConfig, DurationUnit, OutputMode, PinMode, RelativeDuration, UpdateLevel,
+        find_config, load, load_config,
     },
 };
 

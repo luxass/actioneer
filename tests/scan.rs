@@ -8,7 +8,14 @@ use actioneer::{
 };
 use tempfile::TempDir;
 
-fn seed_ref_cache(dir: &TempDir, owner: &str, repo: &str, kind: &str, git_ref: &str, entry: &CacheEntry) {
+fn seed_ref_cache(
+    dir: &TempDir,
+    owner: &str,
+    repo: &str,
+    kind: &str,
+    git_ref: &str,
+    entry: &CacheEntry,
+) {
     let cache = resolve_cache_dir_with(Some(dir.path().to_str().unwrap())).unwrap();
     let encoded = git_ref.replace('/', "%2F");
     let path = cache
@@ -61,10 +68,8 @@ fn scan_offline_produces_reference_reports() {
     seed_ref_cache(&dir, "actions", "setup-node", "tags", "v4", &entry_v4);
     seed_ref_cache(&dir, "actions", "setup-node", "tags", "v3", &entry_v4);
 
-    let release_list: Vec<Release> = serde_json::from_str(include_str!(
-        "../testdata/github/releases_checkout.json"
-    ))
-    .unwrap();
+    let release_list: Vec<Release> =
+        serde_json::from_str(include_str!("../testdata/github/releases_checkout.json")).unwrap();
     let releases_index = ReleasesIndex {
         releases: release_list,
         fetched_at: 1_700_000_000,
@@ -120,10 +125,8 @@ fn scan_major_only_tag_plans_normalization_and_flags_floating() {
     seed_ref_cache(&dir, "actions", "checkout", "tags", "v4", &entry);
     seed_ref_cache(&dir, "actions", "checkout", "tags", "v4.2.0", &entry);
 
-    let release_list: Vec<Release> = serde_json::from_str(include_str!(
-        "../testdata/github/releases_checkout.json"
-    ))
-    .unwrap();
+    let release_list: Vec<Release> =
+        serde_json::from_str(include_str!("../testdata/github/releases_checkout.json")).unwrap();
     let releases_index = ReleasesIndex {
         releases: release_list,
         fetched_at: 1_700_000_000,
@@ -141,10 +144,12 @@ fn scan_major_only_tag_plans_normalization_and_flags_floating() {
     let report = scan_workspace(dir.path(), &[], &config, &client).unwrap();
     let reference = &report.workflows[0].references[0];
 
-    assert!(reference
-        .issues
-        .iter()
-        .any(|i| matches!(i, actioneer::scan::AuditIssue::FloatingMajorPin { .. })));
+    assert!(
+        reference
+            .issues
+            .iter()
+            .any(|i| matches!(i, actioneer::scan::AuditIssue::FloatingMajorPin { .. }))
+    );
     let planned = reference.planned.as_ref().unwrap();
     assert_eq!(planned.from_version.as_deref(), Some("v4"));
     assert_eq!(planned.to_ref, "v4.2.0");
@@ -171,10 +176,8 @@ fn scan_explicit_workflow_file_path() {
     seed_ref_cache(&dir, "actions", "setup-node", "tags", "v4", &entry_v4);
     seed_ref_cache(&dir, "actions", "setup-node", "tags", "v3", &entry_v4);
 
-    let release_list: Vec<Release> = serde_json::from_str(include_str!(
-        "../testdata/github/releases_checkout.json"
-    ))
-    .unwrap();
+    let release_list: Vec<Release> =
+        serde_json::from_str(include_str!("../testdata/github/releases_checkout.json")).unwrap();
     let releases_index = ReleasesIndex {
         releases: release_list,
         fetched_at: 1_700_000_000,

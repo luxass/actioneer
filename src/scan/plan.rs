@@ -11,10 +11,10 @@ use crate::github::{GitHubClient, GitHubError, Release, ResolvedRef};
 
 use super::audit::blocks_update;
 use super::pin::{
-    classify_tag, latest_on_major, parse_semver_tag, version_baseline, would_change,
-    written_version_tag, TagShape, VersionBaseline,
+    TagShape, VersionBaseline, classify_tag, latest_on_major, parse_semver_tag, version_baseline,
+    would_change, written_version_tag,
 };
-use super::types::{AuditIssue, PlannedChange, PlanReason, ResolvedReference};
+use super::types::{AuditIssue, PlanReason, PlannedChange, ResolvedReference};
 
 /// GitHub resolution context shared across plan steps.
 pub struct PlanContext<'a> {
@@ -52,7 +52,10 @@ pub fn propose(
         return Ok(None);
     }
 
-    if issues.iter().any(|i| matches!(i, AuditIssue::UnreleasedCommit { .. })) {
+    if issues
+        .iter()
+        .any(|i| matches!(i, AuditIssue::UnreleasedCommit { .. }))
+    {
         return propose_remediation(resolved, releases, config, ctx);
     }
 
@@ -77,7 +80,12 @@ pub fn propose(
         VersionBaseline::MajorOnly(_) => unreachable!("handled above"),
     };
 
-    let candidate = select_release(releases, &current_ver, config.update, config.min_release_age)?;
+    let candidate = select_release(
+        releases,
+        &current_ver,
+        config.update,
+        config.min_release_age,
+    )?;
     let Some(release) = candidate else {
         return Ok(None);
     };
@@ -115,7 +123,12 @@ fn propose_major_only(
         .unwrap_or_else(|| Version::new(major, 0, 0));
 
     let filtered = filter_releases_on_major(releases, major);
-    let Some(release) = select_release(&filtered, &current_ver, config.update, config.min_release_age)?
+    let Some(release) = select_release(
+        &filtered,
+        &current_ver,
+        config.update,
+        config.min_release_age,
+    )?
     else {
         return Ok(None);
     };
@@ -146,13 +159,7 @@ fn propose_remediation(
         return Ok(None);
     };
 
-    build_plan(
-        resolved,
-        release,
-        written_tag,
-        config,
-        ctx,
-    )
+    build_plan(resolved, release, written_tag, config, ctx)
 }
 
 fn build_plan(
@@ -169,10 +176,7 @@ fn build_plan(
     };
 
     let (to_ref, to_comment) = match config.pin {
-        PinMode::Sha => (
-            target_resolved.sha.clone(),
-            Some(release.tag_name.clone()),
-        ),
+        PinMode::Sha => (target_resolved.sha.clone(), Some(release.tag_name.clone())),
         PinMode::Tag => (release.tag_name.clone(), None),
     };
 
@@ -238,10 +242,7 @@ fn infer_version_on_major(
     Ok(None)
 }
 
-fn cached_resolve(
-    ctx: &mut PlanContext<'_>,
-    git_ref: &str,
-) -> Result<ResolvedRef, GitHubError> {
+fn cached_resolve(ctx: &mut PlanContext<'_>, git_ref: &str) -> Result<ResolvedRef, GitHubError> {
     let key = (
         ctx.owner.to_string(),
         ctx.repo.to_string(),
@@ -259,8 +260,7 @@ fn filter_releases_on_major(releases: &[Release], major: u64) -> Vec<Release> {
     releases
         .iter()
         .filter(|r| {
-            !r.prerelease
-                && parse_semver_tag(&r.tag_name).is_some_and(|v| v.major == major)
+            !r.prerelease && parse_semver_tag(&r.tag_name).is_some_and(|v| v.major == major)
         })
         .cloned()
         .collect()
@@ -309,10 +309,7 @@ fn select_release(
     let mut candidates: Vec<&Release> = releases
         .iter()
         .filter(|r| !r.prerelease)
-        .filter(|r| {
-            parse_semver_tag(&r.tag_name)
-                .is_some_and(|v| is_candidate(current, &v, level))
-        })
+        .filter(|r| parse_semver_tag(&r.tag_name).is_some_and(|v| is_candidate(current, &v, level)))
         .filter(|r| release_meets_min_age(r, min_age, now))
         .collect();
 
@@ -330,9 +327,7 @@ fn is_candidate(current: &Version, candidate: &Version, level: UpdateLevel) -> b
         return false;
     }
     match level {
-        UpdateLevel::Patch => {
-            candidate.major == current.major && candidate.minor == current.minor
-        }
+        UpdateLevel::Patch => candidate.major == current.major && candidate.minor == current.minor,
         UpdateLevel::Minor => candidate.major == current.major,
         UpdateLevel::Major => true,
     }
@@ -412,7 +407,10 @@ mod tests {
             offline: true,
             ..Default::default()
         };
-        GitHubClient::new(&config, resolve_cache_dir_with(Some(dir.path().to_str().unwrap())))
+        GitHubClient::new(
+            &config,
+            resolve_cache_dir_with(Some(dir.path().to_str().unwrap())),
+        )
     }
 
     fn tag_ref(git_ref: &str) -> ResolvedReference {
@@ -468,8 +466,8 @@ mod tests {
         };
 
         let planned = propose(&resolved, &releases(), &config, &mut ctx, &[])
-        .unwrap()
-        .unwrap();
+            .unwrap()
+            .unwrap();
 
         assert_eq!(planned.from_version.as_deref(), Some("v4"));
         assert_eq!(planned.to_ref, "v4.2.0");
@@ -498,8 +496,10 @@ mod tests {
             sha_version_cache: &mut sha_cache,
         };
 
-        assert!(propose(&resolved, &releases(), &config, &mut ctx, &[])
-        .unwrap()
-        .is_some());
+        assert!(
+            propose(&resolved, &releases(), &config, &mut ctx, &[])
+                .unwrap()
+                .is_some()
+        );
     }
 }

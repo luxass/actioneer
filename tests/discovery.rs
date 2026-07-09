@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use actioneer::discovery::{discover_workflows, resolve_workflow_paths, DiscoveryError};
+use actioneer::discovery::{DiscoveryError, discover_workflows, resolve_workflow_paths};
 use tempfile::TempDir;
 
 #[test]
@@ -58,8 +58,7 @@ fn resolve_flat_workflow_directory() {
     fs::create_dir_all(workflows.join("nested")).unwrap();
     fs::write(workflows.join("nested/c.yml"), "name: C\n").unwrap();
 
-    let found =
-        resolve_workflow_paths(dir.path(), &[PathBuf::from("testdata/workflows")]).unwrap();
+    let found = resolve_workflow_paths(dir.path(), &[PathBuf::from("testdata/workflows")]).unwrap();
     assert_eq!(found.len(), 2);
     assert_eq!(found[0], PathBuf::from("testdata/workflows/a.yml"));
     assert_eq!(found[1], PathBuf::from("testdata/workflows/b.yaml"));

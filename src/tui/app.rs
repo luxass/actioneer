@@ -5,9 +5,9 @@ use std::thread;
 use crate::cache::cache_dir;
 use crate::config::ActioneerConfig;
 use crate::github::GitHubClient;
-use crate::scan::{apply, scan_workspace, ApplyReport, ScanError, ScanReport};
+use crate::scan::{ApplyReport, ScanError, ScanReport, apply, scan_workspace};
 
-use super::selection::{from_report, WorkflowGroup};
+use super::selection::{WorkflowGroup, from_report};
 use super::view::{self, ListView};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,7 +162,10 @@ impl App {
                 self.rebuild_list();
             }
             view::DisplayRow::Action { group, item } => {
-                if let Some(entry) = self.groups.get_mut(group).and_then(|g| g.items.get_mut(item))
+                if let Some(entry) = self
+                    .groups
+                    .get_mut(group)
+                    .and_then(|g| g.items.get_mut(item))
                 {
                     entry.selected = !entry.selected;
                 }
@@ -334,18 +337,21 @@ mod tests {
             }],
         }];
         app.rebuild_list();
-        assert!(app.list_view.rows.iter().any(|r| matches!(
-            r,
-            view::DisplayRow::Action { .. }
-        )));
+        assert!(
+            app.list_view
+                .rows
+                .iter()
+                .any(|r| matches!(r, view::DisplayRow::Action { .. }))
+        );
 
         app.focus_index = 0;
         app.toggle_current();
         assert!(app.groups[0].collapsed);
-        assert!(!app
-            .list_view
-            .rows
-            .iter()
-            .any(|r| matches!(r, view::DisplayRow::Action { .. })));
+        assert!(
+            !app.list_view
+                .rows
+                .iter()
+                .any(|r| matches!(r, view::DisplayRow::Action { .. }))
+        );
     }
 }

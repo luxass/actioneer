@@ -102,10 +102,7 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(" all  ", theme::key_label()),
             Span::styled("n", theme::key()),
             Span::styled(" none  ", theme::key_label()),
-            Span::styled(
-                format!("{} ", app.selected_count()),
-                theme::success(),
-            ),
+            Span::styled(format!("{} ", app.selected_count()), theme::success()),
             Span::styled("selected", theme::key_label()),
         ];
 
@@ -114,7 +111,10 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
         {
             spans.push(Span::raw("  "));
             spans.push(Span::styled(
-                format!("{} blocked by {} level", report.stats.config_blocked, app.config.update),
+                format!(
+                    "{} blocked by {} level",
+                    report.stats.config_blocked, app.config.update
+                ),
                 theme::warn(),
             ));
         }
@@ -233,10 +233,13 @@ fn render_select_list(frame: &mut Frame, area: Rect, app: &mut App) {
     let mut list_area = inner;
     if !banner_lines.is_empty() {
         let banner_height = banner_lines.len() as u16;
-        frame.render_widget(Paragraph::new(banner_lines), Rect {
-            height: banner_height.min(inner.height),
-            ..inner
-        });
+        frame.render_widget(
+            Paragraph::new(banner_lines),
+            Rect {
+                height: banner_height.min(inner.height),
+                ..inner
+            },
+        );
         if inner.height <= banner_height {
             return;
         }
@@ -308,11 +311,8 @@ fn table_row(row: &DisplayRow, app: &App, focused: bool) -> Row<'static> {
             let mark = if entry.selected { "✓" } else { "" };
             Row::new(vec![
                 Cell::from(mark).style(theme::checkbox(entry.selected)),
-                Cell::from(truncate_label(
-                    &short_action(&entry.action),
-                    40,
-                ))
-                .style(theme::action_ref()),
+                Cell::from(truncate_label(&short_action(&entry.action), 40))
+                    .style(theme::action_ref()),
                 Cell::from(truncate_label(&entry.from_label, 26)).style(theme::from_ref()),
                 Cell::from(truncate_label(&entry.to_label, 26)).style(theme::to_ref()),
             ])

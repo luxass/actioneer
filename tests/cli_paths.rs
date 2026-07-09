@@ -5,11 +5,7 @@ use clap::Parser;
 
 #[test]
 fn parses_positional_workflow_path() {
-    let cli = Cli::try_parse_from([
-        "actioneer",
-        "testdata/workflows/advanced.yml",
-    ])
-    .unwrap();
+    let cli = Cli::try_parse_from(["actioneer", "testdata/workflows/advanced.yml"]).unwrap();
     assert_eq!(
         cli.workflow_paths(),
         &[PathBuf::from("testdata/workflows/advanced.yml")]
@@ -19,17 +15,12 @@ fn parses_positional_workflow_path() {
 
 #[test]
 fn parses_subcommand_with_workflow_path() {
-    let cli = Cli::try_parse_from([
-        "actioneer",
-        "audit",
-        "testdata/workflows",
-    ])
-    .unwrap();
-    assert_eq!(
-        cli.workflow_paths(),
-        &[PathBuf::from("testdata/workflows")]
-    );
-    assert!(matches!(cli.command, Some(actioneer::cli::Command::Audit { .. })));
+    let cli = Cli::try_parse_from(["actioneer", "audit", "testdata/workflows"]).unwrap();
+    assert_eq!(cli.workflow_paths(), &[PathBuf::from("testdata/workflows")]);
+    assert!(matches!(
+        cli.command,
+        Some(actioneer::cli::Command::Audit { .. })
+    ));
 }
 
 #[test]
@@ -41,10 +32,7 @@ fn parses_global_flags_before_path() {
         "testdata/workflows/advanced.yml",
     ])
     .unwrap();
-    assert_eq!(
-        cli.config.pin,
-        Some(actioneer::config::PinMode::Sha)
-    );
+    assert_eq!(cli.config.pin, Some(actioneer::config::PinMode::Sha));
     assert_eq!(
         cli.workflow_paths(),
         &[PathBuf::from("testdata/workflows/advanced.yml")]

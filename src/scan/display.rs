@@ -69,9 +69,7 @@ mod tests {
     use crate::config::PinMode;
     use crate::engine::{ActionReference, CommentMatch, PinKind, ReferenceKind};
     use crate::github::{RefKind, ResolvedRef};
-    use crate::scan::types::{
-        LocatedReference, PlannedChange, PlanReason, ResolvedReference,
-    };
+    use crate::scan::types::{LocatedReference, PlanReason, PlannedChange, ResolvedReference};
 
     use super::*;
 
@@ -119,16 +117,14 @@ mod tests {
 
     #[test]
     fn sha_pin_shows_version_and_short_sha() {
-        let r = resolved(PinKind::FullSha, "df4cb1c069e1874edd31b4311f1884172cec0e10", Some("v6.0.3"));
+        let r = resolved(
+            PinKind::FullSha,
+            "df4cb1c069e1874edd31b4311f1884172cec0e10",
+            Some("v6.0.3"),
+        );
         let p = planned_sha();
-        assert_eq!(
-            plan_from_label(&r, &p),
-            "v6.0.3 (df4cb1c069e…)"
-        );
-        assert_eq!(
-            plan_to_label(&p, PinMode::Sha),
-            "v6.0.4 (9c091bb21b7…)"
-        );
+        assert_eq!(plan_from_label(&r, &p), "v6.0.3 (df4cb1c069e…)");
+        assert_eq!(plan_to_label(&p, PinMode::Sha), "v6.0.4 (9c091bb21b7…)");
     }
 
     #[test]

@@ -1,12 +1,12 @@
-use actioneer::engine::{comment_matches_ref, parse_workflow, ActionReference, AuditTier, CommentMatch, PinKind, ReferenceKind};
+use actioneer::engine::{
+    ActionReference, AuditTier, CommentMatch, PinKind, ReferenceKind, comment_matches_ref,
+    parse_workflow,
+};
 
 // Helpers
 
 fn workflow(name: &str) -> String {
-    let path = format!(
-        "{}/testdata/workflows/{name}",
-        env!("CARGO_MANIFEST_DIR")
-    );
+    let path = format!("{}/testdata/workflows/{name}", env!("CARGO_MANIFEST_DIR"));
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"))
 }
 
@@ -52,7 +52,11 @@ fn basic_run_step_not_included() {
 #[test]
 fn basic_step_indices() {
     let doc = parse_workflow(&workflow("basic.yml")).unwrap();
-    let build_refs: Vec<_> = doc.references.iter().filter(|r| r.job_id == "build").collect();
+    let build_refs: Vec<_> = doc
+        .references
+        .iter()
+        .filter(|r| r.job_id == "build")
+        .collect();
     assert_eq!(build_refs[0].step_index, Some(0)); // checkout
     assert_eq!(build_refs[1].step_index, Some(1)); // setup-node
 }
@@ -61,14 +65,22 @@ fn basic_step_indices() {
 fn basic_step_without_name() {
     let doc = parse_workflow(&workflow("basic.yml")).unwrap();
     // The lint job's first step has no `name:` field.
-    let lint_steps: Vec<_> = doc.references.iter().filter(|r| r.job_id == "lint").collect();
+    let lint_steps: Vec<_> = doc
+        .references
+        .iter()
+        .filter(|r| r.job_id == "lint")
+        .collect();
     assert!(lint_steps[0].step_name.is_none());
 }
 
 #[test]
 fn basic_job_without_name() {
     let doc = parse_workflow(&workflow("basic.yml")).unwrap();
-    let lint: Vec<_> = doc.references.iter().filter(|r| r.job_id == "lint").collect();
+    let lint: Vec<_> = doc
+        .references
+        .iter()
+        .filter(|r| r.job_id == "lint")
+        .collect();
     // The lint job has no `name:` field.
     assert!(lint[0].job_name.is_none());
 }
@@ -177,11 +189,11 @@ fn advanced_job_level_reusable_workflow() {
     assert_eq!(r.pin_kind, PinKind::Tag);
     assert_eq!(r.owner.as_deref(), Some("octo-org"));
     assert_eq!(r.repo.as_deref(), Some("octo-repo"));
-    assert_eq!(
-        r.subpath.as_deref(),
-        Some(".github/workflows/workflow.yml")
+    assert_eq!(r.subpath.as_deref(), Some(".github/workflows/workflow.yml"));
+    assert!(
+        r.step_index.is_none(),
+        "job-level uses should have no step_index"
     );
-    assert!(r.step_index.is_none(), "job-level uses should have no step_index");
     assert!(r.step_name.is_none());
 }
 
@@ -292,7 +304,10 @@ fn reference_kind_display() {
     assert_eq!(ReferenceKind::Action.to_string(), "action");
     assert_eq!(ReferenceKind::LocalAction.to_string(), "local");
     assert_eq!(ReferenceKind::Docker.to_string(), "docker");
-    assert_eq!(ReferenceKind::ReusableWorkflow.to_string(), "reusable-workflow");
+    assert_eq!(
+        ReferenceKind::ReusableWorkflow.to_string(),
+        "reusable-workflow"
+    );
 }
 
 #[test]
@@ -329,10 +344,7 @@ fn comment_extracted_from_uses_line() {
     );
     let doc = parse_workflow(&yaml).unwrap();
     assert_eq!(doc.references.len(), 1);
-    assert_eq!(
-        doc.references[0].line_comment.as_deref(),
-        Some("v4.2.0")
-    );
+    assert_eq!(doc.references[0].line_comment.as_deref(), Some("v4.2.0"));
 }
 
 #[test]
@@ -495,7 +507,12 @@ fn comments_fixture_all_line_numbers_assigned() {
 
 // CommentMatch - unit-style tests using inline ActionReference construction
 
-fn make_ref(raw: &str, git_ref: Option<&str>, pin_kind: PinKind, comment: Option<&str>) -> ActionReference {
+fn make_ref(
+    raw: &str,
+    git_ref: Option<&str>,
+    pin_kind: PinKind,
+    comment: Option<&str>,
+) -> ActionReference {
     ActionReference {
         raw: raw.into(),
         kind: ReferenceKind::Action,
@@ -627,7 +644,10 @@ fn audit_tier_action_is_primary() {
 
 #[test]
 fn audit_tier_reusable_workflow_is_primary() {
-    assert_eq!(ReferenceKind::ReusableWorkflow.audit_tier(), AuditTier::Primary);
+    assert_eq!(
+        ReferenceKind::ReusableWorkflow.audit_tier(),
+        AuditTier::Primary
+    );
 }
 
 #[test]
@@ -637,7 +657,10 @@ fn audit_tier_docker_is_secondary() {
 
 #[test]
 fn audit_tier_local_action_is_secondary() {
-    assert_eq!(ReferenceKind::LocalAction.audit_tier(), AuditTier::Secondary);
+    assert_eq!(
+        ReferenceKind::LocalAction.audit_tier(),
+        AuditTier::Secondary
+    );
 }
 
 #[test]

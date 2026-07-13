@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/luxass/actioneer/compare/v0.2.0...v0.3.0) - 2026-07-13
+
+### 🐛 Bug Fixes
+
+- *(scan)* fall back to eligible aged releases ([#30](https://github.com/luxass/actioneer/pull/30)) (by @luxass)
+- *(audit)* report verifiable SHA provenance ([#33](https://github.com/luxass/actioneer/pull/33)) (by @luxass)
+- *(scan)* skip remote checks for local workflows ([#32](https://github.com/luxass/actioneer/pull/32)) (by @luxass)
+- *(ci)* repair release test command ([#29](https://github.com/luxass/actioneer/pull/29)) (by @luxass)
+- *(cli)* honor apply execution modes ([#31](https://github.com/luxass/actioneer/pull/31)) (by @luxass)
+
+### 📚 Documentation
+
+- simplify rewrite rules model (by @luxass)
+- add rewrite specification (by @luxass)
+
+### 🚀 Features
+
+- complete workflow pin auditing architecture ([#28](https://github.com/luxass/actioneer/pull/28)) (by @luxass)
+
+### Contributors
+
+* @luxass
+
 ## [0.2.0](https://github.com/luxass/actioneer/compare/v0.1.17...v0.2.0) - 2026-06-13
 
 ### 🚀 Features

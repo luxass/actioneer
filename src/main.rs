@@ -26,23 +26,24 @@ fn main() -> ExitCode {
     }
 
     match cli.command {
-        Some(Command::Update { .. }) => match cfg.mode {
-            Some(OutputMode::Plain) | Some(OutputMode::Json) => {
-                cmd::update::run(&cfg, cli.workflow_paths())
-            }
-            None => run_tui_update(&cfg, cli.workflow_paths()),
-        },
+        Some(Command::Update { .. }) => run_update(&cfg, cli.workflow_paths()),
         Some(Command::Audit { .. }) => cmd::audit::run(&cfg, cli.workflow_paths()),
         Some(Command::Version) => {
             cmd::version::run();
             ExitCode::SUCCESS
         }
-        None => match cfg.mode {
-            Some(OutputMode::Plain) | Some(OutputMode::Json) => {
-                cmd::update::run(&cfg, cli.workflow_paths())
-            }
-            None => run_tui_update(&cfg, cli.workflow_paths()),
-        },
+        None => run_update(&cfg, cli.workflow_paths()),
+    }
+}
+
+fn run_update(cfg: &config::ActioneerConfig, workflow_paths: &[PathBuf]) -> ExitCode {
+    if cfg.apply
+        || cfg.dry_run
+        || matches!(cfg.mode, Some(OutputMode::Plain) | Some(OutputMode::Json))
+    {
+        cmd::update::run(cfg, workflow_paths)
+    } else {
+        run_tui_update(cfg, workflow_paths)
     }
 }
 

@@ -56,7 +56,7 @@ workflow updates remain deferred.
 |------|------|
 | `list_releases` | Once per repo (cached) |
 | `resolve_ref` on current pin | Once per unique `uses:` ref (cached) |
-| `resolve_ref` on comment tag | Once for SHA pins with semver comments |
+| `resolve_ref` on comment tag | Once for SHA pins with full-semver comments |
 | `resolve_ref` on plan target | Once when an update is proposed |
 | `resolve_ref` during major-line infer | Only when `@v4` needs effective semver; newest releases first, stops on match |
 
@@ -66,8 +66,27 @@ Major-line tags (`@v4`) are never mapped to invented semver (e.g. `4.0.0`). When
 walks release tags newest-first until the resolved SHA matches, and may still plan `@v4` → `@v4.2.0`
 when both resolve to the same commit (pin normalization).
 
-Unreleased SHAs (not matching any official release tag) fail audit with `UnreleasedCommit` but do
-not block updates — the planner remediates toward the latest official release.
+### SHA release provenance
+
+Actioneer verifies only the release provenance stated by a SHA pin's full-semver comment. It does
+not resolve every release tag or claim to prove that a commit is absent from all GitHub releases:
+
+1. A full-semver comment whose tag resolves to the pinned SHA is verified and emits no provenance
+   issue.
+2. A full-semver comment whose tag resolves to a different SHA emits `ShaCommentMismatch`
+   (`sha-comment-mismatch` in JSON), carrying `comment` and the full `expected_sha`. This issue does
+   not block planning; if the comment names an official release from `list_releases`, the planner
+   may re-pin to that exact release.
+3. A full-semver comment that cannot be resolved in the active cache/network mode emits
+   `ResolutionFailed` (`resolution-failed` in JSON). Its safe message identifies the comment tag
+   and failure category without including raw HTTP bodies. The issue blocks planning.
+4. A missing comment or a comment that is not full semver — including major-only, partial-version,
+   and arbitrary text comments — emits `ShaProvenanceUnverifiable`
+   (`sha-provenance-unverifiable` in JSON), carrying the pinned SHA. This does not claim the commit
+   is unofficial, does not block ordinary planning, and does not trigger remediation by itself.
+
+This contract adds at most one comment-tag resolution per SHA pin and preserves the no-bulk-resolve
+API budget above.
 
 ## Module layout
 
@@ -126,9 +145,9 @@ One row per `uses:` reference:
 | `ShortSha` | No |
 | `NotShaPinned` | No |
 | `CommentMismatch` | No |
-| `CommentMajorLineMismatch` | No |
 | `FloatingMajorPin` | No |
-| `UnreleasedCommit` | No (audit fails; update remediates) |
+| `ShaProvenanceUnverifiable` (`sha-provenance-unverifiable`) | No (no remediation trigger) |
+| `ShaCommentMismatch` (`sha-comment-mismatch`) | No (may re-pin to the commented release) |
 | `UpdateBlockedByConfig` | No |
 | `ReleaseTooYoung` | **Yes** |
 | `SkippedBranch` | **Yes** |
@@ -141,7 +160,7 @@ One row per `uses:` reference:
 - Uses GitHub **Releases API** (`list_releases`) + semver filtering by `config.update`
 - Major-line tags: infer semver from SHA; never look up a tag named `v4` as a candidate
 - Skips when `would_change` is false (pin string unchanged after apply)
-- Unreleased SHAs: remediation mode (ignores update level when targeting official releases)
+- Verified SHA/comment mismatches: may re-pin to the exact commented official release
 - Respects `min_release_age`, `skip_branches`, `pin` (sha vs tag output)
 
 ### Apply

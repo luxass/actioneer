@@ -11,8 +11,8 @@ use crate::github::{GitHubClient, GitHubError, Release, ResolvedRef};
 
 use super::audit::blocks_update;
 use super::pin::{
-    TagShape, VersionBaseline, classify_tag, latest_on_major, parse_semver_tag, version_baseline,
-    would_change, written_version_tag,
+    VersionBaseline, latest_on_major, parse_semver_tag, version_baseline, would_change,
+    written_version_tag,
 };
 use super::types::{AuditIssue, PlanReason, PlannedChange, ResolvedReference};
 
@@ -52,11 +52,11 @@ pub fn propose(
         return Ok(None);
     }
 
-    if issues
-        .iter()
-        .any(|i| matches!(i, AuditIssue::UnreleasedCommit { .. }))
-    {
-        return propose_remediation(resolved, releases, config, ctx);
+    if let Some(comment) = issues.iter().find_map(|issue| match issue {
+        AuditIssue::ShaCommentMismatch { comment, .. } => Some(comment.as_str()),
+        _ => None,
+    }) {
+        return propose_comment_mismatch_remediation(resolved, releases, config, ctx, comment);
     }
 
     let written_tag = written_version_tag(reference);
@@ -136,30 +136,23 @@ fn propose_major_only(
     build_plan(resolved, &release, from_version, config, ctx)
 }
 
-fn propose_remediation(
+fn propose_comment_mismatch_remediation(
     resolved: &ResolvedReference,
     releases: &[Release],
     config: &ActioneerConfig,
     ctx: &mut PlanContext<'_>,
+    comment: &str,
 ) -> Result<Option<PlannedChange>, GitHubError> {
-    let reference = &resolved.located.reference;
-    let written_tag = written_version_tag(reference);
-
-    let target = match written_tag.as_deref().map(classify_tag) {
-        Some(TagShape::FullSemver(_)) => releases
-            .iter()
-            .find(|r| r.tag_name == written_tag.as_deref().unwrap_or("")),
-        Some(TagShape::MajorOnly(major)) => {
-            latest_on_major_with_age(releases, major, config.min_release_age)
-        }
-        _ => latest_official_with_age(releases, config.min_release_age),
-    };
-
-    let Some(release) = target else {
+    let now = time::OffsetDateTime::now_utc();
+    let Some(release) = releases.iter().find(|release| {
+        release.tag_name == comment
+            && !release.prerelease
+            && release_meets_min_age(release, config.min_release_age, now)
+    }) else {
         return Ok(None);
     };
 
-    build_plan(resolved, release, written_tag, config, ctx)
+    build_plan(resolved, release, Some(comment.to_string()), config, ctx)
 }
 
 fn build_plan(
@@ -273,29 +266,6 @@ fn latest_on_major_with_age(
 ) -> Option<&Release> {
     let now = time::OffsetDateTime::now_utc();
     latest_on_major(releases, major).filter(|r| release_meets_min_age(r, min_age, now))
-}
-
-fn latest_official_with_age(
-    releases: &[Release],
-    min_age: Option<RelativeDuration>,
-) -> Option<&Release> {
-    let now = time::OffsetDateTime::now_utc();
-    let mut best: Option<(Version, &Release)> = None;
-    for release in releases {
-        if release.prerelease {
-            continue;
-        }
-        let Some(ver) = parse_semver_tag(&release.tag_name) else {
-            continue;
-        };
-        if !release_meets_min_age(release, min_age, now) {
-            continue;
-        }
-        if best.as_ref().is_none_or(|(bv, _)| ver > *bv) {
-            best = Some((ver, release));
-        }
-    }
-    best.map(|(_, r)| r)
 }
 
 fn select_release(
@@ -442,6 +412,16 @@ mod tests {
         }
     }
 
+    fn sha_ref(sha: &str, comment: &str) -> ResolvedReference {
+        let mut resolved = tag_ref(sha);
+        resolved.located.reference.raw = format!("actions/checkout@{sha} # {comment}");
+        resolved.located.reference.pin_kind = PinKind::FullSha;
+        resolved.located.reference.line_comment = Some(comment.into());
+        resolved.current.sha = sha.into();
+        resolved.current.ref_kind = RefKind::Sha;
+        resolved
+    }
+
     #[test]
     fn major_only_plans_to_latest_on_line() {
         let dir = TempDir::new().unwrap();
@@ -500,6 +480,58 @@ mod tests {
             propose(&resolved, &releases(), &config, &mut ctx, &[])
                 .unwrap()
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn mismatch_remediation_respects_release_safety_filters() {
+        let dir = TempDir::new().unwrap();
+        seed_tag_cache(&dir, "v4.2.0", &sha_b());
+
+        let config = ActioneerConfig {
+            offline: true,
+            min_release_age: Some(RelativeDuration {
+                amount: 1,
+                unit: DurationUnit::Days,
+            }),
+            ..Default::default()
+        };
+        let client = offline_client(&dir);
+        let resolved = sha_ref("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "v4.2.0");
+        let issues = vec![AuditIssue::ShaCommentMismatch {
+            comment: "v4.2.0".into(),
+            expected_sha: sha_b(),
+        }];
+        let mut cache = HashMap::new();
+        let mut sha_cache = HashMap::new();
+        let mut ctx = PlanContext {
+            client: &client,
+            owner: "actions",
+            repo: "checkout",
+            resolve_cache: &mut cache,
+            sha_version_cache: &mut sha_cache,
+        };
+
+        let too_young = Release {
+            tag_name: "v4.2.0".into(),
+            published_at: "2999-01-01T00:00:00Z".into(),
+            prerelease: false,
+        };
+        assert!(
+            propose(&resolved, &[too_young], &config, &mut ctx, &issues)
+                .unwrap()
+                .is_none()
+        );
+
+        let prerelease = Release {
+            tag_name: "v4.2.0".into(),
+            published_at: "2020-01-01T00:00:00Z".into(),
+            prerelease: true,
+        };
+        assert!(
+            propose(&resolved, &[prerelease], &config, &mut ctx, &issues)
+                .unwrap()
+                .is_none()
         );
     }
 }

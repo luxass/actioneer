@@ -68,10 +68,17 @@ pub enum AuditIssue {
         /// Floating tag as written in the workflow.
         pin: String,
     },
-    /// The pinned commit does not match an official GitHub release.
-    UnreleasedCommit {
-        /// Full pinned commit SHA.
+    /// The SHA pin has no full-semver comment that can establish release provenance.
+    ShaProvenanceUnverifiable {
+        /// Full pinned commit SHA whose provenance could not be verified.
         sha: String,
+    },
+    /// The pinned SHA differs from the commit resolved by its full-semver comment.
+    ShaCommentMismatch {
+        /// Full-semver comment written beside the SHA pin.
+        comment: String,
+        /// Full commit SHA resolved for the commented tag.
+        expected_sha: String,
     },
     /// A newer release exists but exceeds the configured update level.
     UpdateBlockedByConfig {
@@ -81,13 +88,6 @@ pub enum AuditIssue {
         available_version: String,
         /// Configured update level that rejected the release.
         update_level: String,
-    },
-    /// A major-only SHA comment does not match the resolved release major.
-    CommentMajorLineMismatch {
-        /// Major-line comment written in the workflow.
-        comment: String,
-        /// Full release version inferred from the resolved commit.
-        resolved_version: String,
     },
 }
 

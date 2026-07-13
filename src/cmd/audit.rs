@@ -106,8 +106,14 @@ fn issue_label(issue: &AuditIssue) -> String {
         AuditIssue::FloatingMajorPin { pin } => {
             format!("floating major-line tag ({pin})")
         }
-        AuditIssue::UnreleasedCommit { sha } => {
-            format!("pinned commit not found in any GitHub release ({sha})")
+        AuditIssue::ShaProvenanceUnverifiable { sha } => {
+            format!("SHA provenance unverifiable (no full-semver comment for {sha})")
+        }
+        AuditIssue::ShaCommentMismatch {
+            comment,
+            expected_sha,
+        } => {
+            format!("SHA/comment mismatch (comment {comment:?} resolves to {expected_sha})")
         }
         AuditIssue::UpdateBlockedByConfig {
             current_version,
@@ -115,12 +121,6 @@ fn issue_label(issue: &AuditIssue) -> String {
             update_level,
         } => format!(
             "update blocked by {update_level} level (current {current_version}, available {available_version})"
-        ),
-        AuditIssue::CommentMajorLineMismatch {
-            comment,
-            resolved_version,
-        } => format!(
-            "comment major-line mismatch (comment {comment:?}, resolved {resolved_version})"
         ),
     }
 }

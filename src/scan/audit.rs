@@ -6,23 +6,25 @@ use crate::config::{ActioneerConfig, PinMode, RelativeDuration, UpdateLevel};
 use crate::engine::{AuditTier, CommentMatch, PinKind, ReferenceKind};
 use crate::github::{Release, ResolvedRef};
 
+use super::CommentTagResolution;
 use super::pin::{
     TagShape, VersionBaseline, classify_tag, latest_on_major, parse_semver_tag, version_baseline,
 };
 use super::types::{AuditIssue, ResolvedReference};
 
 /// Evaluate audit rules for one reference.
-///
-/// `comment_tag_sha` is set when a SHA-pinned ref has a semver comment and the
-/// caller resolved that tag once: `(tag, sha_at_tag)`.
-pub fn evaluate(
+pub(super) fn evaluate(
     resolved: &ResolvedReference,
     releases: &[Release],
     config: &ActioneerConfig,
-    comment_tag_sha: Option<(&str, &str)>,
+    comment_tag_resolution: &CommentTagResolution,
 ) -> Vec<AuditIssue> {
     let reference = &resolved.located.reference;
     let mut issues = Vec::new();
+
+    if reference.is_local_reusable_workflow() {
+        return issues;
+    }
 
     if reference.kind.audit_tier() == AuditTier::Secondary {
         issues.push(AuditIssue::SecondaryReference {
@@ -62,8 +64,8 @@ pub fn evaluate(
         });
     }
 
-    check_sha_pin_issues(resolved, comment_tag_sha, &mut issues);
-    check_comment_semantics(resolved, comment_tag_sha, &mut issues);
+    check_sha_provenance(resolved, comment_tag_resolution, &mut issues);
+    check_comment_semantics(resolved, &mut issues);
 
     if let Some(min_age) = config.min_release_age
         && let Some(too_young) = check_release_age(&resolved.current, min_age)
@@ -78,9 +80,9 @@ pub fn evaluate(
     issues
 }
 
-fn check_sha_pin_issues(
+fn check_sha_provenance(
     resolved: &ResolvedReference,
-    comment_tag_sha: Option<(&str, &str)>,
+    comment_tag_resolution: &CommentTagResolution,
     issues: &mut Vec<AuditIssue>,
 ) {
     if !matches!(
@@ -90,84 +92,48 @@ fn check_sha_pin_issues(
         return;
     }
 
+    match comment_tag_resolution {
+        CommentTagResolution::Failed { tag, reason } => {
+            issues.push(AuditIssue::ResolutionFailed {
+                message: format!("failed to resolve SHA provenance comment tag {tag:?}: {reason}"),
+            });
+            return;
+        }
+        CommentTagResolution::Resolved { .. } | CommentTagResolution::NotApplicable => {}
+    }
+
     let current_sha = &resolved.current.sha;
     if current_sha.is_empty() {
         return;
     }
 
-    match comment_tag_sha {
-        Some((tag, official_sha)) if official_sha != current_sha => {
-            issues.push(AuditIssue::UnreleasedCommit {
-                sha: short_sha(current_sha),
+    match comment_tag_resolution {
+        CommentTagResolution::Resolved { tag, sha } if sha != current_sha => {
+            issues.push(AuditIssue::ShaCommentMismatch {
+                comment: tag.clone(),
+                expected_sha: sha.clone(),
             });
-            let _ = tag;
         }
-        Some(_) => {}
-        None => {
-            if resolved.located.reference.line_comment.is_none() {
-                issues.push(AuditIssue::UnreleasedCommit {
-                    sha: short_sha(current_sha),
-                });
-            }
+        CommentTagResolution::Resolved { .. } => {}
+        CommentTagResolution::Failed { .. } => unreachable!("handled before current SHA check"),
+        CommentTagResolution::NotApplicable => {
+            issues.push(AuditIssue::ShaProvenanceUnverifiable {
+                sha: current_sha.clone(),
+            });
         }
     }
 }
 
-fn check_comment_semantics(
-    resolved: &ResolvedReference,
-    comment_tag_sha: Option<(&str, &str)>,
-    issues: &mut Vec<AuditIssue>,
-) {
+fn check_comment_semantics(resolved: &ResolvedReference, issues: &mut Vec<AuditIssue>) {
     let reference = &resolved.located.reference;
-    let Some(comment) = reference.line_comment.as_deref() else {
-        return;
-    };
 
-    if matches!(resolved.comment_match, CommentMatch::Mismatch { .. })
-        && !matches!(reference.pin_kind, PinKind::FullSha | PinKind::ShortSha)
+    if !matches!(reference.pin_kind, PinKind::FullSha | PinKind::ShortSha)
+        && let CommentMatch::Mismatch { comment, expected } = &resolved.comment_match
     {
-        if let CommentMatch::Mismatch { comment, expected } = &resolved.comment_match {
-            issues.push(AuditIssue::CommentMismatch {
-                comment: comment.clone(),
-                expected: expected.clone(),
-            });
-        }
-        return;
-    }
-
-    if !matches!(reference.pin_kind, PinKind::FullSha | PinKind::ShortSha) {
-        return;
-    }
-
-    let Some((resolved_tag, _)) = comment_tag_sha else {
-        return;
-    };
-
-    match classify_tag(comment) {
-        TagShape::FullSemver(comment_ver) => {
-            if parse_semver_tag(resolved_tag).as_ref() != Some(&comment_ver) {
-                issues.push(AuditIssue::CommentMismatch {
-                    comment: comment.to_string(),
-                    expected: resolved_tag.to_string(),
-                });
-            }
-        }
-        TagShape::MajorOnly(_) => {
-            if comment != resolved_tag {
-                issues.push(AuditIssue::CommentMajorLineMismatch {
-                    comment: comment.to_string(),
-                    resolved_version: resolved_tag.to_string(),
-                });
-            }
-        }
-        _ => {
-            if let CommentMatch::Mismatch { comment, expected } = &resolved.comment_match {
-                issues.push(AuditIssue::CommentMismatch {
-                    comment: comment.clone(),
-                    expected: expected.clone(),
-                });
-            }
-        }
+        issues.push(AuditIssue::CommentMismatch {
+            comment: comment.clone(),
+            expected: expected.clone(),
+        });
     }
 }
 
@@ -244,14 +210,6 @@ fn is_candidate(current: &Version, candidate: &Version, level: UpdateLevel) -> b
 
 fn format_version_tag(version: &Version) -> String {
     format!("v{version}")
-}
-
-fn short_sha(sha: &str) -> String {
-    if sha.len() > 12 {
-        format!("{}…", &sha[..11])
-    } else {
-        sha.to_string()
-    }
 }
 
 fn check_release_age(current: &ResolvedRef, min_age: RelativeDuration) -> Option<AuditIssue> {
@@ -354,7 +312,12 @@ mod tests {
     #[test]
     fn branch_pin_is_mutable() {
         let resolved = action_ref(PinKind::Branch, "main", None, ReferenceKind::Action);
-        let issues = evaluate(&resolved, &[], &ActioneerConfig::default(), None);
+        let issues = evaluate(
+            &resolved,
+            &[],
+            &ActioneerConfig::default(),
+            &CommentTagResolution::NotApplicable,
+        );
         assert!(
             issues
                 .iter()
@@ -365,7 +328,12 @@ mod tests {
     #[test]
     fn major_only_tag_is_floating() {
         let resolved = action_ref(PinKind::Tag, "v4", None, ReferenceKind::Action);
-        let issues = evaluate(&resolved, &[], &ActioneerConfig::default(), None);
+        let issues = evaluate(
+            &resolved,
+            &[],
+            &ActioneerConfig::default(),
+            &CommentTagResolution::NotApplicable,
+        );
         assert!(
             issues
                 .iter()
@@ -389,42 +357,36 @@ mod tests {
             &resolved,
             &releases(),
             &ActioneerConfig::default(),
-            Some(("v4.2.0", &sha)),
+            &CommentTagResolution::Resolved {
+                tag: "v4.2.0".into(),
+                sha: sha.clone(),
+            },
         );
-        assert!(
-            !issues
-                .iter()
-                .any(|i| matches!(i, AuditIssue::CommentMismatch { .. }))
-        );
-        assert!(
-            !issues
-                .iter()
-                .any(|i| matches!(i, AuditIssue::UnreleasedCommit { .. }))
-        );
+        assert!(issues.is_empty());
     }
 
     #[test]
-    fn sha_comment_major_line_mismatch() {
+    fn sha_major_only_comment_has_unverifiable_provenance() {
         let sha = "a".repeat(40);
         let mut resolved = action_ref(PinKind::FullSha, &sha, Some("v4"), ReferenceKind::Action);
-        resolved.current.sha = sha.clone();
+        resolved.current.sha = sha;
         resolved.comment_match = CommentMatch::Match;
 
         let issues = evaluate(
             &resolved,
             &releases(),
             &ActioneerConfig::default(),
-            Some(("v4.2.0", &sha)),
+            &CommentTagResolution::NotApplicable,
         );
         assert!(
             issues
                 .iter()
-                .any(|i| matches!(i, AuditIssue::CommentMajorLineMismatch { .. }))
+                .any(|i| matches!(i, AuditIssue::ShaProvenanceUnverifiable { .. }))
         );
     }
 
     #[test]
-    fn unreleased_sha_when_comment_tag_mismatch() {
+    fn sha_comment_mismatch_carries_expected_sha() {
         let sha = "a".repeat(40);
         let other = "b".repeat(40);
         let mut resolved = action_ref(
@@ -439,13 +401,18 @@ mod tests {
             &resolved,
             &releases(),
             &ActioneerConfig::default(),
-            Some(("v4.2.0", &other)),
+            &CommentTagResolution::Resolved {
+                tag: "v4.2.0".into(),
+                sha: other.clone(),
+            },
         );
-        assert!(
-            issues
-                .iter()
-                .any(|i| matches!(i, AuditIssue::UnreleasedCommit { .. }))
-        );
+        assert!(issues.iter().any(|issue| matches!(
+            issue,
+            AuditIssue::ShaCommentMismatch {
+                comment,
+                expected_sha,
+            } if comment == "v4.2.0" && expected_sha == &other
+        )));
     }
 
     #[test]
@@ -455,7 +422,12 @@ mod tests {
             update: UpdateLevel::Patch,
             ..Default::default()
         };
-        let issues = evaluate(&resolved, &releases(), &config, None);
+        let issues = evaluate(
+            &resolved,
+            &releases(),
+            &config,
+            &CommentTagResolution::NotApplicable,
+        );
         assert!(
             issues
                 .iter()
@@ -470,7 +442,12 @@ mod tests {
             pin: PinMode::Sha,
             ..Default::default()
         };
-        let issues = evaluate(&resolved, &[], &config, None);
+        let issues = evaluate(
+            &resolved,
+            &[],
+            &config,
+            &CommentTagResolution::NotApplicable,
+        );
         assert!(issues.iter().any(|i| matches!(i, AuditIssue::NotShaPinned)));
     }
 }

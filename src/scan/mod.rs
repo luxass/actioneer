@@ -45,6 +45,13 @@ pub enum ScanError {
     GitHub(GitHubError),
 }
 
+#[derive(Debug)]
+pub(super) enum CommentTagResolution {
+    NotApplicable,
+    Resolved { tag: String, sha: String },
+    Failed { tag: String, reason: &'static str },
+}
+
 impl fmt::Display for ScanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -100,8 +107,8 @@ impl From<GitHubError> for ScanError {
 ///
 /// Discovery, file reads, parsing, release-list requests, and GitHub requests
 /// required to construct a plan abort the scan. A failure to resolve the current
-/// written ref is instead represented by [`AuditIssue::ResolutionFailed`], and
-/// semver-comment resolution is best-effort.
+/// written ref or a semver provenance comment is instead represented by
+/// [`AuditIssue::ResolutionFailed`].
 ///
 /// # Side effects
 ///
@@ -135,7 +142,9 @@ pub fn scan_workspace(
 
         for reference in document.references {
             stats.references += 1;
-            if reference.kind.audit_tier() == crate::engine::AuditTier::Primary {
+            if reference.kind.audit_tier() == crate::engine::AuditTier::Primary
+                && !reference.is_local_reusable_workflow()
+            {
                 stats.primary += 1;
             } else {
                 stats.secondary += 1;
@@ -146,7 +155,9 @@ pub fn scan_workspace(
                 reference: reference.clone(),
             };
 
-            let releases = if reference.kind.audit_tier() == crate::engine::AuditTier::Primary {
+            let releases = if reference.kind.audit_tier() == crate::engine::AuditTier::Primary
+                && !reference.is_local_reusable_workflow()
+            {
                 if let (Some(owner), Some(repo)) = (&reference.owner, &reference.repo) {
                     fetch_releases(client, owner, repo, &mut releases_cache)?
                 } else {
@@ -161,21 +172,14 @@ pub fn scan_workspace(
 
             enrich_published_at(&mut resolved, &releases);
 
-            let comment_tag_sha =
+            let comment_tag_resolution =
                 if let (Some(owner), Some(repo)) = (&reference.owner, &reference.repo) {
-                    resolve_comment_tag_sha(&reference, client, owner, repo, &mut resolve_cache)?
+                    resolve_comment_tag_sha(&reference, client, owner, repo, &mut resolve_cache)
                 } else {
-                    None
+                    CommentTagResolution::NotApplicable
                 };
 
-            let mut issues = audit::evaluate(
-                &resolved,
-                &releases,
-                config,
-                comment_tag_sha
-                    .as_ref()
-                    .map(|(tag, sha)| (tag.as_str(), sha.as_str())),
-            );
+            let mut issues = audit::evaluate(&resolved, &releases, config, &comment_tag_resolution);
 
             if resolution_failed {
                 issues.push(AuditIssue::ResolutionFailed {
@@ -188,7 +192,9 @@ pub fn scan_workspace(
                 .filter(|i| matches!(i, AuditIssue::UpdateBlockedByConfig { .. }))
                 .count();
 
-            let planned = if let (Some(owner), Some(repo)) = (&reference.owner, &reference.repo) {
+            let planned = if !reference.is_local_reusable_workflow()
+                && let (Some(owner), Some(repo)) = (&reference.owner, &reference.repo)
+            {
                 let repo_sha_cache = sha_version_cache
                     .entry((owner.clone(), repo.clone()))
                     .or_default();
@@ -252,7 +258,9 @@ fn resolve_reference(
     let reference = &located.reference;
     let comment_match = comment_matches_ref(reference);
 
-    if reference.kind.audit_tier() == crate::engine::AuditTier::Secondary {
+    if reference.is_local_reusable_workflow()
+        || reference.kind.audit_tier() == crate::engine::AuditTier::Secondary
+    {
         let placeholder = ResolvedRef {
             sha: String::new(),
             ref_kind: crate::github::RefKind::Sha,
@@ -325,22 +333,40 @@ fn resolve_comment_tag_sha(
     owner: &str,
     repo: &str,
     cache: &mut HashMap<(String, String, String), ResolvedRef>,
-) -> Result<Option<(String, String)>, ScanError> {
+) -> CommentTagResolution {
     if !matches!(reference.pin_kind, PinKind::FullSha | PinKind::ShortSha) {
-        return Ok(None);
+        return CommentTagResolution::NotApplicable;
     }
     let Some(comment) = reference.line_comment.as_deref() else {
-        return Ok(None);
+        return CommentTagResolution::NotApplicable;
     };
-    if !matches!(
-        classify_tag(comment),
-        TagShape::FullSemver(_) | TagShape::MajorOnly(_)
-    ) {
-        return Ok(None);
+    if !matches!(classify_tag(comment), TagShape::FullSemver(_)) {
+        return CommentTagResolution::NotApplicable;
     }
 
-    let resolved = cached_resolve(client, owner, repo, comment, cache);
-    Ok(resolved.ok().map(|r| (comment.to_string(), r.sha)))
+    match cached_resolve(client, owner, repo, comment, cache) {
+        Ok(resolved) => CommentTagResolution::Resolved {
+            tag: comment.to_string(),
+            sha: resolved.sha,
+        },
+        Err(error) => CommentTagResolution::Failed {
+            tag: comment.to_string(),
+            reason: safe_resolution_failure_reason(&error),
+        },
+    }
+}
+
+fn safe_resolution_failure_reason(error: &GitHubError) -> &'static str {
+    match error {
+        GitHubError::Offline => "offline cache miss",
+        GitHubError::Http { .. } => "GitHub API request failed",
+        GitHubError::RateLimited => "GitHub API rate limit exceeded",
+        GitHubError::NotFound { .. } => "tag not found on GitHub",
+        GitHubError::CacheRead(_) => "cache read failed",
+        GitHubError::CacheWrite(_) => "cache write failed",
+        GitHubError::Json(_) => "invalid cached or GitHub response",
+        GitHubError::Transport(_) => "GitHub transport failed",
+    }
 }
 
 fn cached_resolve(

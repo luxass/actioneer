@@ -47,7 +47,9 @@ pub fn comment_matches_ref(reference: &ActionReference) -> CommentMatch
 ```
 
 `parse_workflow` is the primary entry point. `comment_matches_ref` operates on an already-parsed
-`ActionReference` and is a pure utility with no I/O.
+`ActionReference` and is a pure utility with no I/O. `ActionReference::is_local_reusable_workflow`
+distinguishes repository-local workflow paths from remote reusable workflow references without
+introducing a separate `ReferenceKind`.
 
 ## Types
 
@@ -85,9 +87,14 @@ Tier assignment per `ReferenceKind`:
 | `ReferenceKind` | `AuditTier` | `is_updatable()` | Notes |
 |-----------------|-------------|-----------------|-------|
 | `Action` | `Primary` | `true` | Full pin checks and SHA update |
-| `ReusableWorkflow` | `Primary` | `false` | Ref checks; update deferred |
+| `ReusableWorkflow` | `Primary` | `false` | Remote reusable workflow ref checks; update deferred |
 | `Docker` | `Secondary` | `false` | Tag/digest warnings only |
 | `LocalAction` | `Secondary` | `false` | Inventory only |
+
+The kind-level tier for `ReusableWorkflow` describes remote calls. Local reusable workflow calls
+retain that parsed kind, but the scan layer identifies them with
+`ActionReference::is_local_reusable_workflow`, inventories them as secondary references, and does
+not apply GitHub resolution or SHA-pin requirements.
 
 ### `PinKind`
 
@@ -143,6 +150,10 @@ Returned by [`comment_matches_ref`] after comparing `line_comment` against `git_
 Reusable-workflow detection heuristic: path segment contains `.github/workflows/` AND
 ends with `.yml` or `.yaml`. This is unambiguous in practice because regular action
 sub-paths do not follow that naming convention.
+
+Local reusable workflow calls have no owner, repository, or required ref. They remain in the
+parsed reference inventory but are not candidates for remote GitHub resolution. Remote reusable
+workflow calls include owner, repository, and ref components and remain primary audit targets.
 
 ### Job-level `uses:` (reusable workflows)
 

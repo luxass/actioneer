@@ -24,6 +24,10 @@ pub fn evaluate(
     let reference = &resolved.located.reference;
     let mut issues = Vec::new();
 
+    if reference.is_local_reusable_workflow() {
+        return issues;
+    }
+
     if reference.kind.audit_tier() == AuditTier::Secondary {
         issues.push(AuditIssue::SecondaryReference {
             reference_kind: reference.kind.to_string(),

@@ -135,7 +135,9 @@ pub fn scan_workspace(
 
         for reference in document.references {
             stats.references += 1;
-            if reference.kind.audit_tier() == crate::engine::AuditTier::Primary {
+            if reference.kind.audit_tier() == crate::engine::AuditTier::Primary
+                && !reference.is_local_reusable_workflow()
+            {
                 stats.primary += 1;
             } else {
                 stats.secondary += 1;
@@ -146,7 +148,9 @@ pub fn scan_workspace(
                 reference: reference.clone(),
             };
 
-            let releases = if reference.kind.audit_tier() == crate::engine::AuditTier::Primary {
+            let releases = if reference.kind.audit_tier() == crate::engine::AuditTier::Primary
+                && !reference.is_local_reusable_workflow()
+            {
                 if let (Some(owner), Some(repo)) = (&reference.owner, &reference.repo) {
                     fetch_releases(client, owner, repo, &mut releases_cache)?
                 } else {
@@ -188,7 +192,9 @@ pub fn scan_workspace(
                 .filter(|i| matches!(i, AuditIssue::UpdateBlockedByConfig { .. }))
                 .count();
 
-            let planned = if let (Some(owner), Some(repo)) = (&reference.owner, &reference.repo) {
+            let planned = if !reference.is_local_reusable_workflow()
+                && let (Some(owner), Some(repo)) = (&reference.owner, &reference.repo)
+            {
                 let repo_sha_cache = sha_version_cache
                     .entry((owner.clone(), repo.clone()))
                     .or_default();
@@ -252,7 +258,9 @@ fn resolve_reference(
     let reference = &located.reference;
     let comment_match = comment_matches_ref(reference);
 
-    if reference.kind.audit_tier() == crate::engine::AuditTier::Secondary {
+    if reference.is_local_reusable_workflow()
+        || reference.kind.audit_tier() == crate::engine::AuditTier::Secondary
+    {
         let placeholder = ResolvedRef {
             sha: String::new(),
             ref_kind: crate::github::RefKind::Sha,

@@ -11,8 +11,7 @@ use crate::github::{GitHubClient, GitHubError, Release, ResolvedRef};
 
 use super::audit::blocks_update;
 use super::pin::{
-    VersionBaseline, latest_on_major, parse_semver_tag, version_baseline, would_change,
-    written_version_tag,
+    VersionBaseline, parse_semver_tag, version_baseline, would_change, written_version_tag,
 };
 use super::types::{AuditIssue, PlanReason, PlannedChange, ResolvedReference};
 
@@ -265,7 +264,22 @@ fn latest_on_major_with_age(
     min_age: Option<RelativeDuration>,
 ) -> Option<&Release> {
     let now = time::OffsetDateTime::now_utc();
-    latest_on_major(releases, major).filter(|r| release_meets_min_age(r, min_age, now))
+    let mut best: Option<(Version, &Release)> = None;
+    for release in releases {
+        if release.prerelease {
+            continue;
+        }
+        let Some(ver) = parse_semver_tag(&release.tag_name).filter(|ver| ver.major == major) else {
+            continue;
+        };
+        if !release_meets_min_age(release, min_age, now) {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(bv, _)| ver > *bv) {
+            best = Some((ver, release));
+        }
+    }
+    best.map(|(_, release)| release)
 }
 
 fn select_release(
@@ -350,6 +364,54 @@ mod tests {
                 prerelease: false,
             },
         ]
+    }
+
+    fn minimum_release_age() -> Option<RelativeDuration> {
+        Some(RelativeDuration {
+            amount: 7,
+            unit: DurationUnit::Days,
+        })
+    }
+
+    #[test]
+    fn latest_on_major_skips_a_young_newer_release() {
+        let releases = vec![
+            Release {
+                tag_name: "v4.1.0".into(),
+                published_at: "2020-06-01T00:00:00Z".into(),
+                prerelease: false,
+            },
+            Release {
+                tag_name: "v4.2.0".into(),
+                published_at: "9999-06-01T00:00:00Z".into(),
+                prerelease: false,
+            },
+        ];
+
+        let selected = latest_on_major_with_age(&releases, 4, minimum_release_age());
+
+        assert_eq!(
+            selected.map(|release| release.tag_name.as_str()),
+            Some("v4.1.0")
+        );
+    }
+
+    #[test]
+    fn latest_on_major_returns_none_when_all_releases_are_too_young() {
+        let releases = vec![
+            Release {
+                tag_name: "v4.1.0".into(),
+                published_at: "9998-06-01T00:00:00Z".into(),
+                prerelease: false,
+            },
+            Release {
+                tag_name: "v4.2.0".into(),
+                published_at: "9999-06-01T00:00:00Z".into(),
+                prerelease: false,
+            },
+        ];
+
+        assert!(latest_on_major_with_age(&releases, 4, minimum_release_age()).is_none());
     }
 
     fn sha_b() -> String {
